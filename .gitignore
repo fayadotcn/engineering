@@ -6,3 +6,4 @@ prisma/dev.db*
 *.tsbuildinfo
 next-env.d.ts
 fixtures/out/
+dev.log
