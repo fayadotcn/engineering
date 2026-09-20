@@ -5,6 +5,7 @@ import type {
   AnomalyRow,
   BreakdownSlice,
   DiffRow,
+  QuotaResultRow,
   QuotationMatchRow,
   WorkspaceView,
 } from "@shared/types";
@@ -329,6 +330,65 @@ export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff"
       ))}
       {!view.rows.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">无变化</div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 定额测算 ---------------- */
+
+export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "quotaResult" }> }) {
+  return (
+    <div className="h-full overflow-auto p-4">
+      <div className="mb-3 text-[11.5px] text-neutral-400">
+        综合单价 = 人工+辅材+机械 + 主材价×耗量 + (人工+机械)×(管理费{(view.mgmtRate * 100).toFixed(0)}%+利润{(view.profitRate * 100).toFixed(0)}%)
+        <span className="ml-2">· 内置参考定额，接入正式定额库后自动替换</span>
+      </div>
+      <table className="w-full border-collapse text-[12.5px]">
+        <thead className="sticky top-0 bg-white">
+          <tr className="border-b border-neutral-200 text-left text-neutral-500">
+            <th className="px-2 py-1.5 font-normal">清单项</th>
+            <th className="px-2 py-1.5 font-normal">定额子目</th>
+            <th className="px-2 py-1.5 text-right font-normal">人工</th>
+            <th className="px-2 py-1.5 text-right font-normal">辅材</th>
+            <th className="px-2 py-1.5 text-right font-normal">机械</th>
+            <th className="px-2 py-1.5 text-right font-normal">主材</th>
+            <th className="px-2 py-1.5 text-right font-normal">管+利</th>
+            <th className="px-2 py-1.5 text-right font-normal">测算价</th>
+            <th className="px-2 py-1.5 text-right font-normal">清单价</th>
+            <th className="px-2 py-1.5 text-right font-normal">偏差</th>
+          </tr>
+        </thead>
+        <tbody>
+          {view.rows.map((r) => (
+            <tr key={r.itemId} className="border-b border-neutral-100">
+              <td className="max-w-40 truncate px-2 py-1.5" title={r.name}>{r.name}</td>
+              <td className="px-2 py-1.5 text-neutral-500">
+                {r.quotaCode ? <span className="mono text-[11px]">{r.quotaCode}</span> : "—"}
+              </td>
+              <td className="mono px-2 py-1.5 text-right">{r.labor ?? "—"}</td>
+              <td className="mono px-2 py-1.5 text-right">{r.materialAux ?? "—"}</td>
+              <td className="mono px-2 py-1.5 text-right">{r.machine ?? "—"}</td>
+              <td className="mono px-2 py-1.5 text-right">
+                {r.needsMainPrice ? <span className="text-amber-600">缺主材价</span> : r.mainMaterial ?? "—"}
+              </td>
+              <td className="mono px-2 py-1.5 text-right">{r.fee ?? "—"}</td>
+              <td className="mono px-2 py-1.5 text-right font-medium">{r.calcPrice ?? "—"}</td>
+              <td className="mono px-2 py-1.5 text-right text-neutral-500">{fmtMoney(r.listPrice)}</td>
+              <td className={cn(
+                "mono px-2 py-1.5 text-right",
+                r.deviation !== null && Math.abs(Number(r.deviation)) > 20 && "font-medium text-red-600"
+              )}>
+                {r.deviation !== null ? `${Number(r.deviation) > 0 ? "+" : ""}${r.deviation}%` : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!view.rows.length && (
+        <div className="flex h-40 items-center justify-center text-xs text-neutral-400">
+          没有可测算的清单项
+        </div>
       )}
     </div>
   );

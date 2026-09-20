@@ -71,6 +71,75 @@ const SYSTEM_PROMPT = `你是安装工程造价 Agent，运行在一个造价工
 当前项目上下文：
 {CONTEXT}`;
 
+async function callAnthropic(
+  cfg: ModelConfig,
+  system: string,
+  messages: unknown[],
+  tools: ReturnType<typeof toolSchemasForLLM>
+) {
+  const res = await fetch(`${cfg.baseUrl}/v1/messages`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": cfg.apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      max_tokens: 4096,
+      system,
+      messages,
+      tools: tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parameters,
+      })),
+    }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!res.ok) throw new Error(`模型请求失败 ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.json() as Promise<{
+    content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
+    stop_reason: string;
+  }>;
+}
+
+async function runAnthropicLoop(
+  cfg: ModelConfig,
+  ctx: RunContext,
+  userMessage: string,
+  toolCtx: ToolContext,
+  execute: (c: ToolContext, t: string, a: unknown) => Promise<ToolResult>,
+  contextBlock: string,
+  maxRounds: number
+): Promise<string> {
+  const system = SYSTEM_PROMPT.replace("{CONTEXT}", contextBlock);
+  const messages: unknown[] = [
+    ...ctx.history.slice(-6).map((h) => ({ role: h.role, content: h.text })),
+    { role: "user", content: userMessage },
+  ];
+  const tools = toolSchemasForLLM();
+  for (let round = 0; round < maxRounds; round++) {
+    const res = await callAnthropic(cfg, system, messages, tools);
+    messages.push({ role: "assistant", content: res.content });
+    const toolUses = res.content.filter((b) => b.type === "tool_use");
+    if (!toolUses.length) {
+      return res.content.filter((b) => b.type === "text").map((b) => b.text).join("") || "已完成。";
+    }
+    const results = [];
+    for (const tu of toolUses) {
+      const result = await execute(toolCtx, tu.name!, tu.input ?? {});
+      results.push({
+        type: "tool_result",
+        tool_use_id: tu.id,
+        content: JSON.stringify(result.observation).slice(0, 8000),
+      });
+    }
+    messages.push({ role: "user", content: results });
+  }
+  return "已达到最大推理轮数，当前进度请查看工作区。";
+}
+
 export async function runLLMLoop(
   ctx: RunContext,
   userMessage: string,
@@ -99,13 +168,12 @@ export async function runLLMLoop(
   ];
   const tools = toolSchemasForLLM();
 
+  if (cfg.provider === "anthropic") {
+    return runAnthropicLoop(cfg, ctx, userMessage, toolCtx, execute, contextBlock, maxRounds);
+  }
+
   for (let round = 0; round < maxRounds; round++) {
-    let msg: LLMMsg;
-    if (cfg.provider === "openai-compatible") {
-      msg = await callOpenAI(cfg, messages, tools);
-    } else {
-      throw new Error(`provider ${cfg.provider} 暂未接入，请用 openai-compatible`);
-    }
+    const msg = await callOpenAI(cfg, messages, tools);
     messages.push(msg);
 
     if (!msg.tool_calls?.length) {

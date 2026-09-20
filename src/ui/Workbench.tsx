@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore, type ConvBlock } from "./store";
 import {
   AnomalyTable, BoqTable, Breakdown, DiffView, ExportResult, FactList,
-  FileList, QuotationMatch,
+  FileList, QuotaResult, QuotationMatch,
 } from "./views";
 import type { WorkspaceView } from "@shared/types";
 import {
@@ -33,6 +33,30 @@ const TOOL_LABEL: Record<string, string> = {
   "project.read": "读取项目",
   "project.summary": "项目汇总",
 };
+
+function RevertButton({ receiptId }: { receiptId: string }) {
+  const s = useStore();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  if (done) return <span className="text-[11px] text-neutral-300">已撤销</span>;
+  return (
+    <button
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        const res = await fetch(`/api/receipts/${receiptId}/revert`, { method: "POST" });
+        if (res.ok) {
+          setDone(true);
+          await s.reloadBoq();
+        }
+        setBusy(false);
+      }}
+      className="invisible rounded border border-neutral-200 px-1.5 py-0 text-[10.5px] text-neutral-500 hover:border-neutral-400 hover:text-neutral-800 group-hover:visible disabled:opacity-40"
+    >
+      撤销
+    </button>
+  );
+}
 
 function Block({ b }: { b: ConvBlock }) {
   if (b.type === "user")
@@ -90,9 +114,10 @@ function Block({ b }: { b: ConvBlock }) {
     );
   if (b.type === "receipt")
     return (
-      <div className="fadein flex items-center gap-2 px-1 text-[12px] text-neutral-500">
+      <div className="fadein group flex items-center gap-2 px-1 text-[12px] text-neutral-500">
         <Receipt size={11} className="text-neutral-400" />
         <span className="truncate">{b.summary}</span>
+        <RevertButton receiptId={b.receiptId} />
       </div>
     );
   return (
@@ -112,6 +137,8 @@ function ViewRenderer({ view }: { view: WorkspaceView }) {
       return <QuotationMatch view={view} />;
     case "breakdown":
       return <Breakdown view={view} />;
+    case "quotaResult":
+      return <QuotaResult view={view} />;
     case "diff":
       return <DiffView view={view} />;
     case "factList":

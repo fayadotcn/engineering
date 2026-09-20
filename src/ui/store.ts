@@ -60,19 +60,62 @@ export const useStore = create<State>((set, get) => ({
   async init(projectId) {
     if (get().projectId === projectId) return;
     set({ projectId, blocks: [], views: [], activeViewId: null });
-    const [p, items] = await Promise.all([
+    const [p, items, runs] = await Promise.all([
       fetch(`/api/projects/${projectId}`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/boq`).then((r) => r.json()),
+      fetch(`/api/projects/${projectId}/runs`).then((r) => r.json()),
     ]);
+
+    // replay persisted runs into conversation blocks + workspace views
+    const blocks: ConvBlock[] = [];
+    const views: WorkspaceView[] = [];
+    let activeViewId: string | null = null;
+    for (const run of runs ?? []) {
+      const ingest = run.userMessage.match(/分析并导入文件「(.+)」/);
+      blocks.push(
+        ingest
+          ? { type: "upload", filename: ingest[1] }
+          : { type: "user", text: run.userMessage }
+      );
+      for (const e of run.events as AgentEventDTO[]) {
+        const pl = e.payload as Record<string, never>;
+        if (e.type === "activity")
+          blocks.push({ type: "activity", text: pl.text, runId: run.id, live: false });
+        else if (e.type === "tool_started")
+          blocks.push({ type: "tool", tool: pl.tool, status: "running", runId: run.id });
+        else if (e.type === "tool_finished") {
+          const b = [...blocks].reverse().find(
+            (x) => x.type === "tool" && x.tool === pl.tool && x.status === "running"
+          );
+          if (b && b.type === "tool") { b.status = pl.status; b.ms = pl.ms; }
+        } else if (e.type === "message")
+          blocks.push({ type: "agent", text: pl.text, runId: run.id });
+        else if (e.type === "receipt")
+          blocks.push({
+            type: "receipt", receiptId: pl.receiptId, summary: pl.summary,
+            actionType: pl.actionType, runId: run.id,
+          });
+        else if (e.type === "workspace_patch") {
+          const v = pl.view as WorkspaceView;
+          const idx = views.findIndex((x) => x.id === v.id);
+          if (idx >= 0) views[idx] = v; else views.push(v);
+          activeViewId = v.id;
+        }
+      }
+    }
+
     set({
       projectName: p.name,
       files: p.files ?? [],
       facts: p.facts ?? [],
       items: items ?? [],
-      views: items?.length
-        ? [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }]
-        : [],
-      activeViewId: items?.length ? "view:boq" : null,
+      blocks,
+      views: views.length
+        ? views
+        : items?.length
+          ? [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }]
+          : [],
+      activeViewId: activeViewId ?? (items?.length ? "view:boq" : null),
     });
   },
 

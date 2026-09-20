@@ -3,6 +3,7 @@ import "./projectTools";
 import "./boqTools";
 import "./materialTools";
 import "./costTools";
+import "./quotaTools";
 import "./excelTools";
 
 export { getTool, listTools, registerTool, toolSchemasForLLM } from "./registry";

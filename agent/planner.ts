@@ -38,6 +38,7 @@ const CAPABILITIES = `我可以直接执行这些造价任务：
 • 询价处理：把询价文件价格匹配并写回清单，未询到的自动标记
 • 金额分析：各专业占比、电缆/桥架/管道/阀门等材料类别占比
 • 工程量反算：总价控制到目标值（含税可指定税率），只调工程量
+• 定额测算：匹配定额子目并组价，与清单价对比偏差
 • 修改与导出：改单价/工程量，展示 Diff，导出或写回 Excel
 直接说出目标即可，例如「检查相同项不同单价」「把询价写回清单」。`;
 
@@ -57,6 +58,22 @@ export class RulePlanner implements Planner {
         steps: [
           { tool: "file.ingest", args: { fileId: extra.ingestFileId }, activity: "正在解析文件" },
           { tool: "project.summary", args: {} },
+        ],
+      };
+    }
+
+    // 写事实: "税率设为9%" / "电缆品牌是上上" / "管理费率=15%"
+    const factMatch = m.match(
+      /(税率|地区|电缆品牌|电线品牌|品牌|管理费率|利润率|价格日期|人工费调整系数)\s*(?:设为|设置为|是|为|=|:|：)\s*([^\s，。,]+)/
+    );
+    if (factMatch) {
+      return {
+        steps: [
+          {
+            tool: "project.setFact",
+            args: { key: factMatch[1], value: factMatch[2] },
+            activity: "正在写入项目台账",
+          },
         ],
       };
     }
@@ -87,6 +104,16 @@ export class RulePlanner implements Planner {
         fallbackMessage: inclTax && !taxFact
           ? `已按含税口径处理，税率取默认 9%（项目台账未记录税率，可用「税率设为x%」写入事实）`
           : undefined,
+      };
+    }
+
+    // 定额测算: "按四川2020定额测算" / "定额组价" / "测算一下"
+    if (/定额|组价|测算/.test(m)) {
+      return {
+        steps: [
+          { tool: "quota.match", args: {}, activity: "正在匹配定额子目" },
+          { tool: "quota.calculate", args: {}, activity: "正在按定额测算综合单价" },
+        ],
       };
     }
 

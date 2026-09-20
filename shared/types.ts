@@ -127,6 +127,14 @@ export type WorkspaceView =
       receiptId: string;
       rows: DiffRow[];
     }
+  | {
+      kind: "quotaResult";
+      id: string;
+      title: string;
+      rows: QuotaResultRow[];
+      mgmtRate: number;
+      profitRate: number;
+    }
   | { kind: "factList"; id: string; title: string; facts: CostFactDTO[] }
   | {
       kind: "exportResult";
@@ -183,6 +191,24 @@ export interface DiffRow {
   field: string;
   before: string;
   after: string;
+}
+
+export interface QuotaResultRow {
+  itemId: string;
+  code: string;
+  name: string;
+  quantity: string;
+  listPrice: string;
+  quotaCode: string | null;
+  quotaName: string | null;
+  labor: string | null;
+  materialAux: string | null;
+  machine: string | null;
+  mainMaterial: string | null;
+  fee: string | null;
+  calcPrice: string | null;
+  deviation: string | null;
+  needsMainPrice: boolean;
 }
 
 /* ---------------- Agent events (SSE wire + persisted) ---------------- */

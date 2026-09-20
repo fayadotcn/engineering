@@ -201,16 +201,4 @@ registerTool({
   },
 });
 
-// --- quota tools: registered (planned), not implemented in Phase 1 ---
-for (const [name, description] of [
-  ["quota.search", "定额库检索（规划中）"],
-  ["quota.match", "清单项匹配定额子目（规划中）"],
-  ["quota.calculate", "按定额测算综合单价（规划中）"],
-] as const) {
-  registerTool({
-    name,
-    description,
-    implemented: false,
-    schema: z.object({ query: z.string().optional() }),
-  });
-}
+// quota.* 已实现于 quotaTools.ts

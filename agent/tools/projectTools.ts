@@ -80,6 +80,48 @@ registerTool({
 });
 
 registerTool({
+  name: "project.setFact",
+  description: "写入项目事实台账（税率/地区/品牌/价格日期/管理费费率等），来源标记为用户提供",
+  implemented: true,
+  schema: z.object({
+    key: z.string().describe("事实名，如 税率 / 电缆品牌 / 管理费率"),
+    value: z.string().describe("事实值，如 9% / 上上"),
+    factType: z.string().optional(),
+  }),
+  handler: async (ctx, args: { key: string; value: string; factType?: string }) => {
+    const factType =
+      args.factType ??
+      (/税率/.test(args.key) ? "TAX_RATE"
+        : /地区|省|市/.test(args.key) ? "REGION"
+        : /品牌/.test(args.key) ? "BRAND"
+        : /费率|单价/.test(args.key) ? "RATE"
+        : "CUSTOM");
+    const f = await setFact(ctx.projectId, {
+      factType,
+      key: args.key,
+      value: args.value,
+      source: "USER_PROVIDED",
+      createdBy: "user",
+      agentRunId: ctx.runId,
+    });
+    const facts = await getFacts(ctx.projectId);
+    return {
+      observation: { key: f.key, value: f.value, source: f.source },
+      views: [{ kind: "factList", id: "view:facts", title: "项目事实台账", facts }],
+      receipts: [
+        {
+          actionType: "FACT_SET",
+          summary: `写入事实：${f.key} = ${f.value}（用户提供）`,
+          before: {},
+          after: { key: f.key, value: f.value },
+        },
+      ],
+      message: `已记入台账：${f.key} = ${f.value}`,
+    };
+  },
+});
+
+registerTool({
   name: "file.read",
   description: "读取项目文件元信息或解析状态",
   implemented: true,
