@@ -33,6 +33,8 @@ MODEL_NAME=deepseek-chat
 - `file/excel.ts` 解析真实造价 Excel：双行表头、无表头数据表、续行合并、"1、名称：X" 内嵌字段、分页噪声。
 - `file/pdf.ts` PDF 文本层提取（pdfjs-dist，serverExternal）+ BOQ 行识别（编码+单位+量+价正则）；≥5 行自动导入清单，否则按文档展示（document 视图）。
 - `cost-engine/fileCompare.ts` 两版清单对审：编码优先对齐、无编码按语义组键；输出 价差/量差/独有项 + 总额差（fileCompare 视图）。
+- 确认门：带 `confirm` 标记的工具（boq.update / material.applyQuotation / quantity.adjust(apply) / quantity.calculate(写回)）执行前暂停 run（AWAITING_CONFIRM），POST /api/runs/[runId]/confirm 批准或取消。跨请求的待确认表必须存 globalThis（Next 每个 route 独立 module graph）。
+- `cost-engine/calcExpr.ts` 工程量计算式求值（递归下降，禁 eval；×÷（）全角与单位词自动处理）。
 - 语义比较：BoqSemanticFeature 分组 → featureCompatible 冲突检查 → 价格比。禁止纯字符串匹配。
 - 每个修改动作产生 ActionReceipt；工作区用户编辑也产生（createdBy=user），Agent 上下文可见。
 - DB schema 用 SQLite 但保持 Postgres 可移植（Json/枚举→String + shared/json helpers）。

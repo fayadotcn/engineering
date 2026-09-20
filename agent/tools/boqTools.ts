@@ -249,6 +249,8 @@ registerTool({
     patches: z.array(patchSchema),
     reason: z.string().optional(),
   }),
+  confirm: (a: { patches: unknown[]; reason?: string }) =>
+    `将修改 ${a.patches.length} 个清单项${a.reason ? `（${a.reason}）` : ""}，合价自动重算`,
   handler: async (ctx, args: { patches: z.infer<typeof patchSchema>[]; reason?: string }) => {
     const { before, after } = await updateBoqItems(
       ctx.projectId,

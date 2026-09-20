@@ -13,6 +13,7 @@ export type ConvBlock =
   | { type: "activity"; text: string; runId: string; live: boolean }
   | { type: "tool"; tool: string; status: string; ms?: number; runId: string }
   | { type: "receipt"; receiptId: string; summary: string; actionType: string; runId: string }
+  | { type: "confirm"; confirmId: string; runId: string; tool: string; description: string; decided?: "approved" | "rejected" }
   | { type: "upload"; filename: string }
   | { type: "error"; text: string };
 
@@ -96,6 +97,18 @@ export const useStore = create<State>((set, get) => ({
             type: "receipt", receiptId: pl.receiptId, summary: pl.summary,
             actionType: pl.actionType, runId: run.id,
           });
+        else if (e.type === "confirm_request")
+          blocks.push({
+            type: "confirm", confirmId: pl.confirmId, runId: run.id,
+            tool: pl.tool, description: pl.description,
+          });
+        else if (e.type === "confirm_resolved") {
+          const b = [...blocks].reverse().find(
+            (x) => x.type === "confirm" && x.confirmId === pl.confirmId
+          );
+          if (b && b.type === "confirm")
+            b.decided = pl.approved ? "approved" : "rejected";
+        }
         else if (e.type === "workspace_patch") {
           const v = pl.view as WorkspaceView;
           const idx = views.findIndex((x) => x.id === v.id);
@@ -254,6 +267,34 @@ export const useStore = create<State>((set, get) => ({
               },
             ],
           };
+        case "confirm_request": {
+          const blocks = s.blocks.map((b) =>
+            b.type === "activity" && b.live ? { ...b, live: false } : b
+          );
+          return {
+            blocks: [
+              ...blocks,
+              {
+                type: "confirm",
+                confirmId: p.confirmId,
+                runId,
+                tool: p.tool,
+                description: p.description,
+              } as ConvBlock,
+            ],
+          };
+        }
+        case "confirm_resolved": {
+          const blocks = [...s.blocks];
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const b = blocks[i];
+            if (b.type === "confirm" && b.confirmId === p.confirmId) {
+              blocks[i] = { ...b, decided: p.approved ? "approved" : "rejected" };
+              break;
+            }
+          }
+          return { blocks };
+        }
         case "workspace_patch": {
           const view = p.view as WorkspaceView;
           const idx = s.views.findIndex((v) => v.id === view.id);

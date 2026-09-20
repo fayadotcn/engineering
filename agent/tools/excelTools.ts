@@ -67,7 +67,18 @@ registerTool({
     const file = args.fileId
       ? await prisma.projectFile.findUnique({ where: { id: args.fileId } })
       : await prisma.projectFile.findFirst({
-          where: { projectId: ctx.projectId, kind: { startsWith: "BOQ" } },
+          where: {
+            projectId: ctx.projectId,
+            kind: { startsWith: "BOQ" },
+            filename: { endsWith: ".xlsx" },
+          },
+          orderBy: { createdAt: "desc" },
+        }) ?? await prisma.projectFile.findFirst({
+          where: {
+            projectId: ctx.projectId,
+            kind: { startsWith: "BOQ" },
+            filename: { endsWith: ".xls" },
+          },
           orderBy: { createdAt: "desc" },
         });
     if (!file) return { observation: { error: "没有可写回的清单源文件" } };
@@ -197,7 +208,83 @@ registerTool({
 
 registerTool({
   name: "report.generate",
-  description: "生成造价分析报告（规划中）",
-  implemented: false,
-  schema: z.object({ kind: z.string().optional() }),
+  description: "生成造价分析报告 Excel：项目汇总、专业/材料占比、事实台账、异常项摘要",
+  implemented: true,
+  schema: z.object({ filename: z.string().optional() }),
+  handler: async (ctx, args: { filename?: string }) => {
+    const items = await listBoq(ctx.projectId);
+    const leaf = items.filter((i) => !i.isHeader);
+    if (!leaf.length) return { observation: { error: "清单为空，无法生成报告" } };
+
+    const { projectTotals, aggregateByDiscipline, aggregateByCategory } = await import("@cost-engine/aggregate");
+    const { findSameItemDifferentPrice, findPriceAnomalies } = await import("@cost-engine/compare");
+    const { getFacts } = await import("@project/facts");
+    const ExcelJS = (await import("exceljs")).default;
+
+    const totals = projectTotals(items);
+    const facts = await getFacts(ctx.projectId);
+    const wb = new ExcelJS.Workbook();
+
+    // 汇总
+    const s1 = wb.addWorksheet("项目汇总");
+    s1.addRow(["造价分析报告"]);
+    s1.addRow(["生成时间", new Date().toLocaleString("zh-CN")]);
+    s1.addRow([]);
+    s1.addRow(["清单项数", totals.itemCount]);
+    s1.addRow(["已定价项数", totals.pricedCount]);
+    s1.addRow(["合价合计（不含税）", totals.totalAmount]);
+    const taxFact = facts.find((f) => f.key === "税率");
+    if (taxFact) {
+      const withTaxAmt = D(totals.totalAmount).times(1 + Number(taxFact.value));
+      s1.addRow([`税率 ${taxFact.value}`, `含税合计 ${withTaxAmt.toFixed(2)} 元`]);
+    }
+
+    // 占比
+    const s2 = wb.addWorksheet("专业占比");
+    s2.addRow(["专业", "金额", "占比", "项数"]);
+    for (const d of aggregateByDiscipline(items).slices)
+      s2.addRow([d.label, d.amount, `${(d.share * 100).toFixed(1)}%`, d.count]);
+    const s3 = wb.addWorksheet("材料占比");
+    s3.addRow(["材料类别", "金额", "占比", "项数"]);
+    for (const c of aggregateByCategory(items).slices)
+      s3.addRow([c.label, c.amount, `${(c.share * 100).toFixed(1)}%`, c.count]);
+
+    // 台账
+    const s4 = wb.addWorksheet("项目台账");
+    s4.addRow(["类型", "键", "值", "来源", "置信度"]);
+    for (const f of facts) s4.addRow([f.factType, f.key, f.value, f.source, f.confidence]);
+
+    // 异常
+    const s5 = wb.addWorksheet("异常摘要");
+    s5.addRow(["类型", "组/项", "明细"]);
+    for (const g of findSameItemDifferentPrice(items))
+      s5.addRow(["相同项不同价", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
+    for (const g of findPriceAnomalies(items))
+      s5.addRow(["单价异常", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
+
+    for (const s of [s1, s2, s3, s4, s5]) s.columns.forEach((c) => { c.width = 22; });
+
+    const out = Buffer.from(await wb.xlsx.writeBuffer());
+    const filename = args.filename ?? `造价分析报告_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const artifact = await saveArtifact(ctx, out, filename);
+    return {
+      observation: { artifactId: artifact.id, sheets: 5, total: totals.totalAmount },
+      views: [{
+        kind: "exportResult",
+        id: `view:report:${artifact.id}`,
+        title: "分析报告",
+        artifactId: artifact.id,
+        filename: artifact.label,
+        summary: `汇总/专业/材料/台账/异常 5 个 sheet，合计 ${totals.totalAmount} 元`,
+      }],
+      receipts: [{
+        actionType: "EXPORT",
+        summary: `生成分析报告：${filename}`,
+        before: {},
+        after: { artifactId: artifact.id },
+        reversible: false,
+      }],
+      message: `已生成「${filename}」：项目汇总 + 专业/材料占比 + 台账 + 异常摘要`,
+    };
+  },
 });

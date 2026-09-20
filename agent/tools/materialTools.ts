@@ -123,6 +123,7 @@ registerTool({
     minConfidence: z.number().optional(),
     onlyItemIds: z.array(z.string()).optional(),
   }),
+  confirm: () => "将把已匹配的询价写回清单综合单价（生成 Diff 与可撤销回执）",
   handler: async (ctx, args: { minConfidence?: number; onlyItemIds?: string[] }) => {
     const [items, quotes] = await Promise.all([
       listBoq(ctx.projectId),

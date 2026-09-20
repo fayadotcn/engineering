@@ -3,7 +3,7 @@ import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import { aggregateByCategory, aggregateByDiscipline, projectTotals } from "@cost-engine/aggregate";
 import { adjustQuantitiesToTarget } from "@cost-engine/adjust";
-import { D, decStr, sum, withTax } from "@cost-engine/money";
+import { D, decStr, round3, sum, withTax } from "@cost-engine/money";
 import { getFact } from "@project/facts";
 import type { DiffRow } from "@shared/types";
 
@@ -106,9 +106,61 @@ registerTool({
 
 registerTool({
   name: "quantity.calculate",
-  description: "工程量计算（规划中：按定额规则/图纸工程量计算式）",
-  implemented: false,
-  schema: z.object({ itemId: z.string().optional() }),
+  description: "工程量计算式求值（如 3层×12个+15、(12.5+3)*2），可写入指定清单项的工程量",
+  implemented: true,
+  schema: z.object({
+    expression: z.string().describe("工程量计算式，支持 +-*/×÷()%、中文单位词自动剥离"),
+    itemId: z.string().optional().describe("给定则把结果写入该清单项工程量（三位小数）"),
+    label: z.string().optional().describe("计算说明"),
+  }),
+  confirm: (a: { itemId?: string; expression?: string }) =>
+    a.itemId ? `将把计算结果写入清单项工程量：${a.expression}` : null,
+  handler: async (ctx, args: { expression: string; itemId?: string; label?: string }) => {
+    const { evalExpr } = await import("@cost-engine/calcExpr");
+    let value: number;
+    try {
+      value = evalExpr(args.expression);
+    } catch (e) {
+      return { observation: { error: `计算式无效：${e instanceof Error ? e.message : e}` } };
+    }
+    const qty = round3(value);
+
+    if (!args.itemId) {
+      const label = args.label && !args.label.includes(args.expression) ? `${args.label}：` : "";
+      return {
+        observation: { expression: args.expression, result: qty.toString() },
+        message: `${label}${args.expression} = ${qty.toString()}`,
+      };
+    }
+
+    const { before, after } = await updateBoqItems(ctx.projectId, [
+      { id: args.itemId, patch: { quantity: qty.toString() } },
+    ]);
+    const b = before[0];
+    const a = after[0];
+    if (!a) return { observation: { error: "清单项不存在" } };
+    return {
+      observation: { itemId: args.itemId, before: b?.quantity, after: a.quantity },
+      views: [
+        {
+          kind: "diff",
+          id: `view:diff:${ctx.runId}`,
+          title: "工程量写入",
+          receiptId: "",
+          rows: [{
+            itemId: a.id, code: a.code, name: a.name, field: "quantity",
+            before: String(b?.quantity ?? ""), after: String(a.quantity),
+          }],
+        },
+      ],
+      receipts: [{
+        actionType: "BOQ_UPDATE",
+        summary: `工程量计算写回：${a.name} ${args.expression} = ${qty}`,
+        before, after,
+      }],
+      message: `${a.name} 工程量已更新：${b?.quantity} → ${qty}（${args.expression}）`,
+    };
+  },
 });
 
 registerTool({
@@ -121,6 +173,8 @@ registerTool({
     allowedItemIds: z.array(z.string()).optional().describe("只允许调整这些清单项；缺省=全部有量有价项"),
     apply: z.boolean().optional().describe("true=直接写回，false=仅试算"),
   }),
+  confirm: (a: { apply?: boolean; targetTotal?: number }) =>
+    a.apply ? `将按目标总价 ${a.targetTotal} 反算工程量并写回清单（单价不变）` : null,
   handler: async (ctx, args) => {
     const items = await listBoq(ctx.projectId);
     const taxFact = (await getFact(ctx.projectId, "税率"))?.value;

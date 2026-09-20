@@ -7,7 +7,7 @@ import {
 } from "./views";
 import type { WorkspaceView } from "@shared/types";
 import {
-  ArrowUp, Check, FileSpreadsheet, Loader2, Paperclip, Receipt, Wrench, X,
+  ArrowUp, Check, FileSpreadsheet, Loader2, Paperclip, Receipt, ShieldQuestion, Wrench, X,
 } from "lucide-react";
 
 const TOOL_LABEL: Record<string, string> = {
@@ -60,6 +60,56 @@ function RevertButton({ receiptId }: { receiptId: string }) {
     >
       撤销
     </button>
+  );
+}
+
+function ConfirmCard({ b }: { b: Extract<ConvBlock, { type: "confirm" }> }) {
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const decide = async (approve: boolean) => {
+    setBusy(approve ? "approve" : "reject");
+    await fetch(`/api/runs/${b.runId}/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ approve }),
+    });
+    // decided 状态由 SSE 的 confirm_resolved 事件回写
+    setBusy(null);
+  };
+  const pending = !b.decided;
+  return (
+    <div className="fadein rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+      <div className="flex items-start gap-2">
+        <ShieldQuestion size={14} className="mt-0.5 shrink-0 text-amber-600" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] font-medium text-neutral-800">需要确认</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-neutral-600">{b.description}</div>
+        </div>
+      </div>
+      <div className="mt-2 flex items-center gap-2 pl-6">
+        {pending ? (
+          <>
+            <button
+              onClick={() => decide(true)}
+              disabled={!!busy}
+              className="rounded-md bg-neutral-900 px-3 py-1 text-[12px] text-white hover:bg-neutral-700 disabled:opacity-40"
+            >
+              {busy === "approve" ? "执行中…" : "确认执行"}
+            </button>
+            <button
+              onClick={() => decide(false)}
+              disabled={!!busy}
+              className="rounded-md border border-neutral-300 px-3 py-1 text-[12px] text-neutral-600 hover:bg-white disabled:opacity-40"
+            >
+              取消
+            </button>
+          </>
+        ) : (
+          <span className="text-[11.5px] text-neutral-400">
+            {b.decided === "approved" ? "已确认执行" : "已取消"}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -117,6 +167,7 @@ function Block({ b }: { b: ConvBlock }) {
         </span>
       </div>
     );
+  if (b.type === "confirm") return <ConfirmCard b={b} />;
   if (b.type === "receipt")
     return (
       <div className="fadein group flex items-center gap-2 px-1 text-[12px] text-neutral-500">

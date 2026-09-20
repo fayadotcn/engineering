@@ -4,7 +4,10 @@ import { resolveContext, type RunContext } from "./context";
 import { executeTool } from "./executor";
 import { RulePlanner, type Plan, type PlanStep } from "./planner";
 import { modelConfig, runLLMLoop } from "./llm";
-import type { ToolContext, ToolResult } from "./tools/registry";
+import { getTool, type ToolContext, type ToolResult } from "./tools/registry";
+import { waitForConfirm } from "./pending";
+import { toJson } from "@shared/json";
+import { randomUUID } from "crypto";
 
 // CostAgent Runtime — the unified loop:
 // user msg -> resolve context -> plan -> execute tools -> observe -> final.
@@ -53,7 +56,39 @@ async function executeRun(runId: string, input: StartRunInput) {
   await emit("activity", { text: useLLM ? "正在理解任务" : "正在分析任务" });
 
   const summaries: string[] = [];
-  const execute = (c: ToolContext, t: string, a: unknown) => executeTool(c, t, a);
+  // 确认门：confirm 标记的工具先暂停 run，等用户批准才执行。
+  // 规则引擎和 LLM 路径都经过这里，行为一致。
+  const execute = async (c: ToolContext, t: string, a: unknown): Promise<ToolResult> => {
+    const def = getTool(t);
+    if (def?.implemented && def.confirm) {
+      const parsed = def.schema.safeParse(a ?? {});
+      const description = parsed.success ? def.confirm(parsed.data) : `执行 ${t}`;
+      if (!description) return executeTool(c, t, a); // 本次调用不需要确认
+      const confirmId = randomUUID();
+      await c.emit("confirm_request", {
+        confirmId,
+        tool: t,
+        description,
+        args: a as Record<string, unknown>,
+      });
+      await prisma.agentRun.update({
+        where: { id: runId },
+        data: {
+          status: "AWAITING_CONFIRM",
+          pendingAction: toJson({ confirmId, tool: t, args: a, description }),
+        },
+      });
+      const approved = await waitForConfirm(runId, t, description);
+      await prisma.agentRun.update({
+        where: { id: runId },
+        data: { status: "RUNNING", pendingAction: "{}" },
+      });
+      await c.emit("confirm_resolved", { confirmId, approved });
+      if (!approved)
+        return { observation: { cancelled: true }, message: `已取消：${description}` };
+    }
+    return executeTool(c, t, a);
+  };
 
   try {
     if (useLLM) {

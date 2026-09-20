@@ -258,6 +258,8 @@ export type AgentEventType =
   | "tool_finished"
   | "workspace_patch"
   | "receipt"
+  | "confirm_request"
+  | "confirm_resolved"
   | "run_finished"
   | "error";
 

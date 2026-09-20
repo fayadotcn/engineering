@@ -39,6 +39,9 @@ const CAPABILITIES = `我可以直接执行这些造价任务：
 • 金额分析：各专业占比、电缆/桥架/管道/阀门等材料类别占比
 • 工程量反算：总价控制到目标值（含税可指定税率），只调工程量
 • 定额测算：匹配定额子目并组价，与清单价对比偏差
+• 两版清单对审：招标/中标/结算的价差、量差、独有项与总额差
+• 工程量计算：「算一下 3层×12个+15」直接求值，可写回清单项
+• 报告：生成造价分析报告 Excel（汇总/占比/台账/异常）
 • 修改与导出：改单价/工程量，展示 Diff，导出或写回 Excel
 直接说出目标即可，例如「检查相同项不同单价」「把询价写回清单」。`;
 
@@ -78,8 +81,8 @@ export class RulePlanner implements Planner {
       };
     }
 
-    // 导出 / 写回
-    if (/写回|回写|更新到源文件|更新到.*文件/.test(m))
+    // 导出 / 写回（询价写回走 material 路径，不在此拦截）
+    if (/写回|回写|更新到源文件|更新到.*文件/.test(m) && !/询价|报价/.test(m))
       return { steps: [{ tool: "excel.write", args: {}, activity: "正在写回源文件" }] };
     if (/导出|生成.*excel|下载/i.test(m))
       return {
@@ -119,6 +122,27 @@ export class RulePlanner implements Planner {
         steps: [
           { tool: "quota.match", args: {}, activity: "正在匹配定额子目" },
           { tool: "quota.calculate", args: {}, activity: "正在按定额测算综合单价" },
+        ],
+      };
+    }
+
+    // 生成分析报告
+    if (/报告|报表/.test(m) && /生成|出|做|导/.test(m))
+      return {
+        steps: [{ tool: "report.generate", args: {}, activity: "正在生成分析报告" }],
+      };
+
+    // 工程量计算式: "算一下 3层×12个+15" / "12.5*(2+3) 等于多少"
+    // 捕获段允许中文/字母（单位词），求值时由 evalExpr 剥离
+    const exprMatch = m.match(/[\d(（][\d+\-*/×÷()（）.%\s一-龥a-zA-Z]*[\d)）%一-龥a-zA-Z]/);
+    if (/计算|算一下|算|求|等于|是多少/.test(m) && exprMatch && /[+\-*/×÷(（]|\d\s*[)%]?\s*[+\-*/×÷]|层|个|米|根|段|处|台|套/.test(m)) {
+      return {
+        steps: [
+          {
+            tool: "quantity.calculate",
+            args: { expression: exprMatch[0].trim(), label: m.slice(0, 40) },
+            activity: "正在计算工程量",
+          },
         ],
       };
     }

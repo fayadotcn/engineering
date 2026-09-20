@@ -125,8 +125,9 @@ model AgentRun {
   projectId   String
   project     Project  @relation(fields: [projectId], references: [id])
   userMessage String
-  status      String   @default("RUNNING") // RUNNING | DONE | FAILED
+  status      String   @default("RUNNING") // RUNNING | AWAITING_CONFIRM | DONE | FAILED
   planner     String   @default("rule")    // rule | llm
+  pendingAction String @default("{}")    // JSON {confirmId,tool,args,description} while AWAITING_CONFIRM
   summary     String   @default("")
   createdAt   DateTime @default(now())
   finishedAt  DateTime?
