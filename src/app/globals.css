@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #fafafa;
+  --panel: #ffffff;
+  --ink: #171717;
+  --muted: #737373;
+  --faint: #a3a3a3;
+  --line: #e5e5e5;
+  --accent: #171717;
+  --blue: #2563eb;
+  --amber: #b45309;
+  --red: #dc2626;
+  --green: #16a34a;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* { scrollbar-width: thin; scrollbar-color: #d4d4d4 transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 4px; }
+
+.mono { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.pulse { animation: pulse-dot 1.2s ease-in-out infinite; }
+
+@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.fadein { animation: fadein 0.18s ease-out; }

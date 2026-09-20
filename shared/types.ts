@@ -1,0 +1,226 @@
+// Shared domain types. No runtime deps — safe on client and server.
+
+export type Discipline =
+  | "ELECTRICAL"
+  | "PLUMBING"
+  | "FIRE"
+  | "HVAC"
+  | "WEAK_CURRENT"
+  | "OTHER";
+
+export type FileKind =
+  | "BOQ_TENDER"
+  | "BOQ_WINNING"
+  | "BOQ_SETTLEMENT"
+  | "MATERIAL_QUOTATION"
+  | "OWNER_SUPPLIED"
+  | "CONTRACT"
+  | "CHANGE"
+  | "VISA"
+  | "DRAWING"
+  | "UNKNOWN";
+
+export type FactSource =
+  | "USER_PROVIDED"
+  | "FILE_EXTRACTED"
+  | "CONTRACT_DEFINED"
+  | "HISTORICAL"
+  | "INFERRED"
+  | "MARKET_REFERENCE";
+
+/** Structured engineering semantics parsed from 项目名称 + 项目特征. */
+export interface BoqSemanticFeature {
+  system?: string; // 消防 | 给排水 | 电气 | 暖通 ...
+  category?: string; // 管道 | 电缆 | 桥架 | 阀门 | 配电箱 ...
+  material?: string; // 镀锌钢管 | PPR | YJV ...
+  specification?: string; // raw spec token(s): DN100, 4x25+1x16, 100x200
+  diameter?: string; // DN100 / Φ108 normalized
+  connectionMethod?: string; // 沟槽 | 螺纹 | 焊接 | 法兰 | 热熔 | 卡压 ...
+  installationMethod?: string; // 明装 | 暗装 | 吊装 | 埋地 ...
+  location?: string; // 室内 | 室外 | 地下 ...
+  height?: string;
+  pressure?: string; // PN1.6 / 1.6MPa
+  fireRating?: string;
+  brand?: string;
+  technicalRequirement?: string;
+  tokens?: string[]; // residual normalized tokens
+}
+
+/** Serialized BoqItem shape sent to client (Decimals -> strings). */
+export interface BoqItemDTO {
+  id: string;
+  projectId: string;
+  fileId: string | null;
+  sheetName: string;
+  rowIndex: number;
+  code: string;
+  name: string;
+  rawFeature: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string;
+  totalPrice: string;
+  sectionPath: string;
+  isHeader: boolean;
+  sortOrder: number;
+  discipline: Discipline;
+  features: BoqSemanticFeature;
+}
+
+export interface QuotationItemDTO {
+  id: string;
+  materialName: string;
+  spec: string;
+  unit: string;
+  brand: string;
+  price: string;
+  sheetName: string;
+  features: BoqSemanticFeature;
+}
+
+export interface CostFactDTO {
+  id: string;
+  factType: string;
+  key: string;
+  value: string;
+  source: FactSource;
+  confidence: number;
+  createdBy: string;
+  createdAt: string;
+}
+
+/* ---------------- Workspace views ---------------- */
+
+export type WorkspaceView =
+  | {
+      kind: "boqTable";
+      id: string;
+      title: string;
+      filter?: { discipline?: Discipline; query?: string; onlyItems?: boolean };
+    }
+  | {
+      kind: "anomalyTable";
+      id: string;
+      title: string;
+      anomalyType: "SAME_ITEM_DIFF_PRICE" | "PRICE_ANOMALY" | "FEATURE_MISMATCH" | "DUPLICATE";
+      rows: AnomalyRow[];
+    }
+  | {
+      kind: "quotationMatch";
+      id: string;
+      title: string;
+      rows: QuotationMatchRow[];
+      unmatched: QuotationItemDTO[];
+    }
+  | {
+      kind: "breakdown";
+      id: string;
+      title: string;
+      mode: "discipline" | "material";
+      slices: BreakdownSlice[];
+      total: string;
+    }
+  | {
+      kind: "diff";
+      id: string;
+      title: string;
+      receiptId: string;
+      rows: DiffRow[];
+    }
+  | { kind: "factList"; id: string; title: string; facts: CostFactDTO[] }
+  | {
+      kind: "exportResult";
+      id: string;
+      title: string;
+      artifactId: string;
+      filename: string;
+      summary: string;
+    }
+  | { kind: "fileList"; id: string; title: string };
+
+export interface AnomalyRow {
+  groupKey: string;
+  label: string;
+  items: {
+    id: string;
+    code: string;
+    name: string;
+    feature: string;
+    unit: string;
+    quantity: string;
+    unitPrice: string;
+    sectionPath: string;
+  }[];
+  prices: string[];
+  spread?: string; // max-min
+  reason: string;
+}
+
+export interface QuotationMatchRow {
+  quotationItemId: string;
+  materialName: string;
+  spec: string;
+  brand: string;
+  price: string;
+  matchedBoqItemIds: string[];
+  matchedNames: string[];
+  confidence: number;
+  status: "MATCHED" | "UNMATCHED" | "LOW_CONFIDENCE";
+}
+
+export interface BreakdownSlice {
+  key: string;
+  label: string;
+  amount: string;
+  share: number; // 0..1
+  count: number;
+}
+
+export interface DiffRow {
+  itemId: string;
+  code: string;
+  name: string;
+  field: string;
+  before: string;
+  after: string;
+}
+
+/* ---------------- Agent events (SSE wire + persisted) ---------------- */
+
+export type AgentEventType =
+  | "activity"
+  | "message"
+  | "tool_started"
+  | "tool_finished"
+  | "workspace_patch"
+  | "receipt"
+  | "run_finished"
+  | "error";
+
+export interface AgentEventDTO {
+  seq: number;
+  type: AgentEventType;
+  payload: Record<string, unknown>;
+}
+
+export const FILE_KIND_LABEL: Record<FileKind, string> = {
+  BOQ_TENDER: "招标清单",
+  BOQ_WINNING: "中标清单",
+  BOQ_SETTLEMENT: "结算清单",
+  MATERIAL_QUOTATION: "材料询价",
+  OWNER_SUPPLIED: "甲供材",
+  CONTRACT: "合同",
+  CHANGE: "变更",
+  VISA: "签证",
+  DRAWING: "图纸",
+  UNKNOWN: "未识别",
+};
+
+export const DISCIPLINE_LABEL: Record<Discipline, string> = {
+  ELECTRICAL: "电气",
+  PLUMBING: "给排水",
+  FIRE: "消防",
+  HVAC: "暖通",
+  WEAK_CURRENT: "弱电智能化",
+  OTHER: "其他",
+};

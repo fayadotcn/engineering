@@ -1,0 +1,189 @@
+// Postgres-portable schema. SQLite in dev: enums and Json are stored as String,
+// serialized/deserialized by shared/json helpers. Decimal is Prisma-supported.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  projects  Project[]
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  name        String
+  status      String        @default("ACTIVE") // ACTIVE | ARCHIVED
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  files       ProjectFile[]
+  boqItems    BoqItem[]
+  quotations  QuotationItem[]
+  facts       CostFact[]
+  runs        AgentRun[]
+  artifacts   Artifact[]
+}
+
+model ProjectFile {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id])
+  filename   String
+  mime       String
+  storageKey String
+  sizeBytes  Int
+  kind       String   @default("UNKNOWN")
+  // BOQ_TENDER | BOQ_WINNING | BOQ_SETTLEMENT | MATERIAL_QUOTATION
+  // OWNER_SUPPLIED | CONTRACT | CHANGE | VISA | DRAWING | UNKNOWN
+  status     String   @default("UPLOADED") // UPLOADED | PARSED | FAILED
+  meta       String   @default("{}") // JSON: sheets, rowCounts, parseReport
+  createdAt  DateTime @default(now())
+  boqItems   BoqItem[]
+  quotations QuotationItem[]
+
+  @@index([projectId])
+}
+
+model BoqItem {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id])
+  fileId        String?
+  file          ProjectFile? @relation(fields: [fileId], references: [id])
+  sheetName     String
+  rowIndex      Int      // original excel row for write-back
+  code          String   @default("")
+  name          String
+  rawFeature    String   @default("")
+  unit          String   @default("")
+  quantity      Decimal  @default(0)
+  unitPrice     Decimal  @default(0)
+  totalPrice    Decimal  @default(0)
+  sectionPath   String   @default("") // e.g. "电气设备安装工程/配电箱"
+  isHeader      Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  discipline    String   @default("OTHER")
+  // ELECTRICAL | PLUMBING | FIRE | HVAC | WEAK_CURRENT | OTHER
+  features      String   @default("{}") // JSON BoqSemanticFeature
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([projectId, code])
+  @@index([projectId, discipline])
+}
+
+model QuotationItem {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+  fileId       String?
+  file         ProjectFile? @relation(fields: [fileId], references: [id])
+  materialName String
+  spec         String   @default("")
+  unit         String   @default("")
+  brand        String   @default("")
+  price        Decimal  @default(0)
+  sheetName    String   @default("")
+  rowIndex     Int      @default(0)
+  features     String   @default("{}")
+  raw          String   @default("{}")
+  createdAt    DateTime @default(now())
+
+  @@index([projectId])
+}
+
+model CostFact {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+  factType     String   // REGION | TAX_RATE | BRAND | PRICE_FILE | PRICE_DATE | CURRENCY | STANDARD | CUSTOM
+  key          String
+  value        String
+  source       String   // USER_PROVIDED | FILE_EXTRACTED | CONTRACT_DEFINED | HISTORICAL | INFERRED | MARKET_REFERENCE
+  sourceFileId String?
+  confidence   Float    @default(1)
+  effectiveDate DateTime?
+  createdBy    String   @default("agent") // agent | user
+  agentRunId   String?
+  createdAt    DateTime @default(now())
+
+  @@index([projectId, factType, key])
+}
+
+model AgentRun {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  userMessage String
+  status      String   @default("RUNNING") // RUNNING | DONE | FAILED
+  planner     String   @default("rule")    // rule | llm
+  summary     String   @default("")
+  createdAt   DateTime @default(now())
+  finishedAt  DateTime?
+  events      AgentEvent[]
+  toolCalls   ToolCall[]
+  receipts    ActionReceipt[]
+}
+
+model AgentEvent {
+  id        String   @id @default(cuid())
+  runId     String
+  run       AgentRun @relation(fields: [runId], references: [id])
+  seq       Int
+  type      String   // activity | message | tool_started | tool_finished | workspace_patch | receipt | run_finished | error
+  payload   String   @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([runId, seq])
+}
+
+model ToolCall {
+  id         String   @id @default(cuid())
+  runId      String
+  run        AgentRun @relation(fields: [runId], references: [id])
+  tool       String
+  args       String   @default("{}")
+  result     String   @default("{}")
+  status     String   @default("OK") // OK | ERROR
+  projectId  String
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+}
+
+model ActionReceipt {
+  id         String   @id @default(cuid())
+  runId      String?
+  run        AgentRun? @relation(fields: [runId], references: [id])
+  toolCallId String?
+  projectId  String
+  actionType String   // BOQ_UPDATE | PRICE_APPLY | QUANTITY_ADJUST | FILE_IMPORT | EXPORT | USER_EDIT | FACT_SET
+  summary    String
+  before     String   @default("{}")
+  after      String   @default("{}")
+  reversible Boolean  @default(true)
+  createdBy  String   @default("agent")
+  createdAt  DateTime @default(now())
+
+  @@index([projectId])
+}
+
+model Artifact {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  kind        String   // EXPORT_EXCEL | REPORT
+  label       String
+  storageKey  String
+  createdByRunId String?
+  createdAt   DateTime @default(now())
+}
