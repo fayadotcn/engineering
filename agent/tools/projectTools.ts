@@ -178,16 +178,20 @@ registerTool({
     await ctx.emit("activity", { text: `正在解析 ${file.filename}` });
 
     const buffer = await storage.get(file.storageKey);
+    const isPdf = /\.pdf$/i.test(file.filename) || file.mime.includes("pdf");
     let sheets = null;
-    try {
-      sheets = parseWorkbook(buffer);
-    } catch {
-      sheets = null;
+    if (!isPdf) {
+      try {
+        sheets = parseWorkbook(buffer);
+      } catch {
+        sheets = null;
+      }
     }
-    const { kind, confidence } = classifyFile(file.filename, sheets, file.mime);
+    let { kind, confidence } = classifyFile(file.filename, sheets, file.mime);
 
     let imported = 0;
     let headers = 0;
+    let pdfPages: string[] | null = null;
     if (sheets) {
       await ctx.emit("activity", { text: "识别到表格结构，正在导入数据" });
       const { count, headers: h } = await importBoqFromSheets(
@@ -198,6 +202,38 @@ registerTool({
       imported += count;
       headers += h;
       imported += await importQuotationsFromSheets(ctx.projectId, file.id, sheets);
+    } else if (isPdf) {
+      await ctx.emit("activity", { text: "正在提取 PDF 文本层" });
+      const { extractPdfText, detectBoqLines } = await import("@file/pdf");
+      pdfPages = await extractPdfText(buffer);
+      const boqLines = detectBoqLines(pdfPages);
+      if (boqLines.length >= 5) {
+        await ctx.emit("activity", { text: `识别到 ${boqLines.length} 条清单行，正在导入` });
+        const { parseSemanticFeature, inferDiscipline } = await import("@cost-engine/semantic");
+        const { lineTotal, round2, round3 } = await import("@cost-engine/money");
+        const { toJson } = await import("@shared/json");
+        await prisma.boqItem.createMany({
+          data: boqLines.map((l, i) => ({
+            projectId: ctx.projectId,
+            fileId: file.id,
+            sheetName: "PDF文本层",
+            rowIndex: l.line,
+            code: l.code,
+            name: l.name,
+            rawFeature: l.feature,
+            unit: l.unit,
+            quantity: round3(l.quantity),
+            unitPrice: round2(l.unitPrice),
+            totalPrice: lineTotal(l.quantity, l.unitPrice).toDecimalPlaces(2),
+            sortOrder: i,
+            discipline: inferDiscipline(l.name, l.feature, ""),
+            features: toJson(parseSemanticFeature(l.name, l.feature)),
+          })),
+        });
+        imported = boqLines.length;
+        kind = "BOQ_TENDER";
+        confidence = 0.7;
+      }
     }
 
     const meta = {
@@ -211,11 +247,16 @@ registerTool({
             .filter(([, v]) => v !== undefined)
             .map(([k, v]) => `${k}:${(v as number) + 1}`),
         })) ?? [],
+      pages: pdfPages ?? undefined,
       classifyConfidence: confidence,
     };
     await prisma.projectFile.update({
       where: { id: file.id },
-      data: { kind, status: sheets ? "PARSED" : "FAILED", meta: JSON.stringify(meta) },
+      data: {
+        kind,
+        status: sheets || pdfPages ? "PARSED" : "FAILED",
+        meta: JSON.stringify(meta),
+      },
     });
 
     // fact extraction — FILE_EXTRACTED, never INFERRED masquerading
@@ -239,6 +280,17 @@ registerTool({
         agentRunId: ctx.runId,
       });
 
+    const views = [
+      ...(imported ? [{ kind: "boqTable" as const, id: "view:boq", title: "工程量清单" }] : []),
+      ...(pdfPages
+        ? [{
+            kind: "document" as const,
+            id: `view:doc:${file.id}`,
+            title: file.filename,
+            pages: pdfPages,
+          }]
+        : []),
+    ];
     return {
       observation: {
         filename: file.filename,
@@ -247,8 +299,9 @@ registerTool({
         imported,
         sectionHeaders: headers,
         sheets: meta.sheets,
+        pdfPages: pdfPages?.length,
       },
-      views: [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }],
+      views,
       receipts: [
         {
           actionType: "FILE_IMPORT",

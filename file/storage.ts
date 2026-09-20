@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 
@@ -8,6 +8,7 @@ export interface StorageProvider {
   put(buffer: Buffer, ext: string): Promise<string>;
   get(storageKey: string): Promise<Buffer>;
   resolve(storageKey: string): string;
+  delete(storageKey: string): Promise<void>;
 }
 
 const root = () => path.resolve(process.cwd(), process.env.STORAGE_DIR ?? "./storage");
@@ -25,6 +26,9 @@ export class LocalStorage implements StorageProvider {
   }
   resolve(storageKey: string): string {
     return path.join(root(), storageKey);
+  }
+  async delete(storageKey: string): Promise<void> {
+    await unlink(path.join(root(), storageKey)).catch(() => {});
   }
 }
 

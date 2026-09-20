@@ -21,6 +21,7 @@
     "exceljs": "4.4.0",
     "lucide-react": "0.545.0",
     "next": "^15.5.25",
+    "pdfjs-dist": "^4.10.38",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "tailwind-merge": "3.3.1",

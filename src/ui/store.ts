@@ -40,6 +40,7 @@ interface State {
   upload(file: File): Promise<void>;
   patchItem(id: string, patch: Partial<BoqItemDTO>): Promise<void>;
   reloadBoq(): Promise<void>;
+  refreshMeta(): Promise<void>;
   streamRun(runId: string): Promise<void>;
   setActiveView(id: string): void;
   handleEvent(e: AgentEventDTO, runId: string): void;
@@ -191,6 +192,13 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({ items, boqVersion: s.boqVersion + 1 }));
   },
 
+  async refreshMeta() {
+    const { projectId } = get();
+    if (!projectId) return;
+    const p = await fetch(`/api/projects/${projectId}`).then((r) => r.json());
+    set({ projectName: p.name, files: p.files ?? [], facts: p.facts ?? [] });
+  },
+
   setActiveView(id) {
     set({ activeViewId: id });
   },
@@ -269,7 +277,7 @@ export const useStore = create<State>((set, get) => ({
     // refresh data after mutations
     if (e.type === "receipt" || (e.type === "tool_finished" && e.payload.tool === "boq.update")) {
       void get().reloadBoq();
-      void get().init(get().projectId!); // refresh facts/files
+      void get().refreshMeta();
     }
   },
 }));

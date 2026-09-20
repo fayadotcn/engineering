@@ -185,6 +185,54 @@ registerTool({
   },
 });
 
+registerTool({
+  name: "boq.compareFiles",
+  description: "两版清单对审：按编码/语义对齐，输出价差/量差/独有项与总价差额（招标vs中标vs结算）",
+  implemented: true,
+  schema: z.object({
+    fileAId: z.string().optional().describe("基准文件；缺省取最早的清单文件"),
+    fileBId: z.string().optional().describe("对比文件；缺省取最新的清单文件"),
+  }),
+  handler: async (ctx, args: { fileAId?: string; fileBId?: string }) => {
+    const { prisma } = await import("@database/client");
+    const files = await prisma.projectFile.findMany({
+      where: { projectId: ctx.projectId, kind: { startsWith: "BOQ" }, status: "PARSED" },
+      orderBy: { createdAt: "asc" },
+    });
+    if (files.length < 2 && !args.fileAId && !args.fileBId)
+      return { observation: { error: "需要两份清单文件才能对审，请再上传一版（如中标/结算清单）" } };
+    const fileA = args.fileAId ? files.find((f) => f.id === args.fileAId) : files[0];
+    const fileB = args.fileBId ? files.find((f) => f.id === args.fileBId) : files[files.length - 1];
+    if (!fileA || !fileB || fileA.id === fileB.id)
+      return { observation: { error: "文件选择无效" } };
+
+    const items = await listBoq(ctx.projectId);
+    const a = items.filter((i) => i.fileId === fileA.id);
+    const b = items.filter((i) => i.fileId === fileB.id);
+    const { compareBoqSets, compareSummary } = await import("@cost-engine/fileCompare");
+    const rows = compareBoqSets(a, b);
+    const summary = compareSummary(rows);
+    return {
+      observation: { fileA: fileA.filename, fileB: fileB.filename, ...summary },
+      views: [
+        {
+          kind: "fileCompare",
+          id: `view:filecmp:${fileA.id.slice(-4)}-${fileB.id.slice(-4)}`,
+          title: `对审 ${fileA.filename} ↔ ${fileB.filename}`,
+          labelA: fileA.filename,
+          labelB: fileB.filename,
+          rows,
+          summary,
+        },
+      ],
+      message:
+        `对审完成：${fileA.filename} vs ${fileB.filename} — 一致 ${summary.same} 项，` +
+        `价差 ${summary.priceDiff} 项，量差 ${summary.qtyDiff} 项，` +
+        `仅A ${summary.onlyA} 项，仅B ${summary.onlyB} 项，总额差 ${summary.totalDelta} 元`,
+    };
+  },
+});
+
 const patchSchema = z.object({
   id: z.string(),
   unitPrice: z.string().optional(),

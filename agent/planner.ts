@@ -107,12 +107,38 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 两版清单对审
+    if (/对审|对比.*清单|清单.*对比|中标.*结算|结算.*对比|两个文件|两版/.test(m))
+      return {
+        steps: [{ tool: "boq.compareFiles", args: {}, activity: "正在对齐两版清单" }],
+      };
+
     // 定额测算: "按四川2020定额测算" / "定额组价" / "测算一下"
     if (/定额|组价|测算/.test(m)) {
       return {
         steps: [
           { tool: "quota.match", args: {}, activity: "正在匹配定额子目" },
           { tool: "quota.calculate", args: {}, activity: "正在按定额测算综合单价" },
+        ],
+      };
+    }
+
+    // 材料价格历史
+    if (/价格历史|历史价|历次询价|价格走势|价格轨迹/.test(m)) {
+      const nameMatch = m.match(
+        /([一-龥A-Za-z0-9x×*+\-]{2,20}?)的?(?:价格历史|历史价|价格走势|价格轨迹|历次询价)/
+      );
+      let materialName = nameMatch?.[1]
+        ?.replace(/^(查一下|查|看一下|看看|帮我|请|把|的)+/, "")
+        .replace(/(材料|物料)$/, "");
+      if (materialName && /^(全部|所有|各种|各种类)/.test(materialName)) materialName = "";
+      return {
+        steps: [
+          {
+            tool: "material.getPriceHistory",
+            args: materialName ? { materialName } : {},
+            activity: "正在汇总历次询价价格",
+          },
         ],
       };
     }

@@ -2,8 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore, type ConvBlock } from "./store";
 import {
-  AnomalyTable, BoqTable, Breakdown, DiffView, ExportResult, FactList,
-  FileList, QuotaResult, QuotationMatch,
+  AnomalyTable, BoqTable, Breakdown, DiffView, DocumentView, ExportResult,
+  FactList, FileCompareView, FileList, QuotaResult, QuotationMatch,
 } from "./views";
 import type { WorkspaceView } from "@shared/types";
 import {
@@ -23,6 +23,11 @@ const TOOL_LABEL: Record<string, string> = {
   "material.compareQuotation": "匹配询价",
   "material.applyQuotation": "写回询价",
   "material.search": "搜索材料",
+  "material.getPriceHistory": "价格历史",
+  "boq.compareFiles": "清单对审",
+  "quota.match": "匹配定额",
+  "quota.calculate": "定额组价",
+  "project.setFact": "写入项目事实",
   "cost.calculate": "金额计算",
   "cost.aggregate": "金额汇总",
   "cost.professionalBreakdown": "专业占比",
@@ -139,6 +144,10 @@ function ViewRenderer({ view }: { view: WorkspaceView }) {
       return <Breakdown view={view} />;
     case "quotaResult":
       return <QuotaResult view={view} />;
+    case "fileCompare":
+      return <FileCompareView view={view} />;
+    case "document":
+      return <DocumentView view={view} />;
     case "diff":
       return <DiffView view={view} />;
     case "factList":

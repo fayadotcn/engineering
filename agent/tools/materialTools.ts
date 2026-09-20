@@ -25,9 +25,59 @@ registerTool({
 
 registerTool({
   name: "material.getPriceHistory",
-  description: "材料价格历史（规划中）",
-  implemented: false,
-  schema: z.object({ materialName: z.string() }),
+  description: "材料询价价格历史：同名称+规格材料在项目历次询价文件中的价格轨迹",
+  implemented: true,
+  schema: z.object({ materialName: z.string().optional() }),
+  handler: async (ctx, args: { materialName?: string }) => {
+    const { prisma } = await import("@database/client");
+    const quotes = await prisma.quotationItem.findMany({
+      where: { projectId: ctx.projectId },
+      include: { file: { select: { filename: true, createdAt: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    const norm = (s: string) => s.replace(/\s/g, "").toUpperCase();
+    const q = args.materialName ? norm(args.materialName) : null;
+    const groups = new Map<string, { name: string; spec: string; points: { price: string; file: string; date: string }[] }>();
+    for (const it of quotes) {
+      if (q && !norm(it.materialName).includes(q)) continue;
+      const key = `${norm(it.materialName)}|${norm(it.spec)}`;
+      const g = groups.get(key) ?? { name: it.materialName, spec: it.spec, points: [] };
+      g.points.push({
+        price: it.price.toString(),
+        file: it.file?.filename ?? "手工录入",
+        date: (it.file?.createdAt ?? it.createdAt).toISOString().slice(0, 10),
+      });
+      groups.set(key, g);
+    }
+    let filtered = groups;
+    let note = "";
+    if (q && groups.size === 0) {
+      // 过滤词没命中任何材料名 —— 回退展示全部，避免误导为空
+      filtered = new Map();
+      for (const it of quotes) {
+        const key = `${norm(it.materialName)}|${norm(it.spec)}`;
+        const g = filtered.get(key) ?? { name: it.materialName, spec: it.spec, points: [] };
+        g.points.push({
+          price: it.price.toString(),
+          file: it.file?.filename ?? "手工录入",
+          date: (it.file?.createdAt ?? it.createdAt).toISOString().slice(0, 10),
+        });
+        filtered.set(key, g);
+      }
+      note = `未找到「${args.materialName}」，以下为全部询价材料`;
+    }
+    const changed = [...filtered.values()].filter(
+      (g) => new Set(g.points.map((p) => p.price)).size > 1
+    );
+    return {
+      observation: {
+        materials: filtered.size,
+        priceChanged: changed.length,
+        detail: [...filtered.values()].slice(0, 30),
+      },
+      message: `${note ? note + "；" : ""}共 ${filtered.size} 种材料有询价记录，${changed.length} 种存在多次不同价格`,
+    };
+  },
 });
 
 registerTool({

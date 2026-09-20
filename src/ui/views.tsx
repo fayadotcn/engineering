@@ -5,6 +5,7 @@ import type {
   AnomalyRow,
   BreakdownSlice,
   DiffRow,
+  FileCompareRow,
   QuotaResultRow,
   QuotationMatchRow,
   WorkspaceView,
@@ -43,6 +44,8 @@ export function BoqTable() {
   const { items, patchItem } = useStore();
   const [editing, setEditing] = useState<{ id: string; field: "unitPrice" | "quantity" } | null>(null);
   const [draft, setDraft] = useState("");
+  const [limit, setLimit] = useState(300);
+  const [query, setQuery] = useState("");
 
   const commit = async () => {
     if (!editing) return;
@@ -50,8 +53,32 @@ export function BoqTable() {
     setEditing(null);
   };
 
+  const filtered = query.trim()
+    ? items.filter(
+        (i) =>
+          i.name.includes(query.trim()) ||
+          i.code.includes(query.trim()) ||
+          i.rawFeature.includes(query.trim())
+      )
+    : items;
+  const shown = filtered.slice(0, limit);
+
   return (
-    <div className="h-full overflow-auto">
+    <div className="flex h-full flex-col">
+      {items.length > 50 && (
+        <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-3 py-1.5">
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setLimit(300); }}
+            placeholder="过滤名称/编码/特征…"
+            className="h-6 w-52 rounded border border-neutral-200 px-2 text-[11.5px] outline-none focus:border-neutral-400"
+          />
+          <span className="text-[11px] text-neutral-400">
+            {filtered.length === items.length ? `${items.length} 行` : `${filtered.length}/${items.length} 行`}
+          </span>
+        </div>
+      )}
+      <div className="flex-1 overflow-auto">
       <table className="w-full border-collapse text-[12.5px]">
         <thead className="sticky top-0 z-10 bg-white">
           <tr className="border-b border-neutral-200 text-left text-neutral-500">
@@ -66,7 +93,7 @@ export function BoqTable() {
           </tr>
         </thead>
         <tbody>
-          {items.map((it, i) =>
+          {shown.map((it, i) =>
             it.isHeader ? (
               <tr key={it.id} className="bg-neutral-50/80">
                 <td colSpan={8} className="px-2 py-1.5 text-[12px] font-medium text-neutral-600">
@@ -114,11 +141,20 @@ export function BoqTable() {
           )}
         </tbody>
       </table>
+      {filtered.length > shown.length && (
+        <button
+          onClick={() => setLimit((l) => l + 500)}
+          className="mx-auto my-3 block rounded border border-neutral-200 bg-white px-4 py-1.5 text-[11.5px] text-neutral-500 hover:border-neutral-300"
+        >
+          加载更多（还有 {filtered.length - shown.length} 行）
+        </button>
+      )}
       {!items.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">
           清单为空 — 在左侧上传 Excel 清单文件
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -394,6 +430,111 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
   );
 }
 
+/* ---------------- 清单对审 ---------------- */
+
+const CMP_LABEL: Record<string, string> = {
+  SAME: "一致", PRICE_DIFF: "价差", QTY_DIFF: "量差",
+  BOTH_DIFF: "量价均差", ONLY_A: "仅A有", ONLY_B: "仅B有",
+};
+const CMP_STYLE: Record<string, string> = {
+  SAME: "text-neutral-400", PRICE_DIFF: "text-amber-700 bg-amber-50",
+  QTY_DIFF: "text-blue-700 bg-blue-50", BOTH_DIFF: "text-red-600 bg-red-50",
+  ONLY_A: "text-neutral-600 bg-neutral-100", ONLY_B: "text-green-700 bg-green-50",
+};
+
+export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind: "fileCompare" }> }) {
+  const [filter, setFilter] = useState<string>("DIFF");
+  const rows = view.rows.filter((r) =>
+    filter === "ALL" ? true
+    : filter === "DIFF" ? r.status !== "SAME"
+    : r.status === filter
+  );
+  const s = view.summary;
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-4 py-2 text-[12px]">
+        <span className="text-neutral-500">
+          差额合计 <b className="mono text-neutral-800">{fmtMoney(s.totalDelta)}</b> 元
+        </span>
+        <div className="ml-auto flex gap-1">
+          {[
+            ["DIFF", `差异 ${s.total - s.same}`],
+            ["ONLY_A", `仅A ${s.onlyA}`],
+            ["ONLY_B", `仅B ${s.onlyB}`],
+            ["SAME", `一致 ${s.same}`],
+            ["ALL", `全部 ${s.total}`],
+          ].map(([k, l]) => (
+            <button
+              key={k}
+              onClick={() => setFilter(k)}
+              className={cn(
+                "rounded px-2 py-1 text-[11.5px]",
+                filter === k ? "bg-neutral-900 text-white" : "text-neutral-500 hover:bg-neutral-100"
+              )}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 overflow-auto">
+        <table className="w-full border-collapse text-[12px]">
+          <thead className="sticky top-0 bg-white">
+            <tr className="border-b border-neutral-200 text-left text-neutral-500">
+              <th className="w-24 px-2 py-1.5 font-normal">编码</th>
+              <th className="px-2 py-1.5 font-normal">名称</th>
+              <th className="w-16 px-2 py-1.5 font-normal">状态</th>
+              <th className="w-16 px-2 py-1.5 text-right font-normal" title={view.labelA}>A量</th>
+              <th className="w-16 px-2 py-1.5 text-right font-normal" title={view.labelB}>B量</th>
+              <th className="w-20 px-2 py-1.5 text-right font-normal">A单价</th>
+              <th className="w-20 px-2 py-1.5 text-right font-normal">B单价</th>
+              <th className="w-24 px-2 py-1.5 text-right font-normal">差额</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key} className="border-b border-neutral-100">
+                <td className="mono px-2 py-1 text-neutral-500">{r.code || "—"}</td>
+                <td className="max-w-44 truncate px-2 py-1" title={r.name}>{r.name}</td>
+                <td className="px-2 py-1">
+                  <span className={cn("rounded px-1.5 py-0.5 text-[10.5px]", CMP_STYLE[r.status])}>
+                    {CMP_LABEL[r.status]}
+                  </span>
+                </td>
+                <td className="mono px-2 py-1 text-right">{r.aQty ?? "—"}</td>
+                <td className={cn("mono px-2 py-1 text-right", r.qtyDelta && "font-medium text-blue-700")}>{r.bQty ?? "—"}</td>
+                <td className="mono px-2 py-1 text-right">{r.aPrice ?? "—"}</td>
+                <td className={cn("mono px-2 py-1 text-right", r.priceDelta && "font-medium text-amber-700")}>{r.bPrice ?? "—"}</td>
+                <td className={cn("mono px-2 py-1 text-right", Number(r.totalDelta) !== 0 && "font-medium")}>
+                  {r.totalDelta ? fmtMoney(r.totalDelta) : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- PDF 文档 ---------------- */
+
+export function DocumentView({ view }: { view: Extract<WorkspaceView, { kind: "document" }> }) {
+  return (
+    <div className="h-full space-y-4 overflow-auto p-6">
+      {view.pages.map((p, i) => (
+        <div key={i} className="rounded-md border border-neutral-200 bg-white p-5 shadow-sm">
+          <div className="mb-2 text-[10.5px] text-neutral-300">第 {i + 1} 页</div>
+          <pre className="whitespace-pre-wrap font-sans text-[12px] leading-relaxed text-neutral-700">{p}</pre>
+        </div>
+      ))}
+      {!view.pages.length && (
+        <div className="flex h-40 items-center justify-center text-xs text-neutral-400">无文本内容</div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- 事实台账 ---------------- */
 
 export function FactList() {
@@ -454,15 +595,30 @@ export function ExportResult({ view }: { view: Extract<WorkspaceView, { kind: "e
 }
 
 export function FileList() {
-  const { files } = useStore();
+  const { files, refreshMeta, reloadBoq } = useStore();
+  const [busy, setBusy] = useState<string | null>(null);
+  const remove = async (id: string, name: string) => {
+    if (!confirm(`删除「${name}」及其导入的全部数据？`)) return;
+    setBusy(id);
+    await fetch(`/api/files/${id}`, { method: "DELETE" });
+    await Promise.all([refreshMeta(), reloadBoq()]);
+    setBusy(null);
+  };
   return (
     <div className="h-full space-y-px overflow-auto p-4">
       {files.map((f) => (
-        <div key={f.id} className="flex items-center gap-3 rounded-md border border-neutral-100 bg-white px-3 py-2 text-[12.5px]">
+        <div key={f.id} className="group flex items-center gap-3 rounded-md border border-neutral-100 bg-white px-3 py-2 text-[12.5px]">
           <FileSpreadsheet size={14} className="text-neutral-400" />
           <span>{f.filename}</span>
           <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-500">{f.kindLabel}</span>
           <span className="ml-auto text-[11px] text-neutral-400">{f.status}</span>
+          <button
+            onClick={() => remove(f.id, f.filename)}
+            disabled={busy === f.id}
+            className="invisible rounded px-1.5 py-0.5 text-[11px] text-red-500 hover:bg-red-50 group-hover:visible disabled:opacity-40"
+          >
+            删除
+          </button>
         </div>
       ))}
       {!files.length && (

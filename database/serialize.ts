@@ -33,6 +33,7 @@ export function toBoqDTO(it: BoqItem): BoqItemDTO {
 export function toQuoteDTO(q: QuotationItem): QuotationItemDTO {
   return {
     id: q.id,
+    fileId: q.fileId,
     materialName: q.materialName,
     spec: q.spec,
     unit: q.unit,
@@ -40,6 +41,7 @@ export function toQuoteDTO(q: QuotationItem): QuotationItemDTO {
     price: q.price.toString(),
     sheetName: q.sheetName,
     features: fromJson<BoqSemanticFeature>(q.features, {}),
+    createdAt: q.createdAt.toISOString(),
   };
 }
 

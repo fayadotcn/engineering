@@ -69,6 +69,7 @@ export interface BoqItemDTO {
 
 export interface QuotationItemDTO {
   id: string;
+  fileId?: string | null;
   materialName: string;
   spec: string;
   unit: string;
@@ -76,6 +77,7 @@ export interface QuotationItemDTO {
   price: string;
   sheetName: string;
   features: BoqSemanticFeature;
+  createdAt?: string;
 }
 
 export interface CostFactDTO {
@@ -135,6 +137,24 @@ export type WorkspaceView =
       mgmtRate: number;
       profitRate: number;
     }
+  | {
+      kind: "fileCompare";
+      id: string;
+      title: string;
+      labelA: string;
+      labelB: string;
+      rows: FileCompareRow[];
+      summary: {
+        total: number; same: number; priceDiff: number;
+        qtyDiff: number; onlyA: number; onlyB: number; totalDelta: string;
+      };
+    }
+  | {
+      kind: "document";
+      id: string;
+      title: string;
+      pages: string[];
+    }
   | { kind: "factList"; id: string; title: string; facts: CostFactDTO[] }
   | {
       kind: "exportResult";
@@ -191,6 +211,24 @@ export interface DiffRow {
   field: string;
   before: string;
   after: string;
+}
+
+export interface FileCompareRow {
+  key: string;
+  code: string;
+  name: string;
+  status: "SAME" | "PRICE_DIFF" | "QTY_DIFF" | "BOTH_DIFF" | "ONLY_A" | "ONLY_B";
+  aId?: string;
+  bId?: string;
+  aQty?: string;
+  bQty?: string;
+  aPrice?: string;
+  bPrice?: string;
+  aTotal?: string;
+  bTotal?: string;
+  qtyDelta?: string;
+  priceDelta?: string;
+  totalDelta?: string;
 }
 
 export interface QuotaResultRow {
