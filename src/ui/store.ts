@@ -12,7 +12,7 @@ export type ConvBlock =
   | { type: "user"; text: string }
   | { type: "agent"; text: string; runId: string }
   | { type: "activity"; text: string; runId: string; live: boolean }
-  | { type: "thought"; text: string; runId: string }
+  | { type: "thought"; text: string; runId: string; streamId?: string; live?: boolean }
   | { type: "tool"; tool: string; status: string; ms?: number; runId: string; args?: string; resultMsg?: string }
   | { type: "receipt"; receiptId: string; summary: string; actionType: string; runId: string }
   | { type: "confirm"; confirmId: string; runId: string; tool: string; description: string; decided?: "approved" | "rejected" }
@@ -334,8 +334,32 @@ export const useStore = create<State>((set, get) => ({
           blocks.push({ type: "activity", text: p.text, runId, live: true });
           return { blocks };
         }
-        case "thought":
+        case "thought_delta": {
+          // 模型流式增量：同 streamId 原位更新，呈现打字机效果
+          const sid = (p.streamId as string) ?? "s0";
+          const blocks = [...s.blocks];
+          const i = blocks.findIndex(
+            (b) => b.type === "thought" && b.runId === runId && b.streamId === sid
+          );
+          const blk = { type: "thought" as const, text: p.text, runId, streamId: sid, live: true };
+          if (i >= 0) blocks[i] = blk; else blocks.push(blk);
+          return { blocks };
+        }
+        case "thought": {
+          // 持久化 thought：同 streamId 的流式预览块落定；否则追加
+          const sid = p.streamId as string | undefined;
+          if (sid) {
+            const blocks = [...s.blocks];
+            const i = blocks.findIndex(
+              (b) => b.type === "thought" && b.runId === runId && b.streamId === sid
+            );
+            if (i >= 0) {
+              blocks[i] = { type: "thought", text: p.text, runId, streamId: sid, live: false };
+              return { blocks };
+            }
+          }
           return { blocks: [...s.blocks, { type: "thought", text: p.text, runId }] };
+        }
         case "tool_started":
           return {
             blocks: [
@@ -355,9 +379,10 @@ export const useStore = create<State>((set, get) => ({
           return { blocks };
         }
         case "message": {
-          const blocks = s.blocks.map((b) =>
-            b.type === "activity" && b.live ? { ...b, live: false } : b
-          );
+          // 最终答复到达：同文本的流式预览块（live thought）移除，避免与消息重复
+          const blocks = s.blocks
+            .filter((b) => !(b.type === "thought" && b.live))
+            .map((b) => (b.type === "activity" && b.live ? { ...b, live: false } : b));
           return { blocks: [...blocks, { type: "agent", text: p.text, runId }] };
         }
         case "receipt":
@@ -423,8 +448,9 @@ export const useStore = create<State>((set, get) => ({
         case "error":
           return { blocks: [...s.blocks, { type: "error", text: p.text, runId }] };
         case "run_finished": {
+          // run 结束：未落定的流式预览块转为普通块（若此前 message 已清理则无残留）
           const blocks = s.blocks.map((b) =>
-            b.type === "activity" && b.live ? { ...b, live: false } : b
+            (b.type === "activity" || b.type === "thought") && b.live ? { ...b, live: false } : b
           );
           return { blocks, running: false };
         }

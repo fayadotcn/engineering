@@ -46,6 +46,8 @@ const TOOL_LABEL: Record<string, string> = {
   "project.summary": "项目汇总",
 };
 
+const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
+
 function RevertButton({ receiptId }: { receiptId: string }) {
   const s = useStore();
   const [busy, setBusy] = useState(false);
@@ -191,8 +193,11 @@ function TaskStep({ b }: { b: ConvBlock }) {
   if (b.type === "thought")
     return (
       <div className="flex items-start gap-2 px-1 py-1 text-[12px] leading-relaxed text-neutral-500">
-        <Sparkles size={11} className="mt-1 shrink-0 text-[var(--brand-accent)]" />
-        <span className="whitespace-pre-wrap">{b.text}</span>
+        <Sparkles size={11} className={cn("mt-1 shrink-0 text-[var(--brand-accent)]", b.live && "animate-pulse")} />
+        <span className="whitespace-pre-wrap">
+          {b.text}
+          {b.live && <span className="ml-0.5 inline-block h-3 w-[5px] translate-y-0.5 animate-pulse bg-[var(--brand-accent)]/60" />}
+        </span>
       </div>
     );
   if (b.type === "tool") return <ToolStep b={b} />;
@@ -216,6 +221,12 @@ function TaskStep({ b }: { b: ConvBlock }) {
 
 function TaskCard({ steps, live }: { steps: ConvBlock[]; live: boolean }) {
   const [open, setOpen] = useState(true);
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => setElapsed((v) => v + 1), 1000);
+    return () => clearInterval(t);
+  }, [live]);
   const toolCount = steps.filter((s) => s.type === "tool").length;
   const failed =
     steps.some((s) => s.type === "error") ||
@@ -244,7 +255,7 @@ function TaskCard({ steps, live }: { steps: ConvBlock[]; live: boolean }) {
           {live ? liveActivity?.text ?? "任务进行中" : failed ? "执行异常" : "任务完成"}
         </span>
         <span className="shrink-0 text-[11px] text-neutral-400">
-          {live ? `${doneSteps}/${toolCount || "…"} 步` : `${toolCount} 步`}
+          {live ? `${elapsed}s · ${doneSteps}/${toolCount || "…"} 步` : `${toolCount} 步`}
         </span>
         <ChevronDown
           size={13}

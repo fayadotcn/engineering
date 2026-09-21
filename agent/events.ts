@@ -19,9 +19,16 @@ export function subscribeRun(runId: string, fn: Listener): () => void {
   };
 }
 
-export function makeEmitter(runId: string) {
+export type Emit = {
+  (type: AgentEventType | string, payload: Record<string, unknown>): Promise<void>;
+  /** 瞬时事件：只推 SSE 不落库（模型流式增量）。seq 共享递增保证客户端有序；
+   *  断线重放看不到它——最终态由完整的 thought/message 事件承担。 */
+  live(type: string, payload: Record<string, unknown>): void;
+};
+
+export function makeEmitter(runId: string): Emit {
   let seq = 0;
-  return async function emit(
+  const emit = async function (
     type: AgentEventType | string,
     payload: Record<string, unknown>
   ) {
@@ -30,5 +37,10 @@ export function makeEmitter(runId: string) {
       data: { runId, seq: e.seq, type: e.type, payload: toJson(payload) },
     });
     for (const fn of subscribers.get(runId) ?? []) fn(e);
+  } as Emit;
+  emit.live = (type, payload) => {
+    const e: AgentEventDTO = { seq: seq++, type: type as AgentEventType, payload };
+    for (const fn of subscribers.get(runId) ?? []) fn(e);
   };
+  return emit;
 }

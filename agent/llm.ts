@@ -28,8 +28,8 @@ export function modelConfig(): ModelConfig | null {
 
 interface LLMMsg {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
-  tool_calls?: { id: string; function: { name: string; arguments: string } }[];
+  content: string | null;
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 }
 
@@ -56,6 +56,90 @@ async function callOpenAI(
   if (!res.ok) throw new Error(`模型请求失败 ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   return data.choices[0].message as LLMMsg;
+}
+
+/** 流式调用（DeepSeek/OpenAI 兼容 SSE）：内容增量经 onText 实时回吐，
+ *  tool_calls 按 index 累积拼装；流失败抛错由调用方降级为非流式。 */
+async function callOpenAIStream(
+  cfg: ModelConfig,
+  messages: LLMMsg[],
+  tools: ReturnType<typeof toolSchemasForLLM>,
+  onText: (accumulated: string) => void
+): Promise<LLMMsg> {
+  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${cfg.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages,
+      tools: tools.map((t) => ({ type: "function", function: t })),
+      tool_choice: "auto",
+      temperature: 0.2,
+      stream: true,
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) throw new Error(`模型请求失败 ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.body) throw new Error("模型响应无流");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let content = "";
+  const calls = new Map<number, { id: string; name: string; args: string }>();
+  let lastFlush = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      for (const line of part.split("\n")) {
+        const l = line.trim();
+        if (!l.startsWith("data:")) continue;
+        const data = l.slice(5).trim();
+        if (data === "[DONE]") continue;
+        let json: {
+          choices?: { delta?: {
+            content?: string;
+            tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[];
+          } }[];
+        };
+        try { json = JSON.parse(data); } catch { continue; }
+        const delta = json.choices?.[0]?.delta;
+        if (!delta) continue;
+        if (delta.content) {
+          content += delta.content;
+          const now = Date.now();
+          if (now - lastFlush > 120) { lastFlush = now; onText(content); }
+        }
+        for (const tc of delta.tool_calls ?? []) {
+          const i = tc.index ?? 0;
+          const cur = calls.get(i) ?? { id: "", name: "", args: "" };
+          if (tc.id) cur.id = tc.id;
+          if (tc.function?.name) cur.name += tc.function.name;
+          if (tc.function?.arguments) cur.args += tc.function.arguments;
+          calls.set(i, cur);
+        }
+      }
+    }
+  }
+  if (content) onText(content); // 收尾全量
+  return {
+    role: "assistant",
+    // DeepSeek 严格反序列化：带 tool_calls 时 content 须为 null 而非 ""
+    content: calls.size ? content || null : content,
+    tool_calls: [...calls.values()].filter((c) => c.name).map((c) => ({
+      id: c.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+      type: "function" as const, // DeepSeek 要求显式 type 字段
+      function: { name: c.name, arguments: c.args || "{}" },
+    })),
+  };
 }
 
 const SYSTEM_PROMPT = `你是安装工程造价 Agent，运行在一个造价工作台上。
@@ -181,14 +265,23 @@ export async function runLLMLoop(
   }
 
   for (let round = 0; round < maxRounds; round++) {
-    const msg = await callOpenAI(cfg, messages, tools);
+    const streamId = `r${round}`;
+    let msg: LLMMsg;
+    try {
+      msg = await callOpenAIStream(cfg, messages, tools, (text) => {
+        toolCtx.emit.live?.("thought_delta", { streamId, text: text.slice(0, 1500) });
+      });
+    } catch {
+      msg = await callOpenAI(cfg, messages, tools); // 流式不支持/中断 → 非流式兜底
+    }
     messages.push(msg);
 
     if (!msg.tool_calls?.length) {
+      // 最终答复轮：流式增量已实时预览；完整文本由 message 事件承载，这里不再落 thought 避免重复
       return msg.content || "已完成。";
     }
     if (msg.content?.trim())
-      await toolCtx.emit("thought", { text: msg.content.trim().slice(0, 800) });
+      await toolCtx.emit("thought", { text: msg.content.trim().slice(0, 800), streamId });
     for (const call of msg.tool_calls) {
       let args: unknown = {};
       try {

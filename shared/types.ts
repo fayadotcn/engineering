@@ -292,6 +292,7 @@ export interface QuotaResultRow {
 export type AgentEventType =
   | "activity"
   | "thought"
+  | "thought_delta"
   | "message"
   | "tool_started"
   | "tool_finished"

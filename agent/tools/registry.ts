@@ -9,7 +9,11 @@ export interface ToolContext {
   projectId: string;
   runId: string;
   userId: string;
-  emit: (type: string, payload: Record<string, unknown>) => Promise<void>;
+  emit: {
+    (type: string, payload: Record<string, unknown>): Promise<void>;
+    /** 瞬时事件：只推 SSE 不落库（流式增量等高频事件用） */
+    live?(type: string, payload: Record<string, unknown>): void;
+  };
 }
 
 export interface ToolReceiptDraft {
