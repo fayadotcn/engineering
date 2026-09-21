@@ -1014,6 +1014,67 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
   );
 }
 
+/* ---------------- 费用汇总表（取费） ---------------- */
+
+export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: "feeSummary" }> }) {
+  return (
+    <div className="h-full overflow-auto p-4">
+      {view.unpricedCount > 0 && (
+        <div
+          className="mb-3 rounded-lg px-3 py-2 text-[12px]"
+          style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
+        >
+          {view.unpricedCount} 项清单未定价，以下费用未包含其金额——可先「用材料库补齐未定价项」
+        </div>
+      )}
+      <div className="xl-sheet overflow-hidden rounded-lg">
+        <table className="xl-table">
+          <thead>
+            <tr>
+              <th className="w-16 text-center">序号</th>
+              <th>费用名称</th>
+              <th>计算基础</th>
+              <th className="w-20 text-right">费率</th>
+              <th className="w-32 text-right">金额（元）</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            {view.rows.map((r) => (
+              <tr
+                key={r.seq}
+                style={
+                  r.level === "total"
+                    ? { background: "color-mix(in srgb, var(--brand-accent) 8%, var(--surface))" }
+                    : r.level === "subtotal"
+                      ? { background: "var(--sidebar)" }
+                      : undefined
+                }
+              >
+                <td className="text-center text-neutral-500">{r.seq}</td>
+                <td className={cn(r.level !== "leaf" && "font-medium")}>{r.name}</td>
+                <td className="text-neutral-500">{r.basis}</td>
+                <td className="mono text-right">{r.rate ?? "—"}</td>
+                <td className={cn("mono text-right", r.level === "total" && "text-[13px] font-semibold", r.level === "subtotal" && "font-medium")}>
+                  {fmtMoney(r.amount)}
+                </td>
+                <td className="text-[11.5px] text-neutral-400">{r.note ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 flex items-baseline justify-end gap-2 text-[12px] text-neutral-500">
+        含税工程造价
+        <span className="mono text-xl font-semibold" style={{ color: "var(--ink-1)" }}>
+          {fmtMoney(view.grandTotal)}
+        </span>
+        元
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 清单对审 ---------------- */
 
 const CMP_LABEL: Record<string, string> = {

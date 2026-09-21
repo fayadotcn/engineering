@@ -4,7 +4,7 @@ import { listBoq } from "@boq/service";
 import { listQuotations } from "@material/service";
 import { calcQuota, matchQuota, mainPriceKey, getQuotaLibrary } from "@quota/service";
 import { findLibraryPrice } from "@dataset/service";
-import { getFact } from "@project/facts";
+import { getFact, parseRateValue } from "@project/facts";
 import { D } from "@cost-engine/money";
 
 registerTool({
@@ -97,9 +97,9 @@ registerTool({
     const mgmtFact = (await getFact(ctx.projectId, "管理费率"))?.value;
     const profitFact = (await getFact(ctx.projectId, "利润率"))?.value;
     const mgmtRate =
-      args.mgmtRate ?? (mgmtFact ? Number(mgmtFact.replace("%", "")) / 100 : 0.16);
+      args.mgmtRate ?? parseRateValue(mgmtFact) ?? 0.16;
     const profitRate =
-      args.profitRate ?? (profitFact ? Number(profitFact.replace("%", "")) / 100 : 0.09);
+      args.profitRate ?? parseRateValue(profitFact) ?? 0.09;
 
     const lib = await getQuotaLibrary();
     const rows = calcQuota(leaf, { mainPrices, mgmtRate, profitRate, lib });

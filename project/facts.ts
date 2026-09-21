@@ -60,3 +60,23 @@ export async function factMap(projectId: string): Promise<Map<string, CostFactDT
   for (const f of facts) if (!map.has(f.key)) map.set(f.key, f);
   return map;
 }
+
+/**
+ * 费率事实归一化：「9%」/「9」/「0.09」→ 0.09。>1 视为百分数，≤1 视为小数。
+ * 返回 null 表示无法解析（消费方按未设置处理，绝不 NaN）。
+ */
+export function parseRateValue(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const v = Number(String(raw).replace(/[%\s]/g, ""));
+  if (!Number.isFinite(v)) return null;
+  return Math.abs(v) > 1 ? v / 100 : v;
+}
+
+/** 金额事实归一化：「50万」→ 500000，「5000元」→ 5000。 */
+export function parseAmountValue(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const s = String(raw).replace(/[,，\s元]/g, "");
+  const wan = s.match(/^([\d.]+)万$/);
+  const v = wan ? Number(wan[1]) * 10000 : Number(s);
+  return Number.isFinite(v) ? v : null;
+}

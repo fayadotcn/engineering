@@ -218,7 +218,7 @@ registerTool({
 
     const { projectTotals, aggregateByDiscipline, aggregateByCategory } = await import("@cost-engine/aggregate");
     const { findSameItemDifferentPrice, findPriceAnomalies } = await import("@cost-engine/compare");
-    const { getFacts } = await import("@project/facts");
+    const { getFacts, parseRateValue } = await import("@project/facts");
     const ExcelJS = (await import("exceljs")).default;
 
     const totals = projectTotals(items);
@@ -234,8 +234,9 @@ registerTool({
     s1.addRow(["已定价项数", totals.pricedCount]);
     s1.addRow(["合价合计（不含税）", totals.totalAmount]);
     const taxFact = facts.find((f) => f.key === "税率");
-    if (taxFact) {
-      const withTaxAmt = D(totals.totalAmount).times(1 + Number(taxFact.value));
+    const taxRate = parseRateValue(taxFact?.value);
+    if (taxFact && taxRate !== null) {
+      const withTaxAmt = D(totals.totalAmount).times(1 + taxRate);
       s1.addRow([`税率 ${taxFact.value}`, `含税合计 ${withTaxAmt.toFixed(2)} 元`]);
     }
 

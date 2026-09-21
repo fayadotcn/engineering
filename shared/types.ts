@@ -165,6 +165,18 @@ export type WorkspaceView =
       pages: string[];
     }
   | { kind: "factList"; id: string; title: string; facts: CostFactDTO[] }
+  | {
+      kind: "feeSummary";
+      id: string;
+      title: string;
+      rows: {
+        seq: string; name: string; basis: string;
+        rate: string | null; amount: string;
+        level: "leaf" | "subtotal" | "total"; note?: string;
+      }[];
+      grandTotal: string;
+      unpricedCount: number;
+    }
   | { kind: "overview"; id: string; title: string }
   | { kind: "receipts"; id: string; title: string }
   | {

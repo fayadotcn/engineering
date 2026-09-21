@@ -52,6 +52,8 @@ MODEL_NAME=deepseek-chat
 - `quota.calculate` 主材价查找顺序：项目询价 → 全局材料库（findLibraryPrice）；`material.search`/`getPriceHistory` 并入材料库数据并标注来源。
 - `Dataset.active` 启停开关：`PATCH /api/admin/datasets/[id] {active}`；停用的数据集对所有消费方不可见（材料搜索/取价/定额匹配/缺价匹配一律过滤），行数据保留可随时复用。
 - 缺价补价闭环：`material.matchLibrary`（预览，只读，出 quotationMatch 视图）→ `material.fillFromLibrary`（确认门，写回 unitPrice + diff + 回执）；planner 区分「看看缺价」（仅预览）与「补齐/补价」（预览+写回）；总览页未定价卡片可一键触发。
+- 费用汇总：`cost.feeSummary`（cost-engine/fees.ts）分部分项→措施→暂列→规费→税前→税金→含税造价；费率读台账事实（措施费率/规费费率/暂列金额率/暂列金额/税率），未设置计 0 并在行内注明。规费基数为分部分项费的简化口径，行内已标注。
+- 费率/金额事实归一化：`project/facts.ts` 的 `parseRateValue`（"9%"/"9"/"0.09"→0.09）和 `parseAmountValue`（"5万"→50000）；**禁止 `Number(fact.value)`/`D(fact.value)` 直接消费台账值**——"9%" 会得到 NaN 或抛 DecimalError。
 
 ## 测试
 

@@ -4,7 +4,8 @@ import { listBoq, updateBoqItems } from "@boq/service";
 import { aggregateByCategory, aggregateByDiscipline, projectTotals } from "@cost-engine/aggregate";
 import { adjustQuantitiesToTarget } from "@cost-engine/adjust";
 import { D, decStr, round3, sum, withTax } from "@cost-engine/money";
-import { getFact } from "@project/facts";
+import { feeSummary } from "@cost-engine/fees";
+import { getFact, parseRateValue, parseAmountValue } from "@project/facts";
 import type { DiffRow } from "@shared/types";
 
 registerTool({
@@ -18,7 +19,7 @@ registerTool({
     const items = await listBoq(ctx.projectId);
     const t = projectTotals(items);
     const taxFact = (await getFact(ctx.projectId, "税率"))?.value;
-    const tax = args.taxRate ?? (taxFact ? Number(taxFact) : 0);
+    const tax = args.taxRate ?? parseRateValue(taxFact) ?? 0;
     const excl = D(t.totalAmount);
     return {
       observation: {
@@ -45,6 +46,48 @@ registerTool({
         total: sum(leaf.map((i) => i.totalPrice)).toFixed(2),
         count: leaf.length,
       },
+    };
+  },
+});
+
+registerTool({
+  name: "cost.feeSummary",
+  description: "费用汇总（取费）：分部分项费 → 措施费 → 暂列金额 → 规费 → 税金 → 含税造价。费率取项目事实台账",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const rate = async (key: string) => {
+      const f = await getFact(ctx.projectId, key);
+      const v = parseRateValue(f?.value);
+      return { v: D(v ?? 0), set: v !== null };
+    };
+    const measure = await rate("措施费率");
+    const regulation = await rate("规费费率");
+    const provRate = await rate("暂列金额率");
+    const provFact = await getFact(ctx.projectId, "暂列金额");
+    const provAmtVal = parseAmountValue(provFact?.value);
+    const taxF = await getFact(ctx.projectId, "税率");
+    const taxRateVal = parseRateValue(taxF?.value);
+    const tax = { v: D(taxRateVal ?? 0.09), set: taxRateVal !== null };
+    const r = feeSummary(items, {
+      measureRate: measure.v, regulationRate: regulation.v,
+      provisionalRate: provRate.v, provisionalAmount: D(provAmtVal ?? 0),
+      taxRate: tax.v,
+      set: { measure: measure.set, regulation: regulation.set, provisional: provRate.set || provAmtVal !== null, tax: tax.set },
+    });
+    return {
+      observation: {
+        grandTotal: r.grandTotal, preTax: r.preTax, unpricedCount: r.unpricedCount,
+        rows: r.rows.map((x) => ({ name: x.name, rate: x.rate, amount: x.amount })),
+      },
+      views: [
+        {
+          kind: "feeSummary", id: `view:fees:${ctx.runId}`, title: "费用汇总表",
+          rows: r.rows, grandTotal: r.grandTotal, unpricedCount: r.unpricedCount,
+        },
+      ],
+      message: `含税工程造价 ${r.grandTotal} 元（税前 ${r.preTax} 元）${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}`,
     };
   },
 });
@@ -178,7 +221,7 @@ registerTool({
   handler: async (ctx, args) => {
     const items = await listBoq(ctx.projectId);
     const taxFact = (await getFact(ctx.projectId, "税率"))?.value;
-    const tax = args.taxRate ?? (taxFact ? Number(taxFact) : 0);
+    const tax = args.taxRate ?? parseRateValue(taxFact) ?? 0;
     const r = adjustQuantitiesToTarget(items, {
       targetTotal: args.targetTotal,
       taxRate: tax,

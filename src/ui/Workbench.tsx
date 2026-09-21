@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore, type ConvBlock } from "./store";
 import {
   AnomalyTable, BoqTable, Breakdown, DiffView, DocumentView, ExportResult,
-  FactList, FileCompareView, FileList, OverviewView, QuotaResult, QuotationMatch,
+  FactList, FeeSummaryView, FileCompareView, FileList, OverviewView, QuotaResult, QuotationMatch,
   ReceiptsView,
 } from "./views";
 import type { WorkspaceView } from "@shared/types";
@@ -35,6 +35,7 @@ const TOOL_LABEL: Record<string, string> = {
   "project.setFact": "写入项目事实",
   "cost.calculate": "金额计算",
   "cost.aggregate": "金额汇总",
+  "cost.feeSummary": "费用汇总",
   "cost.professionalBreakdown": "专业占比",
   "cost.materialBreakdown": "材料占比",
   "quantity.adjust": "工程量反算",
@@ -387,6 +388,8 @@ function ViewRenderer({ view }: { view: WorkspaceView }) {
       return <Breakdown view={view} />;
     case "quotaResult":
       return <QuotaResult view={view} />;
+    case "feeSummary":
+      return <FeeSummaryView view={view} />;
     case "fileCompare":
       return <FileCompareView view={view} />;
     case "document":

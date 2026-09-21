@@ -65,19 +65,17 @@ export class RulePlanner implements Planner {
       };
     }
 
-    // 写事实: "税率设为9%" / "电缆品牌是上上" / "管理费率=15%"
-    const factMatch = m.match(
-      /(税率|地区|电缆品牌|电线品牌|品牌|管理费率|利润率|价格日期|人工费调整系数)\s*(?:设为|设置为|是|为|=|:|：)\s*([^\s，。,]+)/
-    );
-    if (factMatch) {
+    // 写事实: "税率设为9%" / "电缆品牌是上上" / "措施费率=3%，规费费率2%"（一条消息可写多项）
+    const factMatches = [...m.matchAll(
+      /(税率|地区|电缆品牌|电线品牌|品牌|管理费率|利润率|价格日期|人工费调整系数|措施费率|规费费率|暂列金额率|暂列金额)\s*(?:设为|设置为|是|为|=|:|：)\s*([^\s，。,；;]+)/g
+    )];
+    if (factMatches.length) {
       return {
-        steps: [
-          {
-            tool: "project.setFact",
-            args: { key: factMatch[1], value: factMatch[2] },
-            activity: "正在写入项目台账",
-          },
-        ],
+        steps: factMatches.map((fm) => ({
+          tool: "project.setFact",
+          args: { key: fm[1], value: fm[2] },
+          activity: `正在写入台账：${fm[1]} = ${fm[2]}`,
+        })),
       };
     }
 
@@ -88,6 +86,10 @@ export class RulePlanner implements Planner {
       return {
         steps: [{ tool: "report.exportExcel", args: {}, activity: "正在导出 Excel" }],
       };
+
+    // 费用汇总/取费（无目标金额时）：分部分项→措施→规费→税金→含税造价
+    if (/费用汇总|取费|造价汇总|汇总表|含税总价|总价是多少|总造价|费用构成/.test(m))
+      return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用" }] };
 
     // 工程量反算: 总价控制到 X
     const target = m.match(/(?:控制|调|调整|降|到|为)\D{0,6}([\d,]+\.?\d{0,2})/);
