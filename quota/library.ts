@@ -19,6 +19,8 @@ export interface QuotaEntry {
     connection?: RegExp;
     system?: string;
     keywords?: RegExp;
+    /** 关联的清单编码前9位（计价软件的清单↔定额映射，命中是强信号） */
+    codes?: Set<string>;
   };
 }
 

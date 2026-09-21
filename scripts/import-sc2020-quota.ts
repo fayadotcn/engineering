@@ -1,0 +1,149 @@
+// 一次性导入：清单计价专家N10 本地 SQLite 库 → Dataset + QuotaRow
+// 数据源:
+//   ZY_N8QD_SC20.DB3  az_zy  清单编码(xmbh)↔定额编号(debh) 映射
+//   DE_SC20.DB3       az_de  定额明细(人材机/基价)  az_yl 用料  zh_cl 材料  az_fb 分册
+// 用法: npx tsx scripts/import-sc2020-quota.ts
+import { DatabaseSync } from "node:sqlite";
+import { prisma } from "@database/client";
+import { parseSemanticFeature } from "@cost-engine/semantic";
+
+const N10 = "C:/Program Files/清单计价专家N10/DATABASE";
+const ZY_DB = `${N10}/ZY_N8QD_SC20.DB3`;
+const DE_DB = `${N10}/DE_SC20.DB3`;
+
+interface DeRow {
+  debh: string; xmmc: string; dw: string;
+  jj: number | null; rgf: number | null; clf: number | null; jxf: number | null;
+  gcnr: string | null; zjbh: string | null;
+}
+
+const unitScale = (dw: string) => {
+  const m = String(dw).match(/^(\d+(?:\.\d+)?)/);
+  return m ? Number(m[1]) : 1;
+};
+const baseUnit = (dw: string) => String(dw).replace(/^\d+(?:\.\d+)?/, "").trim();
+
+/** 最长公共子串长度（用于主材名 vs 定额名称的重合度） */
+function lcsLen(a: string, b: string): number {
+  let best = 0;
+  for (let i = 0; i < a.length; i++)
+    for (let j = i + 2; j <= a.length; j++)
+      if (b.includes(a.slice(i, j)) && j - i > best) best = j - i;
+  return best;
+}
+
+async function main() {
+  const zy = new DatabaseSync(ZY_DB, { readOnly: true });
+  const de = new DatabaseSync(DE_DB, { readOnly: true });
+
+  // 1) 清单编码映射: debh → Set<xmbh(9位)>
+  const codeMap = new Map<string, Set<string>>();
+  for (const r of zy.prepare("SELECT debh, xmbh FROM az_zy WHERE xmbh != '' AND debh != ''").all() as { debh: string; xmbh: string }[]) {
+    if (!codeMap.has(r.debh)) codeMap.set(r.debh, new Set());
+    codeMap.get(r.debh)!.add(r.xmbh.trim());
+  }
+
+  // 2) 材料主表
+  const clMap = new Map<string, { clmc: string; cldw: string }>();
+  for (const c of de.prepare("SELECT clbh, clmc, cldw FROM zh_cl").all() as { clbh: string; clmc: string; cldw: string }[])
+    clMap.set(c.clbh, { clmc: c.clmc ?? "", cldw: c.cldw ?? "" });
+
+  // 3) 用料: debh → yl rows
+  const ylMap = new Map<string, { clbh: string; clyl: number }[]>();
+  for (const y of de.prepare("SELECT debh, clbh, clyl FROM az_yl").all() as { debh: string; clbh: string; clyl: number }[]) {
+    if (!ylMap.has(y.debh)) ylMap.set(y.debh, []);
+    ylMap.get(y.debh)!.push(y);
+  }
+
+  // 4) 分册名: 5A → A.机械设备安装工程
+  const fbMap = new Map<string, string>();
+  for (const f of de.prepare("SELECT fbid, fbmc FROM az_fb").all() as { fbid: string; fbmc: string }[])
+    fbMap.set(f.fbid, f.fbmc);
+
+  const des = de.prepare("SELECT * FROM az_de ORDER BY fid").all() as unknown as DeRow[];
+  console.log(`az_de 定额子目: ${des.length} 条`);
+
+  // 5) Dataset 记录（幂等：同名数据集先删后建）
+  const DS_NAME = "四川省2020建设工程工程量清单计价定额·安装（N10导入）";
+  const old = await prisma.dataset.findFirst({ where: { name: DS_NAME } });
+  if (old) await prisma.dataset.delete({ where: { id: old.id } });
+  const ds = await prisma.dataset.create({
+    data: {
+      kind: "QUOTA",
+      name: DS_NAME,
+      filename: "ZY_N8QD_SC20.DB3 + DE_SC20.DB3",
+      storageKey: "n10://DATABASE/SC20",
+      status: "PARSED",
+      rowCount: des.length,
+      meta: JSON.stringify({
+        source: "清单计价专家N10",
+        edition: "四川2020",
+        divisions: [...fbMap.values()],
+        note: "含清单编码映射(az_zy)与主材耗量(az_yl+zh_cl)",
+      }),
+    },
+  });
+
+  // 6) 逐条转换 + 批量入库
+  let withMain = 0;
+  const rows = des.map((r) => {
+    const scale = unitScale(r.dw);
+    const bu = baseUnit(r.dw);
+
+    // 主材挑选：与子目名称重合度最高 → 单位与定额基单位一致 → 耗量最大
+    const yls = (ylMap.get(r.debh) ?? [])
+      .map((y) => ({ ...y, cl: clMap.get(y.clbh) }))
+      .filter((y) => y.cl?.clmc);
+    let mainName = "";
+    let mainQty = 0;
+    if (yls.length) {
+      const ranked = yls
+        .map((y) => ({
+          ...y,
+          score: lcsLen(y.cl!.clmc, r.xmmc) * 100 + (y.cl!.cldw === bu ? 30 : 0) + Math.min(y.clyl, 20),
+        }))
+        .sort((a, b) => b.score - a.score)[0];
+      mainName = ranked.cl!.clmc;
+      mainQty = ranked.clyl / scale;
+      withMain++;
+    }
+
+    const f = parseSemanticFeature(`${r.xmmc} ${r.dw}`, "");
+    const codes = codeMap.get(r.debh);
+    const matchKeys: Record<string, string> = {};
+    if (f.category) matchKeys.category = f.category;
+    if (f.material) matchKeys.material = f.material;
+    if (f.diameter) matchKeys.diameter = f.diameter;
+    if (f.specification) matchKeys.spec = f.specification;
+    if (f.connectionMethod) matchKeys.connection = f.connectionMethod;
+    if (f.system) matchKeys.system = f.system;
+    if (mainName) matchKeys.keywords = mainName;
+    if (codes?.size) matchKeys.xmbh = [...codes].join(",");
+
+    return {
+      datasetId: ds.id,
+      code: r.debh,
+      name: r.xmmc,
+      unit: r.dw,
+      unitScale: scale,
+      labor: r.rgf ?? 0,
+      material: r.clf ?? 0,
+      machine: r.jxf ?? 0,
+      mainQtyPerUnit: mainQty ? Number(mainQty.toFixed(4)) : 1,
+      matchKeys: JSON.stringify(matchKeys),
+      raw: JSON.stringify({
+        jj: r.jj, zjbh: r.zjbh, gcnr: r.gcnr ?? "",
+        fb: fbMap.get(r.debh.slice(0, 2)) ?? "",
+        mainMaterial: mainName,
+      }),
+    };
+  });
+
+  for (let i = 0; i < rows.length; i += 500)
+    await prisma.quotaRow.createMany({ data: rows.slice(i, i + 500) });
+
+  console.log(`导入完成: ${rows.length} 条定额 | 含主材耗量 ${withMain} 条 | 含清单编码映射 ${rows.filter((r) => JSON.parse(r.matchKeys).xmbh).length} 条`);
+  console.log(`Dataset: ${ds.id}`);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); }).finally(() => prisma.$disconnect());

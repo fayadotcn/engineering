@@ -36,6 +36,7 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
           // DB 特征值常带后缀（"沟槽连接" vs 清单特征 "沟槽"），剥掉使匹配方向一致
           connection: toRe(mk.connection?.replace(/(连接|方式|敷设|安装)$/, "")),
           keywords: toRe(mk.keywords),
+          codes: mk.xmbh ? new Set(mk.xmbh.split(",")) : undefined,
         },
       };
     });
@@ -56,6 +57,8 @@ export function scoreQuota(item: BoqItemDTO, q: QuotaEntry): number {
   const m = q.match;
   const text = `${item.name} ${item.rawFeature}`;
   let s = 0;
+  // 清单编码前9位命中定额映射表 → 计价软件级确定性，直接强信号
+  if (m.codes?.size && item.code && m.codes.has(item.code.slice(0, 9))) s += 60;
   if (m.category) s += f.category === m.category ? 40 : 0;
   if (m.material) s += m.material.test(f.material ?? text) ? 25 : 0;
   if (m.diameter) s += m.diameter.test(f.diameter ?? f.specification ?? "") ? 20 : 0;

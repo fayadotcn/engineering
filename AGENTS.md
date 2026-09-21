@@ -49,6 +49,8 @@ MODEL_NAME=deepseek-chat
 - 上传：`POST /api/admin/datasets`（multipart，kind=MATERIAL_PRICE|QUOTA|GENERIC）；列表/预览/删除在同路径。
 - `dataset/quotaParse.ts` 专解析定额表（定额编号/子目名称/人工费/材料费/机械费/主材耗量列）；耗量列按"每定额单位"惯例自动归一化为引擎口径"每清单单位"（耗量 ≥ unitScale 时除以倍数）。
 - `quota/service.ts getQuotaLibrary()` 合并内置参考库 + 全部已上传定额数据集（内置是兜底）。
+- **四川2020定额已入库**：`scripts/import-sc2020-quota.ts` 从「清单计价专家N10」本地 SQLite（`C:/Program Files/清单计价专家N10/DATABASE/`）导入 az_de 全部 14,867 条安装定额（11 分册 5A–5K）。字段映射：debh→code / xmmc→name / dw→unit+unitScale / rgf·clf·jxf→人材机 / az_yl+zh_cl→主材耗量（归一化）/ az_zy→xmbh 清单编码映射。重跑脚本幂等（同名数据集先删后建）。
+- `scoreQuota` 打分：清单编码前9位命中 `matchKeys.xmbh` 映射表 +60（计价软件级确定性强信号），其次 category 40 / material 25 / diameter 20 / spec 15 / connection 10 / system 5 / keywords 10。
 - `quota.calculate` 主材价查找顺序：项目询价 → 全局材料库（findLibraryPrice）；`material.search`/`getPriceHistory` 并入材料库数据并标注来源。
 - `Dataset.active` 启停开关：`PATCH /api/admin/datasets/[id] {active}`；停用的数据集对所有消费方不可见（材料搜索/取价/定额匹配/缺价匹配一律过滤），行数据保留可随时复用。
 - 缺价补价闭环：`material.matchLibrary`（预览，只读，出 quotationMatch 视图）→ `material.fillFromLibrary`（确认门，写回 unitPrice + diff + 回执）；planner 区分「看看缺价」（仅预览）与「补齐/补价」（预览+写回）；总览页未定价卡片可一键触发。
