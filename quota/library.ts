@@ -11,8 +11,8 @@ export interface QuotaEntry {
   material: number; // 辅材费
   machine: number; // 机械费
   mainQtyPerUnit: number; // 主材耗量 / 每清单单位（含损耗）
-  /** 定额详情（解释口径）：工程内容/分册/基价/主材名 */
-  detail?: { gcnr?: string; fb?: string; jj?: number; mainMaterial?: string };
+  /** 定额详情（解释口径）：工程内容/分册/章节路径/基价/主材名 */
+  detail?: { gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string };
   match: {
     category?: string;
     material?: RegExp;
@@ -21,8 +21,6 @@ export interface QuotaEntry {
     connection?: RegExp;
     system?: string;
     keywords?: RegExp;
-    /** 关联的清单编码前9位（计价软件的清单↔定额映射，命中是强信号） */
-    codes?: Set<string>;
   };
 }
 

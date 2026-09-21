@@ -63,10 +63,19 @@ async function importBook(zy: DatabaseSync, de: DatabaseSync, p: string, label: 
     }
   }
 
-  // 4) 分册名: fbid → fbmc
+  // 4) 分册名: fbid → fbmc；章节树: zjbh → mc（目录节点，按编码前缀挂到定额上）
   const fbMap = new Map<string, string>();
   for (const f of de.prepare(`SELECT fbid, fbmc FROM ${p}_fb`).all() as { fbid: string; fbmc: string }[])
     fbMap.set(f.fbid, f.fbmc);
+  const mlRows = de.prepare(`SELECT zjbh, mc FROM ${p}_ml ORDER BY length(zjbh), zjbh`).all() as { zjbh: string; mc: string }[];
+  const chapterOf = (zjbh: string | null): string => {
+    if (!zjbh) return "";
+    // zjbh 逐级前缀匹配目录树：5H010101 → 5H01(章) → 5H0101(节)
+    const parts: string[] = [];
+    for (const m of mlRows)
+      if (m.zjbh && zjbh.startsWith(m.zjbh) && m.mc) parts.push(m.mc);
+    return parts.join(" > ");
+  };
 
   const des = de.prepare(`SELECT * FROM ${p}_de ORDER BY fid`).all() as unknown as DeRow[];
   console.log(`${p}_de(${label}) 定额子目: ${des.length} 条`);
@@ -74,7 +83,11 @@ async function importBook(zy: DatabaseSync, de: DatabaseSync, p: string, label: 
   // 5) Dataset 记录（幂等：同名数据集先删后建）
   const DS_NAME = `四川省2020建设工程工程量清单计价定额·${label}（N10导入）`;
   const old = await prisma.dataset.findFirst({ where: { name: DS_NAME } });
-  if (old) await prisma.dataset.delete({ where: { id: old.id } });
+  if (old) {
+    // 关系默认 SetNull——必须先删行再删集，否则行成孤儿仍参与匹配
+    await prisma.quotaRow.deleteMany({ where: { datasetId: old.id } });
+    await prisma.dataset.delete({ where: { id: old.id } });
+  }
   const ds = await prisma.dataset.create({
     data: {
       kind: "QUOTA",
@@ -143,6 +156,7 @@ async function importBook(zy: DatabaseSync, de: DatabaseSync, p: string, label: 
       raw: JSON.stringify({
         jj: r.jj, zjbh: r.zjbh, gcnr: r.gcnr ?? "",
         fb: fbMap.get(r.debh.slice(0, 2)) ?? "",
+        chapter: chapterOf(r.zjbh),
         mainMaterial: mainName,
       }),
     };

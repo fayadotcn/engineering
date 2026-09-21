@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore, type ConvBlock } from "./store";
 import {
-  AnomalyTable, BoqTable, Breakdown, DiffView, DocumentView, ExportResult,
+  AnomalyTable, BoqTable, Breakdown, DiffView, DocumentView, ExportResult, SpecResultView,
   FactList, FeeSummaryView, FileCompareView, FileList, OverviewView, QuotaResult, QuotationMatch,
   ReceiptsView,
 } from "./views";
@@ -32,6 +32,7 @@ const TOOL_LABEL: Record<string, string> = {
   "boq.compareFiles": "清单对审",
   "quota.match": "匹配定额",
   "quota.calculate": "定额组价",
+  "spec.search": "查定额说明",
   "project.setFact": "写入项目事实",
   "cost.calculate": "金额计算",
   "cost.aggregate": "金额汇总",
@@ -394,6 +395,8 @@ function ViewRenderer({ view }: { view: WorkspaceView }) {
       return <FileCompareView view={view} />;
     case "document":
       return <DocumentView view={view} />;
+    case "specResult":
+      return <SpecResultView view={view} />;
     case "diff":
       return <DiffView view={view} />;
     case "factList":

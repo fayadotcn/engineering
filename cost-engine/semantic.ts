@@ -123,7 +123,10 @@ export function parseSemanticFeature(
   f.connectionMethod = first(text, CONNECTIONS);
   f.location = first(text, LOCATIONS);
 
-  const dn = text.match(/(?:DN|DE|Φ)\s*(\d+(?:\.\d+)?)/);
+  // 管径：DN100 / De110 / Φ108 与定额式「公称直径 100mm以内」「直径50以下」「外径」
+  const dn =
+    text.match(/(?:DN|DE|Φ)\s*(\d+(?:\.\d+)?)/) ??
+    text.match(/(?:公称直径|公称口径|公称外径|外径|内径|直径|口径)\s*(\d+(?:\.\d+)?)\s*(?:mm|MM)?\s*(?:以内|以下|之内|内|≤)?/);
   if (dn) f.diameter = `DN${dn[1]}`;
 
   const pn = text.match(/PN\s*(\d+(?:\.\d+)?)/);
@@ -138,6 +141,18 @@ export function parseSemanticFeature(
     f.specification = cable[0].replace(/\s/g, "");
   } else if (dim) {
     f.specification = dim[0].replace(/\s/g, "");
+  }
+  // 定额式上限规格：截面 35mm²以内 / 重量 0.3t以内 / 容量 500L以内 / 功率 15kW以下
+  // 归一化为「值+单位」，两侧（定额名/清单特征）同式可精确比对
+  if (!f.specification) {
+    const bound = text.match(
+      /(?:截面[积]?|重量|容量|容积|功率|风量|扬程|流量|压力等级?)?\s*(?:≤|≥)?\s*(\d+(?:\.\d+)?)\s*(mm²|mm2|t|T|kg|KG|kW|KW|kw|W|kV|KV|kv|V|v|A|m³|m3|L|l|kPa|KPa|kpa|Pa)\s*(?:以内|以下|之上|以内者|及以下|≤|≥|内|以上)/
+    );
+    if (bound) {
+      const u = bound[2].replace(/mm2/i, "mm²").replace(/m3/i, "m³")
+        .replace(/^KW$/i, "kW").replace(/^KV$/i, "kV").replace(/^T$/, "t").replace(/^KG$/i, "kg").replace(/^l$/, "L");
+      f.specification = `${bound[1]}${u}`;
+    }
   }
   if (!f.specification && dn) f.specification = `DN${dn[1]}`;
 

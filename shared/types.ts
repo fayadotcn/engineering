@@ -180,6 +180,13 @@ export type WorkspaceView =
   | { kind: "overview"; id: string; title: string }
   | { kind: "receipts"; id: string; title: string }
   | {
+      kind: "specResult";
+      id: string;
+      title: string;
+      query: string;
+      hits: { book: string; title: string; excerpt: string }[];
+    }
+  | {
       kind: "exportResult";
       id: string;
       title: string;
@@ -272,8 +279,12 @@ export interface QuotaResultRow {
   needsMainPrice: boolean;
   quotaGcnr?: string | null;
   quotaFb?: string | null;
+  quotaChapter?: string | null;
   quotaBase?: string | null;
   quotaMainName?: string | null;
+  /** 存在得分相近且基价不同的备选子目 */
+  ambiguous?: boolean;
+  altQuota?: string | null;
 }
 
 /* ---------------- Agent events (SSE wire + persisted) ---------------- */

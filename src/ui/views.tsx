@@ -931,6 +931,7 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
   const [open, setOpen] = useState<string | null>(null);
   const matched = view.rows.filter((r) => r.quotaCode).length;
   const needMain = view.rows.filter((r) => r.needsMainPrice).length;
+  const ambiguous = view.rows.filter((r) => r.ambiguous).length;
   const deviant = view.rows.filter(
     (r) => r.deviation !== null && Math.abs(Number(r.deviation)) > 20
   ).length;
@@ -950,6 +951,15 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
             style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
           >
             {needMain} 项缺主材价
+          </span>
+        )}
+        {ambiguous > 0 && (
+          <span
+            className="rounded px-1.5 py-0.5"
+            style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
+            title="存在得分相近且基价不同的备选子目，点击行可查看备选，或查定额说明核实"
+          >
+            {ambiguous} 项存疑
           </span>
         )}
         {deviant > 0 && (
@@ -981,7 +991,7 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
         <tbody>
           {view.rows.map((r, ri) => {
             const expanded = open === r.itemId;
-            const hasDetail = !!(r.quotaCode && (r.quotaGcnr || r.quotaFb || r.quotaBase || r.quotaMainName));
+            const hasDetail = !!(r.quotaCode && (r.quotaGcnr || r.quotaFb || r.quotaChapter || r.quotaBase || r.quotaMainName));
             return (
             <Fragment key={r.itemId}>
             <tr
@@ -997,6 +1007,11 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
                   <span className="mono inline-flex items-center gap-1 text-[11px]">
                     {hasDetail && <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />}
                     {r.quotaCode}
+                    {r.ambiguous && (
+                      <span className="rounded bg-amber-100 px-1 py-px text-[9.5px] font-sans font-medium text-amber-700" title={r.altQuota ? `备选：${r.altQuota}` : "存在得分相近的备选子目"}>
+                        存疑
+                      </span>
+                    )}
                   </span>
                 ) : "—"}
               </td>
@@ -1024,8 +1039,12 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                       <span className="font-medium text-neutral-700">{r.quotaCode} {r.quotaName}</span>
                       {r.quotaFb && <span className="text-neutral-500">分册：{r.quotaFb}</span>}
+                      {r.quotaChapter && <span className="text-neutral-500">章节：{r.quotaChapter}</span>}
                       {r.quotaBase && <span className="text-neutral-500">基价：<span className="mono">{r.quotaBase}</span> 元/{r.quotaCode ? "定额单位" : ""}</span>}
                       {r.quotaMainName && <span className="text-neutral-500">主材：{r.quotaMainName}</span>}
+                      {r.ambiguous && r.altQuota && (
+                        <span className="text-amber-600">备选子目：{r.altQuota}（基价不同，请结合定额说明核实）</span>
+                      )}
                     </div>
                     {r.quotaGcnr && <div className="text-neutral-500">工作内容：{r.quotaGcnr}</div>}
                   </div>
@@ -1211,6 +1230,31 @@ export function DocumentView({ view }: { view: Extract<WorkspaceView, { kind: "d
       {!view.pages.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">无文本内容</div>
       )}
+    </div>
+  );
+}
+
+/* ---------------- 定额说明条文 ---------------- */
+
+export function SpecResultView({ view }: { view: Extract<WorkspaceView, { kind: "specResult" }> }) {
+  return (
+    <div className="h-full space-y-4 overflow-auto p-6">
+      <div className="text-[11px] text-neutral-400">
+        检索词「{view.query}」· {view.hits.length} 条相关条文 · 来源：《四川省2020建设工程工程量清单计价定额》说明及计算规则
+      </div>
+      {view.hits.map((h, i) => (
+        <div key={i} className="rounded-xl border border-neutral-200 bg-[var(--surface)] shadow-sm">
+          <div className="flex items-center gap-2 border-b border-neutral-100 px-5 py-3">
+            <span className="rounded bg-[var(--accent)]/10 px-2 py-0.5 text-[10.5px] font-medium text-[var(--accent)]">
+              {h.book}
+            </span>
+            <span className="text-[13px] font-semibold text-neutral-800">{h.title}</span>
+          </div>
+          <pre className="whitespace-pre-wrap px-5 py-4 font-sans text-[12px] leading-relaxed text-neutral-700">
+            {h.excerpt}
+          </pre>
+        </div>
+      ))}
     </div>
   );
 }

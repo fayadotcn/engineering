@@ -229,6 +229,18 @@ model MaterialPrice {
 }
 
 // 定额库：消耗量定额子目（人工/辅材/机械 + 主材耗量）
+// 定额说明/计算规则条文（从定额说明PDF提取，按册-章分节，供匹配存疑时检索）
+model SpecSection {
+  id        String   @id @default(cuid())
+  book      String   // 册，如 "C.H 工业管道工程" / "A 房屋建筑与装饰"
+  title     String   // 节标题，如 "第一章 给排水管道" 或 "册说明"
+  content   String   // 正文（条文文本）
+  orderIdx  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([book])
+}
+
 model QuotaRow {
   id            String   @id @default(cuid())
   datasetId     String?

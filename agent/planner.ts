@@ -118,6 +118,16 @@ export class RulePlanner implements Planner {
         steps: [{ tool: "boq.compareFiles", args: {}, activity: "正在对齐两版清单" }],
       };
 
+    // 查定额说明/计算规则（必须在「定额测算」之前：「查定额说明」也含"定额"）
+    if (/定额说明|计算规则|规范|条文|依据|册说明|章说明|怎么计算|怎么算|如何计算|如何算|计算方法|计算方式/.test(m)) {
+      const q = m
+        .replace(/查一下|查|看|找|检索|一下|的|定额说明|计算规则|规范|条文|依据|册说明|章说明|四川|2020|怎么计算|怎么算|如何计算|如何算|计算方法|计算方式|请问|吗|呢/g, " ")
+        .replace(/\s+/g, " ").trim();
+      return {
+        steps: [{ tool: "spec.search", args: { query: q || m.slice(0, 30) }, activity: "正在检索定额说明及计算规则" }],
+      };
+    }
+
     // 定额测算: "按四川2020定额测算" / "定额组价" / "测算一下"
     if (/定额|组价|测算/.test(m)) {
       return {

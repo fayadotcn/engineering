@@ -50,7 +50,10 @@ MODEL_NAME=deepseek-chat
 - `dataset/quotaParse.ts` 专解析定额表（定额编号/子目名称/人工费/材料费/机械费/主材耗量列）；耗量列按"每定额单位"惯例自动归一化为引擎口径"每清单单位"（耗量 ≥ unitScale 时除以倍数）。
 - `quota/service.ts getQuotaLibrary()` 合并内置参考库 + 全部已上传定额数据集（内置是兜底）。
 - **四川2020定额已入库**：`scripts/import-sc2020-quota.ts` 从「清单计价专家N10」本地 SQLite（`C:/Program Files/清单计价专家N10/DATABASE/`）导入 az_de 全部 14,867 条安装定额（11 分册 5A–5K）。字段映射：debh→code / xmmc→name / dw→unit+unitScale / rgf·clf·jxf→人材机 / az_yl+zh_cl→主材耗量（归一化）/ az_zy→xmbh 清单编码映射。重跑脚本幂等（同名数据集先删后建）。
-- `scoreQuota` 打分：清单编码前9位命中 `matchKeys.xmbh` 映射表 +60（计价软件级确定性强信号），其次 category 40 / material 25 / diameter 20 / spec 15 / connection 10 / system 5 / keywords 10。
+- `scoreQuota` 打分：category 40 / material 25 / diameter 20 / spec 15 / connection 10 / system 12 / keywords 10。**注意：`matchKeys.xmbh` 是软件内部「册章节树码」(03+册序+章+节)，不是 GB 清单编码——绝不能拿来比对 `item.code`**（曾因形似误判：031001001 在树码里对应温度计定额）。
+- 系统归属 tiebreak：定额编号前缀→系统词表（5G→消防|喷淋、5H→给排水、5I→通风空调…），清单项 `sectionPath`/名称含系统词时同册定额 +12——解决跨册同名子目同分问题（如消防管误配给排水册）。
+- 存疑判定：`top2Quota` 分差≤10 且基价差>5% 才标「存疑」（跨册同名同价不算歧义）；存疑行 UI 出琥珀徽标+备选子目，提示用 `spec.search` 核实。
+- **定额说明检索**：`spec.search` 工具查 `SpecSection` 表（201 节，来自《2020定额说明及计算规则》PDF，`scripts/import-sc2020-spec.ts` 导入）；结果出 `specResult` 工作区视图（分册徽标+条文摘录）。planner 触发词含「定额说明/计算规则/怎么计算/怎么算」等。
 - `quota.calculate` 主材价查找顺序：项目询价 → 全局材料库（findLibraryPrice）；`material.search`/`getPriceHistory` 并入材料库数据并标注来源。
 - `Dataset.active` 启停开关：`PATCH /api/admin/datasets/[id] {active}`；停用的数据集对所有消费方不可见（材料搜索/取价/定额匹配/缺价匹配一律过滤），行数据保留可随时复用。
 - 缺价补价闭环：`material.matchLibrary`（预览，只读，出 quotationMatch 视图）→ `material.fillFromLibrary`（确认门，写回 unitPrice + diff + 回执）；planner 区分「看看缺价」（仅预览）与「补齐/补价」（预览+写回）；总览页未定价卡片可一键触发。
