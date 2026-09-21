@@ -1,40 +1,282 @@
 @import "tailwindcss";
 
+/* ── Design Tokens（参考 ZCodeProject 的暖白纸感 + 松绿 accent）── */
 :root {
-  --bg: #fafafa;
-  --panel: #ffffff;
-  --ink: #171717;
-  --muted: #737373;
-  --faint: #a3a3a3;
-  --line: #e5e5e5;
-  --accent: #171717;
-  --blue: #2563eb;
-  --amber: #b45309;
-  --red: #dc2626;
-  --green: #16a34a;
+  --bg: #f4f5f2;
+  --surface: #fafbf8;
+  --sidebar: #eef1ed;
+  --hover: #eaede9;
+  --active: #e0e6e1;
+
+  --ink-1: #202622;
+  --ink-2: #4f5953;
+  --ink-3: #66716a;
+  --ink-4: #909892;
+
+  --hairline: #dfe3de;
+  --hairline-strong: #c9d0ca;
+
+  --brand-accent: #465d50;
+  --brand-accent-hover: #374b40;
+  --brand-soft: #dde6df;
+  --brand-on-accent: #fafbf8;
+  --solid-ink: #202622;
+  --on-solid: #fafbf8;
+
+  --danger: #aa4f49;
+  --danger-soft-bg: #f4e9e7;
+  --danger-soft-fg: #a44742;
+  --success-soft-bg: #e4ede7;
+  --success-soft-fg: #376a55;
+  --warning-soft-bg: #f3eee4;
+  --warning-soft-fg: #805f32;
+  --blue-soft-bg: #e4ebef;
+  --blue-soft-fg: #4a6a7a;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.03);
+  --shadow-md: 0 2px 10px rgb(0 0 0 / 0.05);
+  --shadow-lg: 0 8px 28px rgb(0 0 0 / 0.09);
+  --composer-fill: color-mix(in srgb, var(--sidebar) 85%, var(--bg));
+  --composer-line: color-mix(in srgb, var(--ink-1) 9%, transparent);
+  --composer-line-focus: color-mix(in srgb, var(--ink-1) 16%, transparent);
+  --composer-ring: color-mix(in srgb, var(--ink-1) 5%, transparent);
+  --composer-shadow: 0 1px 2px rgb(0 0 0 / 0.02), 0 4px 16px rgb(0 0 0 / 0.025);
+
+  --dur-hover: 150ms;
+  --ease-brand: cubic-bezier(0.21, 0.7, 0.35, 1);
+
+  /* 兼容旧引用 */
+  --panel: var(--surface);
+  --ink: var(--ink-1);
+  --muted: var(--ink-3);
+  --line: var(--hairline);
+  --accent: var(--ink-1);
+  --blue: var(--blue-soft-fg);
+  --amber: var(--warning-soft-fg);
+  --red: var(--danger);
+  --green: var(--success-soft-fg);
 }
 
-html, body {
-  height: 100%;
-  background: var(--bg);
-  color: var(--ink);
-  font-size: 13px;
-  font-family: ui-sans-serif, system-ui, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+/* 把 Tailwind neutral 色阶整体重映射为绿灰系——组件不改类名即换肤 */
+@theme {
+  --color-neutral-50: #f6f7f4;
+  --color-neutral-100: #eef1ed;
+  --color-neutral-200: #dfe3de;
+  --color-neutral-300: #c9d0ca;
+  --color-neutral-400: #909892;
+  --color-neutral-500: #66716a;
+  --color-neutral-600: #4f5953;
+  --color-neutral-700: #3a453e;
+  --color-neutral-800: #2c3530;
+  --color-neutral-900: #202622;
+  /* 语义色阶 → soft 低饱和变体（与参考站同一配方） */
+  --color-red-50: var(--danger-soft-bg);
+  --color-red-200: #e4c7c3;
+  --color-red-600: #b05a54;
+  --color-red-700: var(--danger-soft-fg);
+  --color-amber-50: var(--warning-soft-bg);
+  --color-amber-200: #e5d9c4;
+  --color-amber-400: #c9a167;
+  --color-amber-600: #a07a45;
+  --color-amber-700: var(--warning-soft-fg);
+  --color-blue-50: var(--blue-soft-bg);
+  --color-blue-300: #b8cdd6;
+  --color-blue-600: #58798a;
+  --color-blue-700: var(--blue-soft-fg);
+  --color-green-50: var(--success-soft-bg);
+  --color-green-500: #7fae93;
+  --color-green-600: #4d7a64;
+  --color-green-700: var(--success-soft-fg);
+  --font-sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+}
+
+html {
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-* { scrollbar-width: thin; scrollbar-color: #d4d4d4 transparent; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 4px; }
-
-.mono { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+body {
+  background: var(--bg);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  /* 关闭系统合成粗体：避免 Windows 中文字体假粗发虚 */
+  font-synthesis: none;
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
 }
-.pulse { animation: pulse-dot 1.2s ease-in-out infinite; }
 
-@keyframes fadein { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
-.fadein { animation: fadein 0.18s ease-out; }
+.mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 输入框容器（参考站 studio-composer：上下两层共处一个圆角容器） */
+.composer-shell {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--composer-line);
+  border-radius: 20px;
+  padding: 6px 8px 8px;
+  background: var(--composer-fill);
+  box-shadow: var(--composer-shadow);
+  transition:
+    border-color var(--dur-hover) ease,
+    box-shadow var(--dur-hover) ease;
+}
+.composer-shell:focus-within {
+  border-color: var(--composer-line-focus);
+  box-shadow: var(--composer-shadow), 0 0 0 3px var(--composer-ring);
+}
+.composer-input {
+  border: 0;
+  background: transparent;
+  caret-color: var(--brand-accent);
+}
+.composer-input::placeholder {
+  color: var(--ink-3);
+}
+.composer-input:focus,
+.composer-input:focus-visible,
+.composer-input:active {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+/* 图标圆钮（面板头部 / composer 内的圆形工具按钮） */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    color var(--dur-hover) ease,
+    background-color var(--dur-hover) ease;
+}
+.icon-btn:enabled:hover {
+  color: var(--ink-1);
+  background: var(--hover);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@keyframes fadein {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fadein {
+  animation: fadein 200ms var(--ease-brand) backwards;
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.pulse {
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* ── Excel 风格数据表 ─────────────────────────────────
+   全网格线 + 左侧行号槽 + 灰底表头 + 活动单元格描边 */
+.xl-sheet {
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+}
+.xl-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12.5px;
+}
+.xl-table th,
+.xl-table td {
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.xl-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--sidebar);
+  color: var(--ink-2);
+  font-weight: 500;
+  font-size: 11.5px;
+  text-align: left;
+}
+.xl-table td.wrap,
+.xl-table th.wrap {
+  white-space: normal;
+}
+/* 行号槽（Excel 行头）：灰底、居中、不可选、横向滚动时吸附左缘 */
+.xl-rn {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  width: 38px;
+  min-width: 38px;
+  padding-inline: 4px !important;
+  background: var(--sidebar);
+  color: var(--ink-4);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  text-align: center !important;
+  user-select: none;
+}
+.xl-table thead .xl-rn {
+  z-index: 20;
+}
+/* 分组行（清单分部标题 / 异常组头） */
+.xl-group td {
+  background: color-mix(in srgb, var(--sidebar) 62%, var(--surface));
+  font-weight: 500;
+  color: var(--ink-2);
+}
+/* 行 hover 与可编辑单元格 */
+.xl-table tbody tr:hover td {
+  background: var(--hover);
+}
+.xl-table tbody tr:hover td.xl-rn {
+  background: var(--active);
+  color: var(--ink-2);
+}
+.xl-table td.xl-edit {
+  cursor: cell;
+}
+.xl-table td.xl-edit:hover {
+  background: color-mix(in srgb, var(--brand-soft) 45%, var(--surface));
+}
+/* 活动单元格：Excel 式绿框 */
+.xl-active {
+  outline: 2px solid var(--brand-accent);
+  outline-offset: -2px;
+}

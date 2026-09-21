@@ -20,7 +20,10 @@ export async function executeTool(
   args: unknown
 ): Promise<ToolResult> {
   const def = getTool(toolName);
-  await ctx.emit("tool_started", { tool: toolName });
+  await ctx.emit("tool_started", {
+    tool: toolName,
+    args: JSON.stringify(args ?? {}).slice(0, 400),
+  });
   const started = Date.now();
 
   const finish = async (result: ToolResult, status: "OK" | "ERROR") => {

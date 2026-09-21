@@ -11,11 +11,12 @@ export type ConvBlock =
   | { type: "user"; text: string }
   | { type: "agent"; text: string; runId: string }
   | { type: "activity"; text: string; runId: string; live: boolean }
-  | { type: "tool"; tool: string; status: string; ms?: number; runId: string }
+  | { type: "thought"; text: string; runId: string }
+  | { type: "tool"; tool: string; status: string; ms?: number; runId: string; args?: string; resultMsg?: string }
   | { type: "receipt"; receiptId: string; summary: string; actionType: string; runId: string }
   | { type: "confirm"; confirmId: string; runId: string; tool: string; description: string; decided?: "approved" | "rejected" }
   | { type: "upload"; filename: string }
-  | { type: "error"; text: string };
+  | { type: "error"; text: string; runId?: string };
 
 interface FileMeta {
   id: string;
@@ -83,13 +84,15 @@ export const useStore = create<State>((set, get) => ({
         const pl = e.payload as Record<string, never>;
         if (e.type === "activity")
           blocks.push({ type: "activity", text: pl.text, runId: run.id, live: false });
+        else if (e.type === "thought")
+          blocks.push({ type: "thought", text: pl.text, runId: run.id });
         else if (e.type === "tool_started")
-          blocks.push({ type: "tool", tool: pl.tool, status: "running", runId: run.id });
+          blocks.push({ type: "tool", tool: pl.tool, status: "running", runId: run.id, args: pl.args });
         else if (e.type === "tool_finished") {
           const b = [...blocks].reverse().find(
             (x) => x.type === "tool" && x.tool === pl.tool && x.status === "running"
           );
-          if (b && b.type === "tool") { b.status = pl.status; b.ms = pl.ms; }
+          if (b && b.type === "tool") { b.status = pl.status; b.ms = pl.ms; b.resultMsg = pl.message; }
         } else if (e.type === "message")
           blocks.push({ type: "agent", text: pl.text, runId: run.id });
         else if (e.type === "receipt")
@@ -230,11 +233,13 @@ export const useStore = create<State>((set, get) => ({
           blocks.push({ type: "activity", text: p.text, runId, live: true });
           return { blocks };
         }
+        case "thought":
+          return { blocks: [...s.blocks, { type: "thought", text: p.text, runId }] };
         case "tool_started":
           return {
             blocks: [
               ...s.blocks,
-              { type: "tool", tool: p.tool, status: "running", runId },
+              { type: "tool", tool: p.tool, status: "running", runId, args: p.args },
             ],
           };
         case "tool_finished": {
@@ -242,7 +247,7 @@ export const useStore = create<State>((set, get) => ({
           for (let i = blocks.length - 1; i >= 0; i--) {
             const b = blocks[i];
             if (b.type === "tool" && b.tool === p.tool && b.status === "running") {
-              blocks[i] = { ...b, status: p.status, ms: p.ms };
+              blocks[i] = { ...b, status: p.status, ms: p.ms, resultMsg: p.message };
               break;
             }
           }
@@ -304,7 +309,7 @@ export const useStore = create<State>((set, get) => ({
           return { views, activeViewId: view.id };
         }
         case "error":
-          return { blocks: [...s.blocks, { type: "error", text: p.text }] };
+          return { blocks: [...s.blocks, { type: "error", text: p.text, runId }] };
         case "run_finished": {
           const blocks = s.blocks.map((b) =>
             b.type === "activity" && b.live ? { ...b, live: false } : b

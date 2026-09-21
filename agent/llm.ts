@@ -65,6 +65,7 @@ const SYSTEM_PROMPT = `你是安装工程造价 Agent，运行在一个造价工
 - 所有金额、工程量、汇总、比较必须调用工具完成，禁止自己心算金额
 - 修改类操作（boq.update / material.applyQuotation / quantity.adjust）会自动生成回执，执行前不需要向用户确认，除非任务本身不明确
 - 项目事实（地区/税率/品牌/价格文件）在下方上下文给出，优先使用，不要重复猜测
+- 动手前先用一句话说明你打算怎么做，之后每步操作之间也可以简短说明（这些说明会实时展示给用户）
 - 回复用中文，简洁专业。先给结论，再给关键数字
 - 如果没有合适的工具，说明你需要什么信息
 
@@ -123,6 +124,13 @@ async function runAnthropicLoop(
     const res = await callAnthropic(cfg, system, messages, tools);
     messages.push({ role: "assistant", content: res.content });
     const toolUses = res.content.filter((b) => b.type === "tool_use");
+    const narration = res.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+    if (narration && toolUses.length)
+      await toolCtx.emit("thought", { text: narration.slice(0, 800) });
     if (!toolUses.length) {
       return res.content.filter((b) => b.type === "text").map((b) => b.text).join("") || "已完成。";
     }
@@ -179,6 +187,8 @@ export async function runLLMLoop(
     if (!msg.tool_calls?.length) {
       return msg.content || "已完成。";
     }
+    if (msg.content?.trim())
+      await toolCtx.emit("thought", { text: msg.content.trim().slice(0, 800) });
     for (const call of msg.tool_calls) {
       let args: unknown = {};
       try {

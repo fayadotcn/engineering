@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "./store";
 import type {
   AnomalyRow,
@@ -11,7 +11,7 @@ import type {
   WorkspaceView,
 } from "@shared/types";
 import { DISCIPLINE_LABEL } from "@shared/types";
-import { Download, FileSpreadsheet, AlertTriangle, GitCompareArrows } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Download, FileSpreadsheet, AlertTriangle, Funnel, X } from "lucide-react";
 
 const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -38,7 +38,165 @@ const SOURCE_LABEL: Record<string, string> = {
   MARKET_REFERENCE: "市场参考",
 };
 
+/* ---------------- Excel 列头：排序 + 筛选下拉 ---------------- */
+
+type SortDir = "asc" | "desc";
+
+function ExcelHead({
+  label,
+  numeric,
+  sortDir,
+  onSort,
+  text,
+  onText,
+  options,
+  selected,
+  onToggle,
+  onAll,
+}: {
+  label: string;
+  numeric?: boolean;
+  sortDir?: SortDir | null;
+  onSort?: (dir: SortDir | null) => void;
+  text?: string;
+  onText?: (v: string) => void;
+  options?: { v: string; n: number }[];
+  selected?: Set<string>;
+  onToggle?: (v: string) => void;
+  onAll?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const hasMenu = onSort || onText || options;
+  const filtered = Boolean(text) || Boolean(options && selected && selected.size < options.length);
+  const Icon = sortDir === "asc" ? ArrowUp : sortDir === "desc" ? ArrowDown : filtered ? Funnel : ChevronDown;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const menuW = 208;
+      const estH = options ? 300 : onSort && onText ? 180 : onText ? 120 : 90;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const up = spaceBelow < estH && r.top > spaceBelow;
+      setPos({
+        left: Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8)),
+        ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
+      });
+    }
+    setOpen(!open);
+  };
+
+  return (
+    <>
+      <div className={cn("flex items-center gap-1", numeric && "flex-row-reverse")}>
+        <span className="truncate">{label}</span>
+        {hasMenu && (
+          <button
+            ref={btnRef}
+            onClick={toggle}
+            className={cn(
+              "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+              filtered || sortDir
+                ? "border-transparent bg-[var(--brand-soft)] text-[var(--brand-accent)]"
+                : "border-neutral-300/70 text-neutral-500 hover:border-neutral-400 hover:bg-[var(--active)] hover:text-neutral-700",
+              open && "border-[var(--brand-accent)] bg-[var(--brand-soft)] text-[var(--brand-accent)]"
+            )}
+            title="排序与筛选"
+          >
+            <Icon size={11} strokeWidth={2.2} />
+          </button>
+        )}
+      </div>
+      {open && pos && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-40 w-52 overflow-auto rounded-lg border border-neutral-200 bg-[var(--surface)] p-1 text-left font-normal shadow-[var(--shadow-menu)]"
+            style={{ left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: 320 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {onSort && (
+              <>
+                {([["asc", "升序", ArrowUp], ["desc", "降序", ArrowDown]] as const).map(([d, l, Icon]) => (
+                  <button
+                    key={d}
+                    onClick={() => { onSort(sortDir === d ? null : d); setOpen(false); }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--hover)]",
+                      sortDir === d && "font-medium text-[var(--brand-accent)]"
+                    )}
+                  >
+                    <Icon size={12} /> {l}
+                    {sortDir === d && <span className="ml-auto text-[10px]">✓</span>}
+                  </button>
+                ))}
+                <div className="my-1 h-px bg-neutral-100" />
+              </>
+            )}
+            {onText && (
+              <div className="px-1.5 py-1">
+                <input
+                  autoFocus={!options}
+                  value={text ?? ""}
+                  onChange={(e) => onText(e.target.value)}
+                  placeholder="包含文本…"
+                  className="h-7 w-full rounded-md border border-neutral-200 px-2 text-[12px] outline-none focus:border-[var(--brand-accent)]"
+                />
+              </div>
+            )}
+            {options && (
+              <>
+                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--hover)]">
+                  <input
+                    type="checkbox"
+                    checked={!selected || selected.size === options.length}
+                    onChange={onAll}
+                    className="accent-[#465d50]"
+                  />
+                  <span className="text-neutral-600">（全选）</span>
+                </label>
+                <div className="max-h-48 overflow-auto">
+                  {options.map((o) => (
+                    <label
+                      key={o.v}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-[var(--hover)]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!selected || selected.has(o.v)}
+                        onChange={() => onToggle?.(o.v)}
+                        className="accent-[#465d50]"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{o.v || "（空白）"}</span>
+                      <span className="text-[10.5px] text-neutral-400">{o.n}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 /* ---------------- 清单表 ---------------- */
+
+type BoqSortKey = "code" | "name" | "quantity" | "unitPrice" | "totalPrice";
 
 export function BoqTable() {
   const { items, patchItem } = useStore();
@@ -46,6 +204,9 @@ export function BoqTable() {
   const [draft, setDraft] = useState("");
   const [limit, setLimit] = useState(300);
   const [query, setQuery] = useState("");
+  const [colText, setColText] = useState({ code: "", name: "", feature: "" });
+  const [unitSel, setUnitSel] = useState<Set<string> | null>(null); // null = 全选
+  const [sort, setSort] = useState<{ key: BoqSortKey; dir: SortDir } | null>(null);
 
   const commit = async () => {
     if (!editing) return;
@@ -53,66 +214,149 @@ export function BoqTable() {
     setEditing(null);
   };
 
-  const filtered = query.trim()
-    ? items.filter(
-        (i) =>
-          i.name.includes(query.trim()) ||
-          i.code.includes(query.trim()) ||
-          i.rawFeature.includes(query.trim())
-      )
-    : items;
-  const shown = filtered.slice(0, limit);
+  const units = useMemo(() => {
+    const m = new Map<string, number>();
+    items.forEach((i) => {
+      if (!i.isHeader) m.set(i.unit, (m.get(i.unit) ?? 0) + 1);
+    });
+    return [...m.entries()].map(([v, n]) => ({ v, n })).sort((a, b) => b.n - a.n);
+  }, [items]);
+
+  const filtering = Boolean(
+    query.trim() || colText.code || colText.name || colText.feature || unitSel || sort
+  );
+
+  const filtered = items.filter((i) => {
+    if (i.isHeader) return !filtering;
+    const q = query.trim();
+    if (q && !(i.name.includes(q) || i.code.includes(q) || i.rawFeature.includes(q))) return false;
+    if (colText.code && !i.code.includes(colText.code)) return false;
+    if (colText.name && !i.name.includes(colText.name)) return false;
+    if (colText.feature && !i.rawFeature.includes(colText.feature)) return false;
+    if (unitSel && !unitSel.has(i.unit)) return false;
+    return true;
+  });
+
+  const sorted = sort
+    ? [...filtered].sort((a, b) => {
+        const av = a[sort.key];
+        const bv = b[sort.key];
+        const cmp =
+          sort.key === "code" || sort.key === "name"
+            ? String(av).localeCompare(String(bv), "zh")
+            : Number(av) - Number(bv);
+        return sort.dir === "asc" ? cmp : -cmp;
+      })
+    : filtered;
+  const shown = sorted.slice(0, limit);
+  const dataTotal = items.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
+  const dataShown = sorted.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
+
+  const toggleUnit = (v: string) => {
+    const next = new Set(unitSel ?? units.map((u) => u.v));
+    if (next.has(v)) next.delete(v); else next.add(v);
+    setUnitSel(next.size === units.length ? null : next);
+    setLimit(300);
+  };
+
+  const setText = (k: keyof typeof colText) => (v: string) => {
+    setColText((c) => ({ ...c, [k]: v }));
+    setLimit(300);
+  };
+
+  const clearAll = () => {
+    setQuery("");
+    setColText({ code: "", name: "", feature: "" });
+    setUnitSel(null);
+    setSort(null);
+    setLimit(300);
+  };
 
   return (
     <div className="flex h-full flex-col">
-      {items.length > 50 && (
-        <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-3 py-1.5">
-          <input
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setLimit(300); }}
-            placeholder="过滤名称/编码/特征…"
-            className="h-6 w-52 rounded border border-neutral-200 px-2 text-[11.5px] outline-none focus:border-neutral-400"
-          />
-          <span className="text-[11px] text-neutral-400">
-            {filtered.length === items.length ? `${items.length} 行` : `${filtered.length}/${items.length} 行`}
-          </span>
-        </div>
-      )}
+      <div className="flex items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
+        <Funnel size={12} className="shrink-0 text-neutral-400" />
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setLimit(300); }}
+          placeholder="搜索名称 / 编码 / 特征…"
+          className="h-7 w-56 rounded-md border border-neutral-200 bg-[var(--surface)] px-2.5 text-[12px] outline-none focus:border-[var(--brand-accent)]"
+        />
+        {filtering && (
+          <button
+            onClick={clearAll}
+            className="flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-neutral-500 hover:bg-[var(--hover)] hover:text-neutral-700"
+          >
+            <X size={11} /> 清除筛选
+          </button>
+        )}
+        <span className="ml-auto text-[11px] text-neutral-400">
+          {dataShown === dataTotal
+            ? `${dataTotal} 行`
+            : `已筛选 ${dataShown} / ${dataTotal} 行`}
+          {sort && " · 已排序"}
+        </span>
+      </div>
       <div className="flex-1 overflow-auto">
-      <table className="w-full border-collapse text-[12.5px]">
-        <thead className="sticky top-0 z-10 bg-white">
-          <tr className="border-b border-neutral-200 text-left text-neutral-500">
-            <th className="w-10 px-2 py-1.5 font-normal">#</th>
-            <th className="w-28 px-2 py-1.5 font-normal">项目编码</th>
-            <th className="px-2 py-1.5 font-normal">项目名称</th>
-            <th className="px-2 py-1.5 font-normal">项目特征</th>
-            <th className="w-12 px-2 py-1.5 font-normal">单位</th>
-            <th className="w-20 px-2 py-1.5 text-right font-normal">工程量</th>
-            <th className="w-24 px-2 py-1.5 text-right font-normal">综合单价</th>
-            <th className="w-28 px-2 py-1.5 text-right font-normal">合价</th>
+      <table className="xl-table">
+        <thead>
+          <tr>
+            <th className="xl-rn"></th>
+            <th className="group/th relative w-28">
+              <ExcelHead label="项目编码" sortDir={sort?.key === "code" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "code", dir: d } : null)} text={colText.code} onText={setText("code")} />
+            </th>
+            <th className="group/th relative">
+              <ExcelHead label="项目名称" sortDir={sort?.key === "name" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "name", dir: d } : null)} text={colText.name} onText={setText("name")} />
+            </th>
+            <th className="group/th relative">
+              <ExcelHead label="项目特征" text={colText.feature} onText={setText("feature")} />
+            </th>
+            <th className="group/th relative w-12">
+              <ExcelHead
+                label="单位"
+                options={units}
+                selected={unitSel ?? undefined}
+                onToggle={toggleUnit}
+                onAll={() => { setUnitSel(null); setLimit(300); }}
+              />
+            </th>
+            <th className="group/th relative w-20 text-right">
+              <ExcelHead numeric label="工程量" sortDir={sort?.key === "quantity" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "quantity", dir: d } : null)} />
+            </th>
+            <th className="group/th relative w-24 text-right">
+              <ExcelHead numeric label="综合单价" sortDir={sort?.key === "unitPrice" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "unitPrice", dir: d } : null)} />
+            </th>
+            <th className="group/th relative w-28 text-right">
+              <ExcelHead numeric label="合价" sortDir={sort?.key === "totalPrice" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "totalPrice", dir: d } : null)} />
+            </th>
           </tr>
         </thead>
         <tbody>
           {shown.map((it, i) =>
             it.isHeader ? (
-              <tr key={it.id} className="bg-neutral-50/80">
-                <td colSpan={8} className="px-2 py-1.5 text-[12px] font-medium text-neutral-600">
+              <tr key={it.id} className="xl-group">
+                <td className="xl-rn">{i + 1}</td>
+                <td colSpan={7} className="text-[12px]">
                   {it.name}
                 </td>
               </tr>
             ) : (
-              <tr key={it.id} className="border-b border-neutral-100 hover:bg-neutral-50/60">
-                <td className="px-2 py-1 text-neutral-400">{i + 1}</td>
-                <td className="mono px-2 py-1 text-neutral-500">{it.code}</td>
-                <td className="px-2 py-1">{it.name}</td>
-                <td className="max-w-56 truncate px-2 py-1 text-neutral-500" title={it.rawFeature}>
+              <tr key={it.id}>
+                <td className="xl-rn">{i + 1}</td>
+                <td className="mono text-neutral-500">{it.code}</td>
+                <td className="max-w-72 truncate" title={it.name}>{it.name}</td>
+                <td className="max-w-56 truncate text-neutral-500" title={it.rawFeature}>
                   {it.rawFeature}
                 </td>
-                <td className="px-2 py-1 text-neutral-500">{it.unit}</td>
+                <td className="text-neutral-500">{it.unit}</td>
                 {(["quantity", "unitPrice"] as const).map((f) => (
                   <td
                     key={f}
-                    className="mono cursor-pointer px-2 py-1 text-right hover:bg-blue-50/60"
+                    className={cn(
+                      "xl-edit mono text-right",
+                      editing?.id === it.id && editing.field === f && "xl-active"
+                    )}
+                    title="双击编辑"
                     onDoubleClick={() => {
                       setEditing({ id: it.id, field: f });
                       setDraft(it[f]);
@@ -128,25 +372,25 @@ export function BoqTable() {
                           if (e.key === "Enter") commit();
                           if (e.key === "Escape") setEditing(null);
                         }}
-                        className="w-20 rounded border border-blue-300 px-1 py-0 text-right text-[12px] outline-none"
+                        className="w-20 border-0 bg-transparent px-0 py-0 text-right text-[12.5px] outline-none"
                       />
                     ) : (
                       it[f]
                     )}
                   </td>
                 ))}
-                <td className="mono px-2 py-1 text-right">{fmtMoney(it.totalPrice)}</td>
+                <td className="mono text-right">{fmtMoney(it.totalPrice)}</td>
               </tr>
             )
           )}
         </tbody>
       </table>
-      {filtered.length > shown.length && (
+      {sorted.length > shown.length && (
         <button
           onClick={() => setLimit((l) => l + 500)}
-          className="mx-auto my-3 block rounded border border-neutral-200 bg-white px-4 py-1.5 text-[11.5px] text-neutral-500 hover:border-neutral-300"
+          className="mx-auto my-3 block rounded border border-neutral-200 bg-[var(--surface)] px-4 py-1.5 text-[11.5px] text-neutral-500 hover:border-neutral-300"
         >
-          加载更多（还有 {filtered.length - shown.length} 行）
+          加载更多（还有 {sorted.length - shown.length} 行）
         </button>
       )}
       {!items.length && (
@@ -169,53 +413,74 @@ const ANOMALY_BADGE: Record<string, string> = {
 };
 
 export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "anomalyTable" }> }) {
+  let rn = 0;
   return (
-    <div className="h-full space-y-3 overflow-auto p-4">
-      {view.rows.map((g: AnomalyRow, gi) => {
-        const min = Math.min(...g.items.map((i) => Number(i.unitPrice)));
-        const max = Math.max(...g.items.map((i) => Number(i.unitPrice)));
-        return (
-          <div key={gi} className="overflow-hidden rounded-md border border-neutral-200 bg-white">
-            <div className="flex items-center gap-2 border-b border-neutral-100 px-3 py-2">
-              <AlertTriangle size={13} className="text-amber-600" />
-              <span className="text-[12.5px] font-medium">{g.label}</span>
-              {g.spread && (
-                <span className={cn("rounded px-1.5 py-0.5 text-[11px]", ANOMALY_BADGE[view.anomalyType])}>
-                  价差 {fmtMoney(g.spread)}
-                </span>
-              )}
-              <span className="ml-auto text-[11px] text-neutral-400">{g.reason}</span>
-            </div>
-            <table className="w-full text-[12px]">
-              <tbody>
-                {g.items.map((it) => {
-                  const p = Number(it.unitPrice);
-                  return (
-                    <tr key={it.id} className="border-b border-neutral-50 last:border-0">
-                      <td className="mono w-28 px-3 py-1.5 text-neutral-500">{it.code || "—"}</td>
-                      <td className="px-2 py-1.5">{it.name}</td>
-                      <td className="max-w-48 truncate px-2 py-1.5 text-neutral-500" title={it.feature}>
-                        {it.feature}
-                      </td>
-                      <td className="w-10 px-2 py-1.5 text-neutral-500">{it.unit}</td>
-                      <td className="mono w-16 px-2 py-1.5 text-right">{it.quantity}</td>
-                      <td
-                        className={cn(
-                          "mono w-24 px-3 py-1.5 text-right font-medium",
-                          p === max && max !== min && "text-red-600",
-                          p === min && max !== min && "text-green-700"
+    <div className="h-full overflow-auto p-4">
+      <div className="xl-sheet overflow-hidden rounded-lg">
+        <table className="xl-table">
+          <thead>
+            <tr>
+              <th className="xl-rn"></th>
+              <th className="w-28">项目编码</th>
+              <th>项目名称</th>
+              <th>项目特征</th>
+              <th className="w-12">单位</th>
+              <th className="w-20 text-right">工程量</th>
+              <th className="w-24 text-right">综合单价</th>
+            </tr>
+          </thead>
+          <tbody>
+            {view.rows.map((g: AnomalyRow, gi) => {
+              const min = Math.min(...g.items.map((i) => Number(i.unitPrice)));
+              const max = Math.max(...g.items.map((i) => Number(i.unitPrice)));
+              return (
+                <Fragment key={gi}>
+                  <tr className="xl-group">
+                    <td className="xl-rn"></td>
+                    <td colSpan={6}>
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle size={12} className="text-amber-600" />
+                        <span>{g.label}</span>
+                        {g.spread && (
+                          <span className={cn("rounded px-1.5 py-0.5 text-[11px]", ANOMALY_BADGE[view.anomalyType])}>
+                            价差 {fmtMoney(g.spread)}
+                          </span>
                         )}
-                      >
-                        {fmtMoney(it.unitPrice)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
-      })}
+                        <span className="ml-auto pr-1 text-[11px] font-normal text-neutral-400">{g.reason}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {g.items.map((it) => {
+                    const p = Number(it.unitPrice);
+                    rn += 1;
+                    return (
+                      <tr key={it.id}>
+                        <td className="xl-rn">{rn}</td>
+                        <td className="mono text-neutral-500">{it.code || "—"}</td>
+                        <td className="max-w-56 truncate" title={it.name}>{it.name}</td>
+                        <td className="max-w-48 truncate text-neutral-500" title={it.feature}>
+                          {it.feature}
+                        </td>
+                        <td className="text-neutral-500">{it.unit}</td>
+                        <td className="mono text-right">{it.quantity}</td>
+                        <td
+                          className={cn(
+                            "mono text-right font-medium",
+                            p === max && max !== min && "text-red-600",
+                            p === min && max !== min && "text-green-700"
+                          )}
+                        >
+                          {fmtMoney(it.unitPrice)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       {!view.rows.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">
           未发现异常 ✓
@@ -241,29 +506,32 @@ const MATCH_LABEL: Record<string, string> = {
 export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: "quotationMatch" }> }) {
   return (
     <div className="h-full overflow-auto p-4">
-      <table className="w-full border-collapse text-[12.5px]">
-        <thead className="sticky top-0 bg-white">
-          <tr className="border-b border-neutral-200 text-left text-neutral-500">
-            <th className="px-2 py-1.5 font-normal">询价材料</th>
-            <th className="px-2 py-1.5 font-normal">规格</th>
-            <th className="px-2 py-1.5 font-normal">品牌</th>
-            <th className="px-2 py-1.5 text-right font-normal">询价</th>
-            <th className="px-2 py-1.5 font-normal">匹配清单项</th>
-            <th className="w-20 px-2 py-1.5 font-normal">置信度</th>
-            <th className="w-20 px-2 py-1.5 font-normal">状态</th>
+      <div className="xl-sheet overflow-hidden rounded-lg">
+      <table className="xl-table">
+        <thead>
+          <tr>
+            <th className="xl-rn"></th>
+            <th>询价材料</th>
+            <th>规格</th>
+            <th>品牌</th>
+            <th className="text-right">询价</th>
+            <th>匹配清单项</th>
+            <th className="w-20">置信度</th>
+            <th className="w-20">状态</th>
           </tr>
         </thead>
         <tbody>
-          {view.rows.map((r: QuotationMatchRow) => (
-            <tr key={r.quotationItemId} className="border-b border-neutral-100">
-              <td className="px-2 py-1.5">{r.materialName}</td>
-              <td className="mono px-2 py-1.5 text-neutral-500">{r.spec || "—"}</td>
-              <td className="px-2 py-1.5 text-neutral-500">{r.brand || "—"}</td>
-              <td className="mono px-2 py-1.5 text-right">{fmtMoney(r.price)}</td>
-              <td className="max-w-64 truncate px-2 py-1.5 text-neutral-600">
+          {view.rows.map((r: QuotationMatchRow, ri) => (
+            <tr key={r.quotationItemId}>
+              <td className="xl-rn">{ri + 1}</td>
+              <td className="max-w-48 truncate" title={r.materialName}>{r.materialName}</td>
+              <td className="mono text-neutral-500">{r.spec || "—"}</td>
+              <td className="text-neutral-500">{r.brand || "—"}</td>
+              <td className="mono text-right">{fmtMoney(r.price)}</td>
+              <td className="max-w-64 truncate text-neutral-600">
                 {r.matchedNames.join("、") || "—"}
               </td>
-              <td className="px-2 py-1.5">
+              <td>
                 <div className="h-1 w-16 rounded bg-neutral-100">
                   <div
                     className={cn("h-1 rounded", r.confidence >= 60 ? "bg-green-500" : r.confidence >= 30 ? "bg-amber-400" : "bg-neutral-300")}
@@ -271,7 +539,7 @@ export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: 
                   />
                 </div>
               </td>
-              <td className="px-2 py-1.5">
+              <td>
                 <span className={cn("rounded px-1.5 py-0.5 text-[11px]", MATCH_STYLE[r.status])}>
                   {MATCH_LABEL[r.status]}
                 </span>
@@ -280,6 +548,7 @@ export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: 
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -335,35 +604,38 @@ export function Breakdown({ view }: { view: Extract<WorkspaceView, { kind: "brea
 /* ---------------- Diff ---------------- */
 
 export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff" }> }) {
-  const byItem = useMemo(() => {
-    const m = new Map<string, DiffRow[]>();
-    view.rows.forEach((r) => {
-      const arr = m.get(r.itemId) ?? [];
-      arr.push(r);
-      m.set(r.itemId, arr);
-    });
-    return [...m.entries()];
-  }, [view.rows]);
-
   return (
-    <div className="h-full space-y-3 overflow-auto p-4">
-      {byItem.map(([itemId, rows]) => (
-        <div key={itemId} className="overflow-hidden rounded-md border border-neutral-200 bg-white">
-          <div className="border-b border-neutral-100 px-3 py-1.5 text-[12px] font-medium">
-            {rows[0].code && <span className="mono mr-2 text-neutral-400">{rows[0].code}</span>}
-            {rows[0].name}
-          </div>
-          {rows.map((r, i) => (
-            <div key={i} className="flex items-center gap-3 px-3 py-1 text-[12px]">
-              <GitCompareArrows size={12} className="text-neutral-400" />
-              <span className="w-16 text-neutral-500">{FIELD_LABEL[r.field] ?? r.field}</span>
-              <span className="mono rounded bg-red-50 px-1.5 text-red-700 line-through">{r.before}</span>
-              <span className="text-neutral-300">→</span>
-              <span className="mono rounded bg-green-50 px-1.5 text-green-700">{r.after}</span>
-            </div>
-          ))}
-        </div>
-      ))}
+    <div className="h-full overflow-auto p-4">
+      <div className="xl-sheet overflow-hidden rounded-lg">
+        <table className="xl-table">
+          <thead>
+            <tr>
+              <th className="xl-rn"></th>
+              <th className="w-28">编码</th>
+              <th>名称</th>
+              <th className="w-20">字段</th>
+              <th className="w-32 text-right">修改前</th>
+              <th className="w-32 text-right">修改后</th>
+            </tr>
+          </thead>
+          <tbody>
+            {view.rows.map((r, i) => (
+              <tr key={i}>
+                <td className="xl-rn">{i + 1}</td>
+                <td className="mono text-neutral-500">{r.code || "—"}</td>
+                <td className="max-w-56 truncate" title={r.name}>{r.name}</td>
+                <td className="text-neutral-500">{FIELD_LABEL[r.field] ?? r.field}</td>
+                <td className="mono text-right">
+                  <span className="rounded bg-red-50 px-1.5 text-red-700 line-through">{r.before}</span>
+                </td>
+                <td className="mono text-right">
+                  <span className="rounded bg-green-50 px-1.5 text-green-700">{r.after}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {!view.rows.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">无变化</div>
       )}
@@ -380,39 +652,42 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
         综合单价 = 人工+辅材+机械 + 主材价×耗量 + (人工+机械)×(管理费{(view.mgmtRate * 100).toFixed(0)}%+利润{(view.profitRate * 100).toFixed(0)}%)
         <span className="ml-2">· 内置参考定额，接入正式定额库后自动替换</span>
       </div>
-      <table className="w-full border-collapse text-[12.5px]">
-        <thead className="sticky top-0 bg-white">
-          <tr className="border-b border-neutral-200 text-left text-neutral-500">
-            <th className="px-2 py-1.5 font-normal">清单项</th>
-            <th className="px-2 py-1.5 font-normal">定额子目</th>
-            <th className="px-2 py-1.5 text-right font-normal">人工</th>
-            <th className="px-2 py-1.5 text-right font-normal">辅材</th>
-            <th className="px-2 py-1.5 text-right font-normal">机械</th>
-            <th className="px-2 py-1.5 text-right font-normal">主材</th>
-            <th className="px-2 py-1.5 text-right font-normal">管+利</th>
-            <th className="px-2 py-1.5 text-right font-normal">测算价</th>
-            <th className="px-2 py-1.5 text-right font-normal">清单价</th>
-            <th className="px-2 py-1.5 text-right font-normal">偏差</th>
+      <div className="xl-sheet overflow-hidden rounded-lg">
+      <table className="xl-table">
+        <thead>
+          <tr>
+            <th className="xl-rn"></th>
+            <th>清单项</th>
+            <th>定额子目</th>
+            <th className="text-right">人工</th>
+            <th className="text-right">辅材</th>
+            <th className="text-right">机械</th>
+            <th className="text-right">主材</th>
+            <th className="text-right">管+利</th>
+            <th className="text-right">测算价</th>
+            <th className="text-right">清单价</th>
+            <th className="text-right">偏差</th>
           </tr>
         </thead>
         <tbody>
-          {view.rows.map((r) => (
-            <tr key={r.itemId} className="border-b border-neutral-100">
-              <td className="max-w-40 truncate px-2 py-1.5" title={r.name}>{r.name}</td>
-              <td className="px-2 py-1.5 text-neutral-500">
+          {view.rows.map((r, ri) => (
+            <tr key={r.itemId}>
+              <td className="xl-rn">{ri + 1}</td>
+              <td className="max-w-40 truncate" title={r.name}>{r.name}</td>
+              <td className="text-neutral-500">
                 {r.quotaCode ? <span className="mono text-[11px]">{r.quotaCode}</span> : "—"}
               </td>
-              <td className="mono px-2 py-1.5 text-right">{r.labor ?? "—"}</td>
-              <td className="mono px-2 py-1.5 text-right">{r.materialAux ?? "—"}</td>
-              <td className="mono px-2 py-1.5 text-right">{r.machine ?? "—"}</td>
-              <td className="mono px-2 py-1.5 text-right">
+              <td className="mono text-right">{r.labor ?? "—"}</td>
+              <td className="mono text-right">{r.materialAux ?? "—"}</td>
+              <td className="mono text-right">{r.machine ?? "—"}</td>
+              <td className="mono text-right">
                 {r.needsMainPrice ? <span className="text-amber-600">缺主材价</span> : r.mainMaterial ?? "—"}
               </td>
-              <td className="mono px-2 py-1.5 text-right">{r.fee ?? "—"}</td>
-              <td className="mono px-2 py-1.5 text-right font-medium">{r.calcPrice ?? "—"}</td>
-              <td className="mono px-2 py-1.5 text-right text-neutral-500">{fmtMoney(r.listPrice)}</td>
+              <td className="mono text-right">{r.fee ?? "—"}</td>
+              <td className="mono text-right font-medium">{r.calcPrice ?? "—"}</td>
+              <td className="mono text-right text-neutral-500">{fmtMoney(r.listPrice)}</td>
               <td className={cn(
-                "mono px-2 py-1.5 text-right",
+                "mono text-right",
                 r.deviation !== null && Math.abs(Number(r.deviation)) > 20 && "font-medium text-red-600"
               )}>
                 {r.deviation !== null ? `${Number(r.deviation) > 0 ? "+" : ""}${r.deviation}%` : "—"}
@@ -421,6 +696,7 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
           ))}
         </tbody>
       </table>
+      </div>
       {!view.rows.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">
           没有可测算的清单项
@@ -452,7 +728,7 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
   const s = view.summary;
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-4 py-2 text-[12px]">
+      <div className="flex items-center gap-2 border-b border-neutral-200 bg-[var(--surface)] px-4 py-2 text-[12px]">
         <span className="text-neutral-500">
           差额合计 <b className="mono text-neutral-800">{fmtMoney(s.totalDelta)}</b> 元
         </span>
@@ -478,34 +754,36 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
         </div>
       </div>
       <div className="flex-1 overflow-auto">
-        <table className="w-full border-collapse text-[12px]">
-          <thead className="sticky top-0 bg-white">
-            <tr className="border-b border-neutral-200 text-left text-neutral-500">
-              <th className="w-24 px-2 py-1.5 font-normal">编码</th>
-              <th className="px-2 py-1.5 font-normal">名称</th>
-              <th className="w-16 px-2 py-1.5 font-normal">状态</th>
-              <th className="w-16 px-2 py-1.5 text-right font-normal" title={view.labelA}>A量</th>
-              <th className="w-16 px-2 py-1.5 text-right font-normal" title={view.labelB}>B量</th>
-              <th className="w-20 px-2 py-1.5 text-right font-normal">A单价</th>
-              <th className="w-20 px-2 py-1.5 text-right font-normal">B单价</th>
-              <th className="w-24 px-2 py-1.5 text-right font-normal">差额</th>
+        <table className="xl-table text-[12px]">
+          <thead>
+            <tr>
+              <th className="xl-rn"></th>
+              <th className="w-24">编码</th>
+              <th>名称</th>
+              <th className="w-16">状态</th>
+              <th className="w-16 text-right" title={view.labelA}>A量</th>
+              <th className="w-16 text-right" title={view.labelB}>B量</th>
+              <th className="w-20 text-right">A单价</th>
+              <th className="w-20 text-right">B单价</th>
+              <th className="w-24 text-right">差额</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.key} className="border-b border-neutral-100">
-                <td className="mono px-2 py-1 text-neutral-500">{r.code || "—"}</td>
-                <td className="max-w-44 truncate px-2 py-1" title={r.name}>{r.name}</td>
-                <td className="px-2 py-1">
+            {rows.map((r, ri) => (
+              <tr key={r.key}>
+                <td className="xl-rn">{ri + 1}</td>
+                <td className="mono text-neutral-500">{r.code || "—"}</td>
+                <td className="max-w-44 truncate" title={r.name}>{r.name}</td>
+                <td>
                   <span className={cn("rounded px-1.5 py-0.5 text-[10.5px]", CMP_STYLE[r.status])}>
                     {CMP_LABEL[r.status]}
                   </span>
                 </td>
-                <td className="mono px-2 py-1 text-right">{r.aQty ?? "—"}</td>
-                <td className={cn("mono px-2 py-1 text-right", r.qtyDelta && "font-medium text-blue-700")}>{r.bQty ?? "—"}</td>
-                <td className="mono px-2 py-1 text-right">{r.aPrice ?? "—"}</td>
-                <td className={cn("mono px-2 py-1 text-right", r.priceDelta && "font-medium text-amber-700")}>{r.bPrice ?? "—"}</td>
-                <td className={cn("mono px-2 py-1 text-right", Number(r.totalDelta) !== 0 && "font-medium")}>
+                <td className="mono text-right">{r.aQty ?? "—"}</td>
+                <td className={cn("mono text-right", r.qtyDelta && "font-medium text-blue-700")}>{r.bQty ?? "—"}</td>
+                <td className="mono text-right">{r.aPrice ?? "—"}</td>
+                <td className={cn("mono text-right", r.priceDelta && "font-medium text-amber-700")}>{r.bPrice ?? "—"}</td>
+                <td className={cn("mono text-right", Number(r.totalDelta) !== 0 && "font-medium")}>
                   {r.totalDelta ? fmtMoney(r.totalDelta) : "—"}
                 </td>
               </tr>
@@ -523,7 +801,7 @@ export function DocumentView({ view }: { view: Extract<WorkspaceView, { kind: "d
   return (
     <div className="h-full space-y-4 overflow-auto p-6">
       {view.pages.map((p, i) => (
-        <div key={i} className="rounded-md border border-neutral-200 bg-white p-5 shadow-sm">
+        <div key={i} className="rounded-xl border border-neutral-200 bg-[var(--surface)] p-5 shadow-sm">
           <div className="mb-2 text-[10.5px] text-neutral-300">第 {i + 1} 页</div>
           <pre className="whitespace-pre-wrap font-sans text-[12px] leading-relaxed text-neutral-700">{p}</pre>
         </div>
@@ -541,22 +819,25 @@ export function FactList() {
   const { facts } = useStore();
   return (
     <div className="h-full overflow-auto p-4">
-      <table className="w-full text-[12.5px]">
+      <div className="xl-sheet overflow-hidden rounded-lg">
+      <table className="xl-table">
         <thead>
-          <tr className="border-b border-neutral-200 text-left text-neutral-500">
-            <th className="px-2 py-1.5 font-normal">类型</th>
-            <th className="px-2 py-1.5 font-normal">键</th>
-            <th className="px-2 py-1.5 font-normal">值</th>
-            <th className="px-2 py-1.5 font-normal">来源</th>
+          <tr>
+            <th className="xl-rn"></th>
+            <th className="w-32">类型</th>
+            <th>键</th>
+            <th>值</th>
+            <th className="w-24">来源</th>
           </tr>
         </thead>
         <tbody>
-          {facts.map((f) => (
-            <tr key={f.id} className="border-b border-neutral-100">
-              <td className="px-2 py-1.5 text-neutral-500">{f.factType}</td>
-              <td className="px-2 py-1.5">{f.key}</td>
-              <td className="px-2 py-1.5">{f.value}</td>
-              <td className="px-2 py-1.5">
+          {facts.map((f, fi) => (
+            <tr key={f.id}>
+              <td className="xl-rn">{fi + 1}</td>
+              <td className="text-neutral-500">{f.factType}</td>
+              <td>{f.key}</td>
+              <td className="max-w-80 truncate" title={f.value}>{f.value}</td>
+              <td>
                 <span className={cn("rounded px-1.5 py-0.5 text-[11px]", f.source === "INFERRED" ? "bg-amber-50 text-amber-700" : "bg-neutral-100 text-neutral-500")}>
                   {SOURCE_LABEL[f.source] ?? f.source}
                 </span>
@@ -565,6 +846,7 @@ export function FactList() {
           ))}
         </tbody>
       </table>
+      </div>
       {!facts.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">
           暂无项目事实
@@ -579,7 +861,7 @@ export function FactList() {
 export function ExportResult({ view }: { view: Extract<WorkspaceView, { kind: "exportResult" }> }) {
   return (
     <div className="flex h-full items-center justify-center p-8">
-      <div className="w-80 rounded-lg border border-neutral-200 bg-white p-5">
+      <div className="w-80 rounded-xl border border-neutral-200 bg-[var(--surface)] p-5">
         <FileSpreadsheet size={20} className="text-neutral-400" />
         <div className="mt-3 text-[13px] font-medium">{view.filename}</div>
         <div className="mt-1 text-xs text-neutral-500">{view.summary}</div>
@@ -605,22 +887,46 @@ export function FileList() {
     setBusy(null);
   };
   return (
-    <div className="h-full space-y-px overflow-auto p-4">
-      {files.map((f) => (
-        <div key={f.id} className="group flex items-center gap-3 rounded-md border border-neutral-100 bg-white px-3 py-2 text-[12.5px]">
-          <FileSpreadsheet size={14} className="text-neutral-400" />
-          <span>{f.filename}</span>
-          <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-500">{f.kindLabel}</span>
-          <span className="ml-auto text-[11px] text-neutral-400">{f.status}</span>
-          <button
-            onClick={() => remove(f.id, f.filename)}
-            disabled={busy === f.id}
-            className="invisible rounded px-1.5 py-0.5 text-[11px] text-red-500 hover:bg-red-50 group-hover:visible disabled:opacity-40"
-          >
-            删除
-          </button>
-        </div>
-      ))}
+    <div className="h-full overflow-auto p-4">
+      <div className="xl-sheet overflow-hidden rounded-lg">
+        <table className="xl-table">
+          <thead>
+            <tr>
+              <th className="xl-rn"></th>
+              <th>文件名</th>
+              <th className="w-28">类型</th>
+              <th className="w-24">状态</th>
+              <th className="w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {files.map((f, fi) => (
+              <tr key={f.id} className="group">
+                <td className="xl-rn">{fi + 1}</td>
+                <td>
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet size={13} className="shrink-0 text-neutral-400" />
+                    <span className="max-w-96 truncate" title={f.filename}>{f.filename}</span>
+                  </div>
+                </td>
+                <td>
+                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-500">{f.kindLabel}</span>
+                </td>
+                <td className="text-[11.5px] text-neutral-500">{f.status}</td>
+                <td className="text-center">
+                  <button
+                    onClick={() => remove(f.id, f.filename)}
+                    disabled={busy === f.id}
+                    className="invisible rounded px-1.5 py-0.5 text-[11px] text-red-500 hover:bg-red-50 group-hover:visible disabled:opacity-40"
+                  >
+                    删除
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {!files.length && (
         <div className="flex h-40 items-center justify-center text-xs text-neutral-400">还没有文件</div>
       )}

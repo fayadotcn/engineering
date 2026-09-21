@@ -7,7 +7,8 @@ import {
 } from "./views";
 import type { WorkspaceView } from "@shared/types";
 import {
-  ArrowUp, Check, FileSpreadsheet, Loader2, Paperclip, Receipt, ShieldQuestion, Wrench, X,
+  ArrowUp, Check, ChevronDown, ChevronRight, CircleCheck, CircleX,
+  FileSpreadsheet, Loader2, Paperclip, Receipt, ShieldQuestion, Sparkles, Wrench, X,
 } from "lucide-react";
 
 const TOOL_LABEL: Record<string, string> = {
@@ -77,9 +78,9 @@ function ConfirmCard({ b }: { b: Extract<ConvBlock, { type: "confirm" }> }) {
   };
   const pending = !b.decided;
   return (
-    <div className="fadein rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+    <div className="fadein rounded-xl border px-3 py-2.5" style={{ borderColor: "color-mix(in srgb, var(--warning-soft-fg) 32%, transparent)", background: "var(--warning-soft-bg)" }}>
       <div className="flex items-start gap-2">
-        <ShieldQuestion size={14} className="mt-0.5 shrink-0 text-amber-600" />
+        <ShieldQuestion size={14} className="mt-0.5 shrink-0" style={{ color: "var(--warning-soft-fg)" }} />
         <div className="min-w-0 flex-1">
           <div className="text-[12.5px] font-medium text-neutral-800">需要确认</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-neutral-600">{b.description}</div>
@@ -98,7 +99,7 @@ function ConfirmCard({ b }: { b: Extract<ConvBlock, { type: "confirm" }> }) {
             <button
               onClick={() => decide(false)}
               disabled={!!busy}
-              className="rounded-md border border-neutral-300 px-3 py-1 text-[12px] text-neutral-600 hover:bg-white disabled:opacity-40"
+              className="rounded-md border border-neutral-300 px-3 py-1 text-[12px] text-neutral-600 hover:bg-[var(--surface)] disabled:opacity-40"
             >
               取消
             </button>
@@ -113,6 +114,174 @@ function ConfirmCard({ b }: { b: Extract<ConvBlock, { type: "confirm" }> }) {
   );
 }
 
+/* ---------------- Manus 式任务卡 ----------------
+   同一 run 的 activity/thought/tool/confirm/receipt 聚合成一张卡：
+   标题栏状态 + 竖向步骤时间线 + 工具步可展开看参数与结果。 */
+
+function ToolStep({ b }: { b: Extract<ConvBlock, { type: "tool" }> }) {
+  const [open, setOpen] = useState(false);
+  const hasDetail = Boolean(b.args || b.resultMsg);
+  return (
+    <div>
+      <button
+        onClick={() => hasDetail && setOpen(!open)}
+        className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-[12px] transition-colors enabled:hover:bg-[var(--hover)]"
+      >
+        {b.status === "running" ? (
+          <Loader2 size={12} className="spin shrink-0 text-neutral-400" />
+        ) : b.status === "ERROR" ? (
+          <CircleX size={12} className="shrink-0 text-red-500" />
+        ) : (
+          <Wrench size={11} className="shrink-0 text-neutral-400" />
+        )}
+        <span className={b.status === "ERROR" ? "text-red-600" : "text-neutral-700"}>
+          {TOOL_LABEL[b.tool] ?? b.tool}
+        </span>
+        <span className="mono text-[10.5px] text-neutral-400">
+          {b.status === "running" ? "…" : b.ms != null ? `${b.ms}ms` : ""}
+        </span>
+        {hasDetail && (
+          <ChevronRight
+            size={11}
+            className={`ml-auto shrink-0 text-neutral-300 transition-transform ${open ? "rotate-90" : ""}`}
+          />
+        )}
+      </button>
+      {open && hasDetail && (
+        <div className="mb-1 ml-5 space-y-1 rounded-md bg-[var(--sidebar)] px-2.5 py-2 text-[11px]">
+          {b.args && (
+            <div>
+              <div className="text-[10px] text-neutral-400">参数</div>
+              <div className="mono break-all text-neutral-600">{b.args}</div>
+            </div>
+          )}
+          {b.resultMsg && (
+            <div>
+              <div className="text-[10px] text-neutral-400">结果</div>
+              <div className="whitespace-pre-wrap text-neutral-600">{b.resultMsg}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskStep({ b }: { b: ConvBlock }) {
+  if (b.type === "activity")
+    return (
+      <div className="flex items-center gap-2 px-1 py-1 text-[12px] text-neutral-500">
+        {b.live ? (
+          <Loader2 size={11} className="spin shrink-0 text-[var(--brand-accent)]" />
+        ) : (
+          <Check size={11} className="shrink-0 text-neutral-300" />
+        )}
+        {b.text}
+      </div>
+    );
+  if (b.type === "thought")
+    return (
+      <div className="flex items-start gap-2 px-1 py-1 text-[12px] leading-relaxed text-neutral-500">
+        <Sparkles size={11} className="mt-1 shrink-0 text-[var(--brand-accent)]" />
+        <span className="whitespace-pre-wrap">{b.text}</span>
+      </div>
+    );
+  if (b.type === "tool") return <ToolStep b={b} />;
+  if (b.type === "confirm") return <div className="py-0.5"><ConfirmCard b={b} /></div>;
+  if (b.type === "receipt")
+    return (
+      <div className="group flex items-center gap-2 px-1 py-1 text-[12px] text-neutral-500">
+        <Receipt size={11} className="shrink-0 text-neutral-400" />
+        <span className="truncate">{b.summary}</span>
+        <RevertButton receiptId={b.receiptId} />
+      </div>
+    );
+  if (b.type === "error")
+    return (
+      <div className="flex items-center gap-2 px-1 py-1 text-[12px] text-red-600">
+        <X size={11} /> {b.text}
+      </div>
+    );
+  return null;
+}
+
+function TaskCard({ steps, live }: { steps: ConvBlock[]; live: boolean }) {
+  const [open, setOpen] = useState(true);
+  const toolCount = steps.filter((s) => s.type === "tool").length;
+  const failed =
+    steps.some((s) => s.type === "error") ||
+    steps.some((s) => s.type === "tool" && s.status === "ERROR");
+  const liveActivity = [...steps]
+    .reverse()
+    .find((s): s is Extract<ConvBlock, { type: "activity" }> => s.type === "activity" && s.live);
+  const doneSteps = steps.filter(
+    (s) => (s.type === "tool" && s.status !== "running") || s.type === "receipt"
+  ).length;
+
+  return (
+    <div className="fadein overflow-hidden rounded-xl border border-neutral-200 bg-[var(--surface)]">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--hover)]"
+      >
+        {live ? (
+          <Loader2 size={13} className="spin shrink-0 text-[var(--brand-accent)]" />
+        ) : failed ? (
+          <CircleX size={13} className="shrink-0 text-red-500" />
+        ) : (
+          <CircleCheck size={13} className="shrink-0 text-[var(--success-soft-fg)]" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-neutral-800">
+          {live ? liveActivity?.text ?? "任务进行中" : failed ? "执行异常" : "任务完成"}
+        </span>
+        <span className="shrink-0 text-[11px] text-neutral-400">
+          {live ? `${doneSteps}/${toolCount || "…"} 步` : `${toolCount} 步`}
+        </span>
+        <ChevronDown
+          size={13}
+          className={`shrink-0 text-neutral-400 transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open && (
+        <div className="relative space-y-0.5 border-t border-neutral-100 px-2 py-2">
+          <div className="pointer-events-none absolute bottom-3 left-[15px] top-3 w-px bg-neutral-100" />
+          {steps.map((b, i) => (
+            <div key={i} className="relative">
+              <TaskStep b={b} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 把同一 run 的过程块聚合为任务卡；user/upload/agent 消息保持独立 */
+type RenderItem =
+  | { kind: "single"; block: ConvBlock }
+  | { kind: "task"; runId: string; steps: ConvBlock[] };
+
+function groupBlocks(blocks: ConvBlock[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  let task: { runId: string; steps: ConvBlock[] } | null = null;
+  for (const b of blocks) {
+    if (b.type === "user" || b.type === "upload" || b.type === "agent") {
+      if (task) out.push({ kind: "task", runId: task.runId, steps: task.steps });
+      task = null;
+      out.push({ kind: "single", block: b });
+      continue;
+    }
+    const rid = "runId" in b ? (b.runId ?? "") : "";
+    if (!task || task.runId !== rid) {
+      if (task) out.push({ kind: "task", runId: task.runId, steps: task.steps });
+      task = { runId: rid, steps: [] };
+    }
+    task.steps.push(b);
+  }
+  if (task) out.push({ kind: "task", runId: task.runId, steps: task.steps });
+  return out;
+}
+
 function Block({ b }: { b: ConvBlock }) {
   if (b.type === "user")
     return (
@@ -125,7 +294,7 @@ function Block({ b }: { b: ConvBlock }) {
   if (b.type === "upload")
     return (
       <div className="fadein flex justify-end">
-        <div className="flex max-w-[85%] items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-[13px]">
+        <div className="flex max-w-[85%] items-center gap-2 rounded-lg border border-neutral-200 bg-[var(--surface)] px-3 py-2 text-[13px]">
           <FileSpreadsheet size={14} className="text-neutral-400" />
           {b.filename}
         </div>
@@ -137,50 +306,7 @@ function Block({ b }: { b: ConvBlock }) {
         {b.text}
       </div>
     );
-  if (b.type === "activity")
-    return (
-      <div className="fadein flex items-center gap-2 px-1 text-[12px] text-neutral-500">
-        {b.live ? (
-          <Loader2 size={11} className="pulse text-neutral-400" />
-        ) : (
-          <Check size={11} className="text-neutral-300" />
-        )}
-        {b.text}
-      </div>
-    );
-  if (b.type === "tool")
-    return (
-      <div className="fadein flex items-center gap-1.5 px-1">
-        <span
-          className={
-            "flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] " +
-            (b.status === "running"
-              ? "border-neutral-200 text-neutral-500"
-              : b.status === "OK"
-                ? "border-neutral-200 bg-neutral-50 text-neutral-600"
-                : "border-red-200 bg-red-50 text-red-600")
-          }
-        >
-          <Wrench size={10} />
-          {TOOL_LABEL[b.tool] ?? b.tool}
-          {b.status === "running" ? "…" : b.ms != null ? ` ${b.ms}ms` : ""}
-        </span>
-      </div>
-    );
-  if (b.type === "confirm") return <ConfirmCard b={b} />;
-  if (b.type === "receipt")
-    return (
-      <div className="fadein group flex items-center gap-2 px-1 text-[12px] text-neutral-500">
-        <Receipt size={11} className="text-neutral-400" />
-        <span className="truncate">{b.summary}</span>
-        <RevertButton receiptId={b.receiptId} />
-      </div>
-    );
-  return (
-    <div className="fadein flex items-center gap-2 px-1 text-[12px] text-red-600">
-      <X size={11} /> {b.text}
-    </div>
-  );
+  return null;
 }
 
 function ViewRenderer({ view }: { view: WorkspaceView }) {
@@ -239,7 +365,7 @@ export function Workbench({ projectId }: { projectId: string }) {
     <div className="flex h-screen">
       {/* left: Agent conversation */}
       <div
-        className="flex w-[400px] shrink-0 flex-col border-r border-neutral-200 bg-white"
+        className="flex w-[400px] shrink-0 flex-col border-r border-neutral-200 bg-[var(--surface)]"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
@@ -281,7 +407,7 @@ export function Workbench({ projectId }: { projectId: string }) {
                   <button
                     key={t}
                     onClick={() => void s.send(t)}
-                    className="block w-full rounded-md border border-neutral-150 border-neutral-200 px-3 py-2 text-left text-[12.5px] text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50"
+                    className="block w-full rounded-xl border border-neutral-200 px-3 py-2 text-left text-[12.5px] text-neutral-600 transition-colors hover:border-neutral-300 hover:bg-[var(--hover)]"
                   >
                     {t}
                   </button>
@@ -289,9 +415,17 @@ export function Workbench({ projectId }: { projectId: string }) {
               </div>
             </div>
           )}
-          {s.blocks.map((b, i) => (
-            <Block key={i} b={b} />
-          ))}
+          {(() => {
+            const groups = groupBlocks(s.blocks);
+            const lastTaskIdx = groups.reduce((n, g, i) => (g.kind === "task" ? i : n), -1);
+            return groups.map((g, i) =>
+              g.kind === "single" ? (
+                <Block key={i} b={g.block} />
+              ) : (
+                <TaskCard key={i} steps={g.steps} live={s.running && i === lastTaskIdx} />
+              )
+            );
+          })()}
           {s.running && !s.blocks.some((b) => b.type === "activity" && b.live) && (
             <div className="flex items-center gap-2 px-1 text-[12px] text-neutral-400">
               <Loader2 size={11} className="animate-spin" /> 思考中
@@ -299,15 +433,8 @@ export function Workbench({ projectId }: { projectId: string }) {
           )}
         </div>
 
-        <div className="border-t border-neutral-100 p-3">
-          <div className="flex items-end gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 focus-within:border-neutral-400">
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="pb-0.5 text-neutral-400 hover:text-neutral-600"
-              title="上传文件"
-            >
-              <Paperclip size={15} />
-            </button>
+        <div className="p-3">
+          <div className="composer-shell">
             <input
               ref={fileRef}
               type="file"
@@ -323,30 +450,47 @@ export function Workbench({ projectId }: { projectId: string }) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   send();
                 }
               }}
-              rows={Math.min(4, Math.max(1, input.split("\n").length))}
-              placeholder="告诉我要做什么…"
-              className="flex-1 resize-none bg-transparent text-[13px] outline-none placeholder:text-neutral-400"
+              rows={Math.min(5, Math.max(1, input.split("\n").length))}
+              placeholder="发消息，或拖入 Excel / PDF…"
+              className="composer-input max-h-32 min-h-[30px] w-full resize-none px-2 py-1 text-[13.5px] leading-6"
             />
-            <button
-              onClick={send}
-              disabled={!input.trim() || s.running}
-              className="flex h-6 w-6 items-center justify-center rounded-md bg-neutral-900 text-white hover:bg-neutral-700 disabled:opacity-30"
-            >
-              {s.running ? <Loader2 size={12} className="animate-spin" /> : <ArrowUp size={13} />}
-            </button>
+            <div className="mt-0.5 flex items-center justify-between px-0.5">
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="icon-btn h-8 w-8"
+                title="上传 Excel / PDF"
+              >
+                <Paperclip size={15} />
+              </button>
+              <button
+                onClick={send}
+                disabled={!input.trim() || s.running}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all active:translate-y-px"
+                style={{
+                  background: !input.trim() || s.running ? "var(--hover)" : "var(--brand-accent)",
+                  color: !input.trim() || s.running ? "var(--ink-4)" : "var(--brand-on-accent)",
+                }}
+                title="发送"
+              >
+                {s.running ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} strokeWidth={2.2} />}
+              </button>
+            </div>
           </div>
+          <p className="mt-1.5 text-center text-[10.5px] text-neutral-400">
+            Enter 发送 · Shift+Enter 换行 · 所有修改均有回执可撤销
+          </p>
         </div>
       </div>
 
       {/* right: dynamic workspace */}
       <div className="flex min-w-0 flex-1 flex-col bg-[var(--bg)]">
         {s.views.length > 0 && (
-          <div className="flex items-center gap-px overflow-x-auto border-b border-neutral-200 bg-white px-2">
+          <div className="flex items-center gap-px overflow-x-auto border-b border-neutral-200 bg-[var(--surface)] px-2">
             {s.views.map((v) => (
               <button
                 key={v.id}
@@ -354,7 +498,7 @@ export function Workbench({ projectId }: { projectId: string }) {
                 className={
                   "whitespace-nowrap border-b-2 px-3 py-2 text-[12px] " +
                   (v.id === activeView?.id
-                    ? "border-neutral-900 font-medium text-neutral-900"
+                    ? "border-[var(--brand-accent)] font-medium text-neutral-900"
                     : "border-transparent text-neutral-500 hover:text-neutral-800")
                 }
               >
