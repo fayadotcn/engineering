@@ -267,12 +267,21 @@ export async function runLLMLoop(
   for (let round = 0; round < maxRounds; round++) {
     const streamId = `r${round}`;
     let msg: LLMMsg;
+    // 首个 token 之前没有事件流动——每 4s 心跳更新当前 activity 文案，
+    // 消除「卡在正在理解任务」的黑盒感
+    let waited = 0;
+    const heartbeat = setInterval(() => {
+      waited += 4;
+      toolCtx.emit.live?.("activity_live", { text: `正在等待模型响应 ${waited}s` });
+    }, 4000);
     try {
       msg = await callOpenAIStream(cfg, messages, tools, (text) => {
         toolCtx.emit.live?.("thought_delta", { streamId, text: text.slice(0, 1500) });
       });
     } catch {
       msg = await callOpenAI(cfg, messages, tools); // 流式不支持/中断 → 非流式兜底
+    } finally {
+      clearInterval(heartbeat);
     }
     messages.push(msg);
 

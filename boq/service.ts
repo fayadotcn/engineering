@@ -15,6 +15,11 @@ export async function importBoqFromSheets(
   fileId: string,
   sheets: ParsedSheet[]
 ): Promise<{ count: number; headers: number }> {
+  /** 数值单元格容错：取首行、去千分位/空格；非数值落 "0"（decimal.js 遇 "暂估" 会抛 Invalid argument 打断导入） */
+  const numCell = (v?: string): string => {
+    const first = (v ?? "").split("\n")[0].replace(/[,\s]/g, "");
+    return first !== "" && Number.isFinite(Number(first)) ? first : "0";
+  };
   let count = 0;
   let headers = 0;
   let sortOrder = 0;
@@ -30,12 +35,13 @@ export async function importBoqFromSheets(
         section = name;
         headers++;
       }
-      const qty = D(row.cells.quantity?.replace(/,/g, "") || 0);
-      const price = D(row.cells.unitPrice?.replace(/,/g, "") || 0);
-      const total =
-        row.cells.totalPrice && row.cells.totalPrice.replace(/,/g, "") !== ""
-          ? D(row.cells.totalPrice.replace(/,/g, ""))
-          : lineTotal(qty, price);
+      // 数值单元格容错：取首行（合并残留的换行文本）、去千分位；
+      // 非数值内容（"暂估"/"详见附图"）落 0 不打断导入，原文仍在 rawFeature/单元格里可溯
+      const qty = D(numCell(row.cells.quantity));
+      const price = D(numCell(row.cells.unitPrice));
+      const total = (row.cells.totalPrice ?? "").trim()
+        ? D(numCell(row.cells.totalPrice))
+        : lineTotal(qty, price);
       const rawFeature = row.cells.feature ?? "";
       const features = parseSemanticFeature(name, rawFeature);
       data.push({

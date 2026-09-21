@@ -249,9 +249,13 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
     }
 
     // merge continuation rows (multi-line feature/spec text split vertically)
+    // 但名称列有文字的独立行是「分部标题/小计」等结构行，绝不能并进上一条子目——
+    // 否则小计行的金额数字会污染上一条的合价列（"1589.16\n4395.33" → Decimal 抛错）
+    const SUBTOTAL_RE = /小计\s*$|合\s*计\s*$|总计\s*$/; // 名称以小计/合计/总计结尾的都是汇总行
     const merged: { cells: string[]; origIndex: number }[] = [];
     for (let i = dataStart; i < rows.length; i++) {
       const cells = rows[i];
+      const nameCell = columns.name !== undefined ? (cells[columns.name] ?? "").trim() : "";
       const hasAnchor =
         (columns.seq !== undefined && cells[columns.seq]?.trim()) ||
         (columns.code !== undefined && cells[columns.code]?.trim()) ||
@@ -259,7 +263,12 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
         (columns.quantity !== undefined && cells[columns.quantity]?.trim()) ||
         (columns.price !== undefined && cells[columns.price]?.trim()) ||
         (columns.unitPrice !== undefined && cells[columns.unitPrice]?.trim());
-      if (!hasAnchor && merged.length && cells.some((c) => c.trim())) {
+      // 汇总/小计行：不导入也不合并（分部合计由系统自己算）
+      if (!hasAnchor && SUBTOTAL_RE.test(nameCell)) continue;
+      if (
+        !hasAnchor && merged.length && cells.some((c) => c.trim()) &&
+        !nameCell // 真续行：名称列为空，只有特征/规格列有延续文本
+      ) {
         const prev = merged[merged.length - 1].cells;
         cells.forEach((c, ci) => {
           if (c.trim()) prev[ci] = prev[ci] ? prev[ci] + "\n" + c : c;
@@ -273,6 +282,14 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
     for (const { cells, origIndex } of merged) {
       const get = (k: keyof ColumnMap) =>
         columns[k] !== undefined ? cells[columns[k]!] ?? "" : "";
+      // 分页重复的表头行：≥2 个已映射列的值命中自己的列名同义词（"项目编码"/"项目名称"/"工程量"）→ 跳过
+      let echo = 0;
+      for (const [k, ci] of Object.entries(columns)) {
+        if (ci === undefined) continue;
+        const v = (cells[ci] ?? "").replace(/\s/g, "");
+        if (v && COLUMN_SYNONYMS[k as keyof ColumnMap]?.test(v)) echo++;
+      }
+      if (echo >= 2) continue;
       // embedded "N、名称：X / 型号规格：Y" fields — scan the whole row
       const joined = cells.filter((c) => hasEmbedded(c)).join("\n");
       const emb = joined ? extractEmbedded(joined) : {};

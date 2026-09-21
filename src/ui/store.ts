@@ -334,6 +334,17 @@ export const useStore = create<State>((set, get) => ({
           blocks.push({ type: "activity", text: p.text, runId, live: true });
           return { blocks };
         }
+        case "activity_live": {
+          // 心跳：原地改写当前 live activity 的文案，不产生新时间线行
+          const blocks = [...s.blocks];
+          const last = blocks[blocks.length - 1];
+          if (last?.type === "activity" && last.runId === runId && last.live) {
+            blocks[blocks.length - 1] = { ...last, text: p.text };
+            return { blocks };
+          }
+          blocks.push({ type: "activity", text: p.text, runId, live: true });
+          return { blocks };
+        }
         case "thought_delta": {
           // 模型流式增量：同 streamId 原位更新，呈现打字机效果
           const sid = (p.streamId as string) ?? "s0";

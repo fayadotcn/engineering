@@ -291,6 +291,7 @@ export interface QuotaResultRow {
 
 export type AgentEventType =
   | "activity"
+  | "activity_live" // 原地更新当前 live activity 的文本（心跳，不落库）
   | "thought"
   | "thought_delta"
   | "message"
