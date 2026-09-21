@@ -1,6 +1,6 @@
 import { listProjects } from "@project/service";
 import { NewProject } from "@/ui/NewProject";
-import { FileSpreadsheet } from "lucide-react";
+import { Database, FileSpreadsheet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -9,12 +9,20 @@ export default async function Home() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col px-6 pb-16 pt-28">
       <div className="fadein">
-        <p
-          className="text-[12px] font-medium tracking-wide"
-          style={{ color: "var(--brand-accent)" }}
-        >
-          Agent Native 造价工作台
-        </p>
+        <div className="flex items-center justify-between">
+          <p
+            className="text-[12px] font-medium tracking-wide"
+            style={{ color: "var(--brand-accent)" }}
+          >
+            Agent Native 造价工作台
+          </p>
+          <a
+            href="/admin"
+            className="flex items-center gap-1.5 rounded-full border border-neutral-200 px-3 py-1.5 text-[12px] text-neutral-500 transition-colors hover:bg-[var(--hover)] hover:text-neutral-700"
+          >
+            <Database size={12} /> 数据管理
+          </a>
+        </div>
         <h1 className="mt-2 text-[30px] font-medium leading-tight tracking-tight">
           对话即造价
         </h1>

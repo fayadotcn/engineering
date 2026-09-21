@@ -2,6 +2,7 @@ import { z } from "zod";
 import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import { listQuotations } from "@material/service";
+import { searchMaterialPrices } from "@dataset/service";
 import { matchQuotations } from "@cost-engine/match";
 import type { DiffRow } from "@shared/types";
 
@@ -19,7 +20,15 @@ registerTool({
         x.spec.toLowerCase().includes(q) ||
         x.brand.toLowerCase().includes(q)
     );
-    return { observation: hits.slice(0, 30) };
+    // 全局材料价格库（后台数据集）作为第二来源
+    const lib = await searchMaterialPrices(args.query, 20);
+    return {
+      observation: {
+        project: hits.slice(0, 30),
+        library: lib,
+        note: lib.length ? `材料库另有 ${lib.length} 条参考价` : "",
+      },
+    };
   },
 });
 
@@ -65,6 +74,16 @@ registerTool({
         filtered.set(key, g);
       }
       note = `未找到「${args.materialName}」，以下为全部询价材料`;
+    }
+    // 全局材料库价格作为参考点并入轨迹
+    const libRows = await searchMaterialPrices(args.materialName ?? "", 50);
+    for (const r of libRows) {
+      const key = `${norm(r.name)}|${norm(r.spec)}`;
+      if (q && !norm(r.name).includes(q)) continue;
+      const g = filtered.get(key) ?? { name: r.name, spec: r.spec, points: [] };
+      if (!g.points.some((p) => p.price === r.price && p.file.startsWith("材料库")))
+        g.points.push({ price: r.price, file: `材料库·${r.source}`, date: r.priceType });
+      filtered.set(key, g);
     }
     const changed = [...filtered.values()].filter(
       (g) => new Set(g.points.map((p) => p.price)).size > 1

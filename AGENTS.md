@@ -41,7 +41,15 @@ MODEL_NAME=deepseek-chat
 
 ## 目录
 
-`/agent` runtime+planner+tools · `/cost-engine` money/semantic/compare/aggregate/adjust · `/boq` `/material` `/project` 领域服务 · `/file` 存储+excel+分类 · `/database` prisma+序列化 · `/shared` 类型 · `src/app` Next 路由 · `src/ui` 双栏工作台 UI
+`/agent` runtime+planner+tools · `/cost-engine` money/semantic/compare/aggregate/adjust · `/boq` `/material` `/project` 领域服务 · `/file` 存储+excel+分类 · `/database` prisma+序列化 · `/dataset` 全局数据集（材料价格库/定额库，见下） · `/shared` 类型 · `src/app` Next 路由 · `src/ui` 双栏工作台 UI
+
+## 全局数据集（/admin 数据管理后台）
+
+- `Dataset` 模型 + `MaterialPrice` / `QuotaRow` 行表，跨项目共享；区别于项目内 `ProjectFile`。
+- 上传：`POST /api/admin/datasets`（multipart，kind=MATERIAL_PRICE|QUOTA|GENERIC）；列表/预览/删除在同路径。
+- `dataset/quotaParse.ts` 专解析定额表（定额编号/子目名称/人工费/材料费/机械费/主材耗量列）；耗量列按"每定额单位"惯例自动归一化为引擎口径"每清单单位"（耗量 ≥ unitScale 时除以倍数）。
+- `quota/service.ts getQuotaLibrary()` 合并内置参考库 + 全部已上传定额数据集（内置是兜底）。
+- `quota.calculate` 主材价查找顺序：项目询价 → 全局材料库（findLibraryPrice）；`material.search`/`getPriceHistory` 并入材料库数据并标注来源。
 
 ## 测试
 

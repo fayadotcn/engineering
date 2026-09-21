@@ -2,8 +2,8 @@ import { z } from "zod";
 import { registerTool } from "./registry";
 import { listBoq } from "@boq/service";
 import { listQuotations } from "@material/service";
-import { QUOTA_LIBRARY } from "@quota/library";
-import { calcQuota, matchQuota, mainPriceKey } from "@quota/service";
+import { calcQuota, matchQuota, mainPriceKey, getQuotaLibrary } from "@quota/service";
+import { findLibraryPrice } from "@dataset/service";
 import { getFact } from "@project/facts";
 import { D } from "@cost-engine/money";
 
@@ -14,7 +14,8 @@ registerTool({
   schema: z.object({ query: z.string() }),
   handler: async (_ctx, args: { query: string }) => {
     const q = args.query.toLowerCase();
-    const hits = QUOTA_LIBRARY.filter(
+    const lib = await getQuotaLibrary();
+    const hits = lib.filter(
       (e) =>
         e.name.toLowerCase().includes(q) ||
         e.code.toLowerCase().includes(q) ||
@@ -37,7 +38,8 @@ registerTool({
   handler: async (ctx) => {
     const items = await listBoq(ctx.projectId);
     const leaf = items.filter((i) => !i.isHeader && i.name.trim());
-    const matches = leaf.map((i) => matchQuota(i));
+    const lib = await getQuotaLibrary();
+    const matches = leaf.map((i) => matchQuota(i, 50, lib));
     const matched = matches.filter((m) => m.quota);
     return {
       observation: {
@@ -84,6 +86,12 @@ registerTool({
         return sameSpec || (nameHit && sameSpec !== false && !qSpec);
       });
       if (hit && !D(hit.price).isZero()) mainPrices[mainPriceKey(it)] = Number(hit.price);
+      else {
+        // 项目询价没命中 → 回退到全局材料价格库（后台上传的数据集）
+        const libPrice = await findLibraryPrice(f.material ?? it.name, spec);
+        if (libPrice !== null && !D(libPrice).isZero())
+          mainPrices[mainPriceKey(it)] = libPrice;
+      }
     }
 
     const mgmtFact = (await getFact(ctx.projectId, "管理费率"))?.value;
@@ -93,7 +101,8 @@ registerTool({
     const profitRate =
       args.profitRate ?? (profitFact ? Number(profitFact.replace("%", "")) / 100 : 0.09);
 
-    const rows = calcQuota(leaf, { mainPrices, mgmtRate, profitRate });
+    const lib = await getQuotaLibrary();
+    const rows = calcQuota(leaf, { mainPrices, mgmtRate, profitRate, lib });
     const done = rows.filter((r) => r.quotaCode);
     const needMain = done.filter((r) => r.needsMainPrice).length;
     const deviant = done.filter(

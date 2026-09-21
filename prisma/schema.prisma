@@ -188,3 +188,62 @@ model Artifact {
   createdByRunId String?
   createdAt   DateTime @default(now())
 }
+
+/* ---------------- 后台数据管理：全局共享数据集 ---------------- */
+
+model Dataset {
+  id         String   @id @default(cuid())
+  kind       String   // MATERIAL_PRICE | QUOTA | GENERIC
+  name       String
+  filename   String
+  storageKey String
+  sizeBytes  Int      @default(0)
+  status     String   @default("PARSED") // PARSED | FAILED
+  rowCount   Int      @default(0)
+  meta       String   @default("{}") // JSON: sheets, errors
+  createdAt  DateTime @default(now())
+  materialPrices MaterialPrice[]
+  quotaRows       QuotaRow[]
+}
+
+// 材料价格库：跨项目共享的信息价/市场价/供应商价
+model MaterialPrice {
+  id        String   @id @default(cuid())
+  datasetId String?
+  dataset   Dataset? @relation(fields: [datasetId], references: [id])
+  name      String
+  spec      String   @default("")
+  unit      String   @default("")
+  brand     String   @default("")
+  price     Decimal  @default(0)
+  priceType String   @default("MARKET") // MARKET | INFO | SUPPLY
+  region    String   @default("")
+  period    String   @default("") // 价格期，如 2024-06
+  features  String   @default("{}") // JSON BoqSemanticFeature
+  raw       String   @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([name])
+  @@index([datasetId])
+}
+
+// 定额库：消耗量定额子目（人工/辅材/机械 + 主材耗量）
+model QuotaRow {
+  id            String   @id @default(cuid())
+  datasetId     String?
+  dataset       Dataset? @relation(fields: [datasetId], references: [id])
+  code          String
+  name          String
+  unit          String   @default("")
+  unitScale     Float    @default(1) // 定额单位倍数：10m→10
+  labor         Decimal  @default(0)
+  material      Decimal  @default(0)
+  machine       Decimal  @default(0)
+  mainQtyPerUnit Float   @default(1) // 主材耗量/每清单单位
+  matchKeys     String   @default("{}") // JSON: 从名称解析出的语义特征（匹配依据）
+  raw           String   @default("{}")
+  createdAt     DateTime @default(now())
+
+  @@index([code])
+  @@index([datasetId])
+}
