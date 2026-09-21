@@ -51,15 +51,21 @@ export function listTools(): ToolDef[] {
   return [...tools.values()];
 }
 
-/** JSON schemas for LLM tool-calling. */
+/** JSON schemas for LLM tool-calling.
+ *  注：DeepSeek/OpenAI/Anthropic 的 function name 只允许 [a-zA-Z0-9_-]，
+ *  「material.matchLibrary」这类点号名会被 400 拒绝，线上用 __ 转义。 */
 export function toolSchemasForLLM() {
   return listTools()
     .filter((t) => t.implemented)
     .map((t) => ({
-      name: t.name,
+      name: t.name.replace(/\./g, "__"),
       description: t.description,
       parameters: zodToJsonSchema(t.schema),
     }));
+}
+
+export function toolNameFromWire(wireName: string): string {
+  return wireName.replace(/__/g, ".");
 }
 
 function unwrap(s: z.ZodType<unknown>): z.ZodType<unknown> {

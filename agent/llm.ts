@@ -1,6 +1,6 @@
 import type { RunContext } from "./context";
 import type { ToolContext, ToolResult } from "./tools/registry";
-import { toolSchemasForLLM } from "./tools/registry";
+import { toolSchemasForLLM, toolNameFromWire } from "./tools/registry";
 
 // Model layer: provider-agnostic. openai-compatible covers OpenAI, DeepSeek,
 // Moonshot, and most relay gateways; anthropic covers Claude endpoints.
@@ -136,7 +136,7 @@ async function runAnthropicLoop(
     }
     const results = [];
     for (const tu of toolUses) {
-      const result = await execute(toolCtx, tu.name!, tu.input ?? {});
+      const result = await execute(toolCtx, toolNameFromWire(tu.name!), tu.input ?? {});
       results.push({
         type: "tool_result",
         tool_use_id: tu.id,
@@ -196,7 +196,7 @@ export async function runLLMLoop(
       } catch {
         args = {};
       }
-      const result = await execute(toolCtx, call.function.name, args);
+      const result = await execute(toolCtx, toolNameFromWire(call.function.name), args);
       messages.push({
         role: "tool",
         tool_call_id: call.id,
