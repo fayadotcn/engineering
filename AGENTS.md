@@ -56,8 +56,14 @@ MODEL_NAME=deepseek-chat
 - **定额说明检索**：`spec.search` 工具查 `SpecSection` 表（201 节，来自《2020定额说明及计算规则》PDF，`scripts/import-sc2020-spec.ts` 导入）；结果出 `specResult` 工作区视图（分册徽标+条文摘录）。planner 触发词含「定额说明/计算规则/怎么计算/怎么算」等。
 - `quota.calculate` 主材价查找顺序：项目询价 → 全局材料库（findLibraryPrice）；`material.search`/`getPriceHistory` 并入材料库数据并标注来源。
 - `Dataset.active` 启停开关：`PATCH /api/admin/datasets/[id] {active}`；停用的数据集对所有消费方不可见（材料搜索/取价/定额匹配/缺价匹配一律过滤），行数据保留可随时复用。
-- 缺价补价闭环：`material.matchLibrary`（预览，只读，出 quotationMatch 视图）→ `material.fillFromLibrary`（确认门，写回 unitPrice + diff + 回执）；planner 区分「看看缺价」（仅预览）与「补齐/补价」（预览+写回）；总览页未定价卡片可一键触发。
-- 费用汇总：`cost.feeSummary`（cost-engine/fees.ts）分部分项→措施→暂列→规费→税前→税金→含税造价；费率读台账事实（措施费率/规费费率/暂列金额率/暂列金额/税率），未设置计 0 并在行内注明。规费基数为分部分项费的简化口径，行内已标注。
+- **造价专业语义红线（资深造价师口径）**：
+  - `unitPrice` 是**综合单价**（人材机管利五要素组价结果）；`mainMaterialPrice` 是**主材暂估价**（询价/信息价，组价输入）。材料价/询价/材料库价**只能写 mainMaterialPrice，绝不写 unitPrice**——综合单价由定额组价生成。
+  - 组价链路：`material.fillFromLibrary`/`applyQuotation` 写主材暂估价 → `quota.calculate` 测算（人材机+主材价×耗量+取费）→ `quota.applyCalc`（确认门）写回综合单价。缺主材价的项测算**不完整**：不算偏差、applyCalc 默认跳过。
+  - `feeType` 计价表分层：分部分项 | 单价措施 | 总价措施 | 其他项目。表-11/表-12（总价措施/其他项目）只有名称+金额也必须导入（安全文明施工费是真钱）；表-04 汇总/规费税金表不导入（计算结果非清单项）。`isPricableItem()` 判定可计价项——总价措施/其他项目单价为 0 属正常，不算未定价。
+  - 规费基数是**定额人工费**（四川安装口径），不是分部分项费：`quota.calculate` 测算后把 Σ(定额人工×量) 写台账 `定额人工费`，`feeSummary` 有真基数用真基数，否则退回简化口径并标注。
+  - 总价控制：`quantity.adjust` 默认调**综合单价**（下浮/上浮，合规手段），`mode=quantity` 才调工程量（改变图纸口径，慎用）。
+- 缺价补价闭环：`material.matchLibrary`（预览，只读，出 quotationMatch 视图）→ `material.fillFromLibrary`（确认门，写主材暂估价 + diff + 回执）→ `quota.calculate` → `quota.applyCalc`（确认门，写综合单价）；planner 区分「看看缺价」（仅预览）与「补齐/补价」（全链路）；总览页未定价卡片可一键触发。
+- 费用汇总：`cost.feeSummary`（cost-engine/fees.ts）分部分项→措施→其他项目→规费→税前→税金→含税造价；费率读台账事实（措施费率/规费费率/暂列金额率/暂列金额/税率/定额人工费），未设置计 0 并在行内注明。导入了措施表/其他项目表时用真值，否则费率估算并标注。
 - 费率/金额事实归一化：`project/facts.ts` 的 `parseRateValue`（"9%"/"9"/"0.09"→0.09）和 `parseAmountValue`（"5万"→50000）；**禁止 `Number(fact.value)`/`D(fact.value)` 直接消费台账值**——"9%" 会得到 NaN 或抛 DecimalError。
 
 ## 测试

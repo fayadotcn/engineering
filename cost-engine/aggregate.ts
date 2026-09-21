@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { D, decStr, sum } from "./money";
-import { DISCIPLINE_LABEL, type BoqItemDTO, type BreakdownSlice, type Discipline } from "@shared/types";
+import { DISCIPLINE_LABEL, isPricableItem, type BoqItemDTO, type BreakdownSlice, type Discipline } from "@shared/types";
 
 export function aggregateByDiscipline(items: BoqItemDTO[]): {
   slices: BreakdownSlice[];
@@ -59,9 +59,11 @@ export function aggregateByCategory(
 
 export function projectTotals(items: BoqItemDTO[]) {
   const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+  const pricable = leaf.filter(isPricableItem);
   return {
     itemCount: leaf.length,
-    pricedCount: leaf.filter((i) => !D(i.unitPrice).isZero()).length,
+    pricedCount: pricable.filter((i) => !D(i.unitPrice).isZero()).length,
+    pricableCount: pricable.length,
     totalAmount: decStr(sum(leaf.map((i) => D(i.totalPrice)))),
   };
 }

@@ -46,6 +46,9 @@ export interface BoqSemanticFeature {
   tokens?: string[]; // residual normalized tokens
 }
 
+/** 清单费用口径：分部分项 | 单价措施 | 总价措施 | 其他项目（计价表体系分层）。 */
+export type FeeType = "分部分项" | "单价措施" | "总价措施" | "其他项目";
+
 /** Serialized BoqItem shape sent to client (Decimals -> strings). */
 export interface BoqItemDTO {
   id: string;
@@ -58,14 +61,26 @@ export interface BoqItemDTO {
   rawFeature: string;
   unit: string;
   quantity: string;
+  /** 综合单价（人材机管利五要素组价结果），材料价/询价绝不能直接写入 */
   unitPrice: string;
+  /** 主材/设备暂估价（询价/信息价），是组价输入而非综合单价 */
+  mainMaterialPrice: string;
   totalPrice: string;
+  feeType: FeeType;
   sectionPath: string;
   isHeader: boolean;
   sortOrder: number;
   discipline: Discipline;
   features: BoqSemanticFeature;
 }
+
+/** 可计价项：分部分项/单价措施才走「量×综合单价」；总价措施/其他项目是总额计价行，单价为 0 属正常（不算未定价）。 */
+export const isPricableItem = (
+  i: Pick<BoqItemDTO, "isHeader" | "name" | "feeType">
+): boolean =>
+  !i.isHeader && !!i.name.trim() &&
+  (i.feeType ?? "分部分项") !== "总价措施" &&
+  (i.feeType ?? "分部分项") !== "其他项目";
 
 export interface QuotationItemDTO {
   id: string;

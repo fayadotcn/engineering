@@ -159,14 +159,28 @@ export class RulePlanner implements Planner {
       };
     }
 
-    // 缺价补价：用材料库补齐未定价项
+    // 定额组价写回：测算价 → 综合单价（缺主材项自动跳过）
+    if (/组价|测算.*写回|写回.*测算|套用定额价/.test(m)) {
+      return {
+        steps: [
+          { tool: "quota.calculate", args: {}, activity: "正在按定额测算综合单价" },
+          { tool: "quota.applyCalc", args: {}, activity: "正在把组价写回清单" },
+        ],
+      };
+    }
+
+    // 缺价补价（专业闭环）：材料库补主材暂估价 → 定额测算 → 组价写回综合单价
     if (/补价|补齐|缺价|未定价|没价|套价/.test(m)) {
       const apply = /补|填|写|套/.test(m) && !/预览|看看|查/.test(m);
       const steps: StepOrFn[] = [
-        { tool: "material.matchLibrary", args: {}, activity: "正在用材料库匹配未定价项" },
+        { tool: "material.matchLibrary", args: {}, activity: "正在用材料库匹配未定价项主材价" },
       ];
       if (apply)
-        steps.push({ tool: "material.fillFromLibrary", args: {}, activity: "正在写回材料库价格" });
+        steps.push(
+          { tool: "material.fillFromLibrary", args: {}, activity: "正在写回主材暂估价" },
+          { tool: "quota.calculate", args: {}, activity: "正在按定额组价" },
+          { tool: "quota.applyCalc", args: {}, activity: "正在把组价写回清单" }
+        );
       return { steps };
     }
 

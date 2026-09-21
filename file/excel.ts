@@ -172,12 +172,27 @@ function profileColumns(rows: string[][]): ColumnMap {
 
 export type SheetType = "BOQ" | "QUOTATION" | "GENERIC";
 
+/** 计价表体系费用口径。规费/税金/汇总表是计算结果而非清单项，不映射。 */
+export type SheetFeeType = "分部分项" | "单价措施" | "总价措施" | "其他项目";
+
+/** 表-11 总价措施 / 单价措施 / 表-12 其他项目 等 sheet 名 → 费用口径。
+ *  表-08 全名是「分部分项工程和单价措施项目清单与计价表」——两种口径混在一张表里，
+ *  表级默认必须是分部分项，由分部标题行（"单价措施项目"）逐段切换。 */
+export function feeTypeOfSheet(sheetName: string): SheetFeeType | null {
+  if (/总价措施/.test(sheetName)) return "总价措施";
+  if (/其他项目|暂列|计日工|总承包服务/.test(sheetName)) return "其他项目";
+  if (/单价措施/.test(sheetName) && !/分部分项/.test(sheetName)) return "单价措施";
+  return null;
+}
+
 export interface ParsedSheet {
   type: SheetType;
   sheetName: string;
   headerRow: number;
   columns: ColumnMap;
   rows: ParsedRow[];
+  /** 措施/其他项目表的费用口径（分部分项表为 undefined） */
+  feeType?: SheetFeeType;
 }
 
 export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
@@ -237,8 +252,12 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
     }
     // usability decides type, not just header hits.
     // A real BOQ has 综合单价 or 工程量; a price list has 单价 but no 综合单价.
+    // 措施/其他项目表（表-11/表-12）只有 名称+编码+金额，没有量/价/单位——
+    // 但它们是真实造价组成（安全文明施工费、暂列金额等），必须导入，不能丢。
+    const sheetFeeType = feeTypeOfSheet(sheetName);
     const boqUsable = (columns.name !== undefined || columns.code !== undefined) &&
-      (columns.quantity !== undefined || columns.unitPrice !== undefined || columns.unit !== undefined);
+      (columns.quantity !== undefined || columns.unitPrice !== undefined || columns.unit !== undefined ||
+        (sheetFeeType !== null && columns.totalPrice !== undefined));
     const quoteUsable =
       (columns.materialName !== undefined || columns.spec !== undefined || columns.name !== undefined) &&
       columns.price !== undefined;
@@ -300,10 +319,13 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
 
       const hasNum = (k: keyof ColumnMap) =>
         get(k) !== "" && !isNaN(Number(get(k).replace(/,/g, "")));
+      // 措施/其他项目表里「安全文明施工费」等条目只有名称+金额，没有编码/量/单位——
+      // 名称+数字金额也算有效计价行，否则整表费用丢失
       const isItem =
         (name.length > 0 || quoteName.length > 0) &&
         (hasNum("quantity") || hasNum("unitPrice") || hasNum("price") ||
-          get("unit") !== "" || get("code") !== "");
+          get("unit") !== "" || get("code") !== "" ||
+          (sheetFeeType !== null && hasNum("totalPrice")));
       const isHeader =
         name.length > 0 && !isItem && !hasNum("quantity") && !hasNum("unitPrice") && !hasNum("price");
       const anyText = cells.some((c) => c.trim().length > 0);
@@ -326,7 +348,7 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
         isItem,
       });
     }
-    sheets.push({ type, sheetName, headerRow, columns, rows: parsedRows });
+    sheets.push({ type, sheetName, headerRow, columns, rows: parsedRows, feeType: sheetFeeType ?? undefined });
   }
   return sheets;
 }

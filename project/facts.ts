@@ -89,16 +89,19 @@ export async function loadFeeParams(projectId: string): Promise<import("@cost-en
     const v = parseRateValue(f?.value);
     return { v: D(v ?? 0), set: v !== null };
   };
-  const [measure, regulation, provRate, provFact, taxF] = await Promise.all([
+  const [measure, regulation, provRate, provFact, taxF, laborFact] = await Promise.all([
     rate("措施费率"), rate("规费费率"), rate("暂列金额率"),
     getFact(projectId, "暂列金额"), getFact(projectId, "税率"),
+    getFact(projectId, "定额人工费"),
   ]);
   const provAmt = parseAmountValue(provFact?.value);
   const tax = parseRateValue(taxF?.value);
+  const labor = laborFact ? Number(laborFact.value) : null;
   return {
     measureRate: measure.v, regulationRate: regulation.v,
     provisionalRate: provRate.v, provisionalAmount: D(provAmt ?? 0),
     taxRate: D(tax ?? 0.09),
+    laborBase: labor !== null && Number.isFinite(labor) && labor > 0 ? D(labor) : null,
     set: { measure: measure.set, regulation: regulation.set, provisional: provRate.set || provAmt !== null, tax: tax !== null },
   };
 }

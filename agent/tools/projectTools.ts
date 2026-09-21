@@ -60,7 +60,7 @@ registerTool({
     const t = projectTotals(items);
     return {
       observation: t,
-      message: `清单 ${t.itemCount} 项，已定价 ${t.pricedCount} 项，合价 ${t.totalAmount} 元`,
+      message: `清单 ${t.itemCount} 行（可计价 ${t.pricableCount} 项，已定价 ${t.pricedCount} 项），合价 ${t.totalAmount} 元`,
     };
   },
 });

@@ -184,14 +184,17 @@ export function calcQuota(
     const mach = perUnit(q.machine);
     const fee = labor.plus(mach).mul(mgmt.plus(profit));
 
-    // 主材价: quotation map → 用户清单单价兜底反推不可用 → 标记
+    // 主材价优先级：清单项已确认的主材暂估价 > 询价/材料库匹配价。
+    // 缺主材价时测算价不含主材费，是不完整单价——绝不能与清单综合单价比偏差。
+    const ownMain = D(item.mainMaterialPrice ?? 0);
     const mainKey = `${f2m(item)}`;
-    const mainPrice = opts.mainPrices?.[mainKey];
+    const mainPrice = ownMain.gt(0) ? Number(ownMain) : opts.mainPrices?.[mainKey];
     const needsMain = mainPrice === undefined;
     const main = needsMain ? D(0) : D(mainPrice!).mul(q.mainQtyPerUnit);
 
     const calc = labor.plus(aux).plus(mach).plus(main).plus(fee);
-    const dev = D(item.unitPrice).isZero()
+    // 缺主材的测算价缺了造价大头（阀体/管材/设备），与清单综合单价比偏差必然失真——不出偏差数
+    const dev = needsMain || D(item.unitPrice).isZero()
       ? null
       : calc.minus(D(item.unitPrice)).div(D(item.unitPrice)).mul(100);
 

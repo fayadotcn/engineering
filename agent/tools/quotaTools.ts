@@ -4,8 +4,10 @@ import { listBoq } from "@boq/service";
 import { listQuotations } from "@material/service";
 import { calcQuota, matchQuota, top2Quota, mainPriceKey, getQuotaLibrary } from "@quota/service";
 import { findLibraryPrice } from "@dataset/service";
-import { getFact, parseRateValue } from "@project/facts";
-import { D } from "@cost-engine/money";
+import { getFact, setFact, parseRateValue } from "@project/facts";
+import { D, sum } from "@cost-engine/money";
+import { isPricableItem } from "@shared/types";
+import type { DiffRow } from "@shared/types";
 
 registerTool({
   name: "quota.search",
@@ -37,7 +39,7 @@ registerTool({
   schema: z.object({ query: z.string().optional() }),
   handler: async (ctx) => {
     const items = await listBoq(ctx.projectId);
-    const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+    const leaf = items.filter((i) => isPricableItem(i));
     const lib = await getQuotaLibrary();
     // top2 候选 + 存疑判定在 service.top2Quota：分差小且基价不同才算「拿不准」
     const rows = leaf.map((item) => ({ item, ...top2Quota(item, lib) }));
@@ -136,7 +138,7 @@ registerTool({
       listBoq(ctx.projectId),
       listQuotations(ctx.projectId),
     ]);
-    const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+    const leaf = items.filter((i) => isPricableItem(i));
 
     // 主材价来源：询价表按 material+spec 匹配
     const mainPrices: Record<string, number> = {};
@@ -177,12 +179,27 @@ registerTool({
     const deviant = done.filter(
       (r) => r.deviation !== null && Math.abs(Number(r.deviation)) > 20
     );
+    // 定额人工费合计 → 台账（规费基数是人工费而非分部分项费，四川安装口径）
+    const laborBase = sum(
+      done.map((r) => D(r.labor ?? 0).mul(D(r.quantity)))
+    );
+    if (done.length)
+      await setFact(ctx.projectId, {
+        factType: "取费基数",
+        key: "定额人工费",
+        value: laborBase.toFixed(2),
+        source: "INFERRED",
+        confidence: 0.7,
+        createdBy: "agent",
+        agentRunId: ctx.runId,
+      });
     return {
       observation: {
         total: leaf.length,
         matched: done.length,
         needsMainPrice: needMain,
         deviationOver20pct: deviant.length,
+        laborBase: laborBase.toFixed(2),
         mgmtRate, profitRate,
       },
       views: [
@@ -197,8 +214,101 @@ registerTool({
       ],
       message:
         `定额测算完成：${done.length}/${leaf.length} 项匹配子目` +
-        (needMain ? `，${needMain} 项缺主材价（主材费未计）` : "") +
+        (needMain ? `，${needMain} 项缺主材价（测算价不含主材费，属不完整单价）` : "") +
         (deviant.length ? `，${deviant.length} 项测算价与清单价偏差>20%` : ""),
+    };
+  },
+});
+
+// 组价写回：定额测算综合单价 → 清单综合单价。缺主材价的项测算不完整，
+// 默认跳过（必须先补主材暂估价或另行询价），includeIncomplete 时才强写。
+registerTool({
+  name: "quota.applyCalc",
+  description: "把定额测算综合单价写回清单项（需确认；缺主材价的不完整测算默认跳过，生成 Diff 与回执）",
+  implemented: true,
+  schema: z.object({
+    includeIncomplete: z.boolean().optional().describe("true=连缺主材价的不完整测算也写回（不推荐）"),
+    onlyItemIds: z.array(z.string()).optional().describe("只写回这些清单项"),
+  }),
+  confirm: (a: { includeIncomplete?: boolean }) =>
+    `将把定额测算综合单价写回清单${a.includeIncomplete ? "（含缺主材价的不完整项）" : "（缺主材价项跳过）"}`,
+  handler: async (ctx, args: { includeIncomplete?: boolean; onlyItemIds?: string[] }) => {
+    const [items, quotes] = await Promise.all([
+      listBoq(ctx.projectId),
+      listQuotations(ctx.projectId),
+    ]);
+    const leaf = items.filter((i) => isPricableItem(i));
+    const mainPrices: Record<string, number> = {};
+    for (const it of leaf) {
+      const f = it.features ?? {};
+      const spec = f.diameter ?? f.specification ?? "";
+      const hit = quotes.find((q) => {
+        const qf = q.features ?? {};
+        const qSpec = qf.diameter ?? qf.specification ?? q.spec;
+        const sameSpec =
+          spec && qSpec && spec.replace(/X/gi, "x") === qSpec.replace(/X/gi, "x");
+        const nameHit =
+          q.materialName &&
+          (it.name.includes(q.materialName) ||
+            (f.material && q.materialName.includes(f.material)));
+        return sameSpec || (nameHit && sameSpec !== false && !qSpec);
+      });
+      if (hit && !D(hit.price).isZero()) mainPrices[mainPriceKey(it)] = Number(hit.price);
+      else {
+        const libPrice = await findLibraryPrice(f.material ?? it.name, spec);
+        if (libPrice !== null && !D(libPrice).isZero())
+          mainPrices[mainPriceKey(it)] = libPrice;
+      }
+    }
+    const mgmtRate = parseRateValue((await getFact(ctx.projectId, "管理费率"))?.value) ?? 0.16;
+    const profitRate = parseRateValue((await getFact(ctx.projectId, "利润率"))?.value) ?? 0.09;
+    const lib = await getQuotaLibrary();
+    const rows = calcQuota(leaf, { mainPrices, mgmtRate, profitRate, lib });
+    const allowed = args.onlyItemIds ? new Set(args.onlyItemIds) : null;
+    const writable = rows.filter(
+      (r) => r.quotaCode && r.calcPrice &&
+        (args.includeIncomplete || !r.needsMainPrice) &&
+        (!allowed || allowed.has(r.itemId))
+    );
+    const skipped = rows.filter((r) => r.quotaCode && r.needsMainPrice && !args.includeIncomplete);
+    if (!writable.length)
+      return {
+        observation: { applied: 0, skipped: skipped.length },
+        message: skipped.length
+          ? `${skipped.length} 项测算缺主材价，属不完整单价，未写回——先补主材暂估价（询价/材料库）再组价`
+          : "没有可写回的测算结果，请先运行定额测算",
+      };
+    const { updateBoqItems } = await import("@boq/service");
+    const { before, after } = await updateBoqItems(
+      ctx.projectId,
+      writable.map((r) => ({ id: r.itemId, patch: { unitPrice: r.calcPrice! } }))
+    );
+    const diffRows: DiffRow[] = [];
+    for (const b of before) {
+      const a = after.find((x) => x.id === b.id)!;
+      diffRows.push({
+        itemId: b.id, code: b.code, name: b.name,
+        field: "unitPrice", before: b.unitPrice, after: a.unitPrice,
+      });
+      if (b.totalPrice !== a.totalPrice)
+        diffRows.push({
+          itemId: b.id, code: b.code, name: b.name,
+          field: "totalPrice", before: b.totalPrice, after: a.totalPrice,
+        });
+    }
+    return {
+      observation: { applied: writable.length, skippedIncomplete: skipped.length, mgmtRate, profitRate },
+      views: [
+        { kind: "diff", id: `view:diff:${ctx.runId}`, title: "组价写回 Diff", receiptId: "", rows: diffRows },
+        { kind: "boqTable", id: "view:boq", title: "工程量清单" },
+      ],
+      receipts: [{
+        actionType: "PRICE_APPLY",
+        summary: `定额组价写回：${writable.length} 项综合单价（管理费 ${mgmtRate * 100}%/利润 ${profitRate * 100}%）${skipped.length ? `，${skipped.length} 项缺主材价未写` : ""}`,
+        before: before.map((b) => ({ id: b.id, name: b.name, unitPrice: b.unitPrice })),
+        after: after.map((a) => ({ id: a.id, name: a.name, unitPrice: a.unitPrice })),
+      }],
+      message: `已把定额测算综合单价写回 ${writable.length} 项${skipped.length ? `；${skipped.length} 项缺主材价跳过` : ""}`,
     };
   },
 });

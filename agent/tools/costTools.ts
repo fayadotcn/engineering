@@ -2,7 +2,7 @@ import { z } from "zod";
 import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import { aggregateByCategory, aggregateByDiscipline, projectTotals } from "@cost-engine/aggregate";
-import { adjustQuantitiesToTarget } from "@cost-engine/adjust";
+import { adjustToTarget } from "@cost-engine/adjust";
 import { D, decStr, round3, sum, withTax } from "@cost-engine/money";
 import { feeSummary } from "@cost-engine/fees";
 import { getFact, parseRateValue, loadFeeParams } from "@project/facts";
@@ -190,24 +190,30 @@ registerTool({
 
 registerTool({
   name: "quantity.adjust",
-  description: "工程量反算：总价控制到目标值（可含税），单价不动，只按比例调整允许项工程量并保留三位小数",
+  description: "总价反算：把清单总价控制到目标值（可含税）。默认按比例调整综合单价（下浮/上浮，总价控制的合规手段，工程量不动）；mode=quantity 时才调工程量",
   implemented: true,
   schema: z.object({
     targetTotal: z.number().describe("目标总价"),
+    mode: z.enum(["price", "quantity"]).optional().describe("price=调综合单价（默认，合规）；quantity=调工程量（改变图纸口径，慎用）"),
     taxRate: z.number().optional().describe("目标价为含税价时的税率，如 0.09"),
     allowedItemIds: z.array(z.string()).optional().describe("只允许调整这些清单项；缺省=全部有量有价项"),
     apply: z.boolean().optional().describe("true=直接写回，false=仅试算"),
   }),
-  confirm: (a: { apply?: boolean; targetTotal?: number }) =>
-    a.apply ? `将按目标总价 ${a.targetTotal} 反算工程量并写回清单（单价不变）` : null,
+  confirm: (a: { apply?: boolean; targetTotal?: number; mode?: string }) =>
+    a.apply
+      ? `将按目标总价 ${a.targetTotal} 反算并写回清单（${a.mode === "quantity" ? "调工程量，单价不变——会改变图纸口径" : "调综合单价，工程量不变"}）`
+      : null,
   handler: async (ctx, args) => {
     const items = await listBoq(ctx.projectId);
     const taxFact = (await getFact(ctx.projectId, "税率"))?.value;
     const tax = args.taxRate ?? parseRateValue(taxFact) ?? 0;
-    const r = adjustQuantitiesToTarget(items, {
+    const field = args.mode === "quantity" ? "quantity" : "price";
+    const fieldLabel = field === "quantity" ? "工程量" : "综合单价";
+    const r = adjustToTarget(items, {
       targetTotal: args.targetTotal,
       taxRate: tax,
       allowedItemIds: args.allowedItemIds,
+      field,
     });
     if (!r.ok && !r.adjustments.length)
       return { observation: { ok: false, reason: r.reason } };
@@ -217,14 +223,18 @@ registerTool({
       const it = beforeMap.get(a.itemId)!;
       return {
         itemId: a.itemId, code: it.code, name: it.name,
-        field: "quantity", before: a.beforeQty.toString(), after: a.afterQty.toString(),
+        field, before: a.before.toString(), after: a.after.toString(),
       };
     });
+    const scalePct = r.beforeTotal.isZero()
+      ? "0"
+      : r.afterTotal.div(r.beforeTotal).minus(1).mul(100).toFixed(2);
 
     if (!args.apply) {
       return {
         observation: {
           ok: r.ok,
+          mode: field,
           beforeTotal: r.beforeTotal.toFixed(2),
           afterTotal: r.afterTotal.toFixed(2),
           residual: r.residual.toFixed(4),
@@ -235,47 +245,49 @@ registerTool({
           {
             kind: "diff",
             id: `view:diff:${ctx.runId}`,
-            title: `工程量反算试算（目标 ${args.targetTotal}）`,
+            title: `总价反算试算（目标 ${args.targetTotal}，调${fieldLabel}）`,
             receiptId: "",
             rows: diffRows,
           },
         ],
-        message: `试算完成：调整 ${r.adjustments.length} 项工程量，总价 ${r.beforeTotal.toFixed(2)} → ${r.afterTotal.toFixed(2)} 元（不含税口径），残差 ${r.residual.toFixed(4)}。确认后可写回`,
+        message: `试算完成：${fieldLabel}整体${Number(scalePct) >= 0 ? "上浮" : "下浮"} ${Math.abs(Number(scalePct))}%，调整 ${r.adjustments.length} 项，总价 ${r.beforeTotal.toFixed(2)} → ${r.afterTotal.toFixed(2)} 元（不含税口径），残差 ${r.residual.toFixed(4)}。确认后可写回`,
       };
     }
 
+    const patchKey = field === "quantity" ? "quantity" : "unitPrice";
     const { before, after } = await updateBoqItems(
       ctx.projectId,
-      r.adjustments.map((a) => ({ id: a.itemId, patch: { quantity: a.afterQty.toString() } }))
+      r.adjustments.map((a) => ({ id: a.itemId, patch: { [patchKey]: a.after.toString() } }))
     );
     return {
       observation: {
         ok: r.ok,
+        mode: field,
         applied: after.length,
         afterTotal: r.afterTotal.toFixed(2),
         residual: r.residual.toFixed(4),
       },
       views: [
-        { kind: "diff", id: `view:diff:${ctx.runId}`, title: "工程量反算 Diff", receiptId: "", rows: diffRows },
+        { kind: "diff", id: `view:diff:${ctx.runId}`, title: `总价反算 Diff（调${fieldLabel}）`, receiptId: "", rows: diffRows },
         { kind: "boqTable", id: "view:boq", title: "工程量清单" },
       ],
       receipts: [
         {
-          actionType: "QUANTITY_ADJUST",
-          summary: `工程量反算：${r.adjustments.length} 项调量，总价 ${r.beforeTotal.toFixed(2)} → ${r.afterTotal.toFixed(2)}（目标 ${args.targetTotal}${tax ? " 含税" : ""}）`,
+          actionType: "PRICE_ADJUST",
+          summary: `总价反算：${r.adjustments.length} 项调${fieldLabel}（${Number(scalePct) >= 0 ? "+" : ""}${scalePct}%），总价 ${r.beforeTotal.toFixed(2)} → ${r.afterTotal.toFixed(2)}（目标 ${args.targetTotal}${tax ? " 含税" : ""}）`,
           before: r.adjustments.map((a) => ({
             id: a.itemId,
             name: beforeMap.get(a.itemId)?.name,
-            quantity: a.beforeQty.toString(),
+            [patchKey]: a.before.toString(),
           })),
           after: r.adjustments.map((a) => ({
             id: a.itemId,
             name: beforeMap.get(a.itemId)?.name,
-            quantity: a.afterQty.toString(),
+            [patchKey]: a.after.toString(),
           })),
         },
       ],
-      message: `已写回 ${r.adjustments.length} 项工程量，调整后总价 ${r.afterTotal.toFixed(2)} 元（不含税），残差 ${r.residual.toFixed(4)} 元`,
+      message: `已写回 ${r.adjustments.length} 项${fieldLabel}（${Number(scalePct) >= 0 ? "上浮" : "下浮"} ${Math.abs(Number(scalePct))}%），调整后总价 ${r.afterTotal.toFixed(2)} 元（不含税），残差 ${r.residual.toFixed(4)} 元`,
     };
   },
 });

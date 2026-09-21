@@ -10,7 +10,7 @@ import type {
   QuotationMatchRow,
   WorkspaceView,
 } from "@shared/types";
-import { DISCIPLINE_LABEL } from "@shared/types";
+import { DISCIPLINE_LABEL, isPricableItem } from "@shared/types";
 import { ArrowDown, ArrowUp, ChevronDown, Download, FileSpreadsheet, AlertTriangle, Funnel, X } from "lucide-react";
 import { ConfirmDialog, EmptyState, toast } from "./primitives";
 
@@ -24,6 +24,7 @@ const fmtMoney = (v: string | number) => {
 
 const FIELD_LABEL: Record<string, string> = {
   unitPrice: "综合单价",
+  mainMaterialPrice: "主材暂估价",
   quantity: "工程量",
   totalPrice: "合价",
   name: "项目名称",
@@ -202,7 +203,7 @@ export function OverviewView() {
   const { items, files, receipts, facts, gotoBoqItem, send } = useStore();
   const leaf = items.filter((i) => !i.isHeader);
   const total = leaf.reduce((n, i) => n + Number(i.totalPrice), 0);
-  const unpriced = leaf.filter((i) => Number(i.unitPrice) === 0);
+  const unpriced = leaf.filter((i) => isPricableItem(i) && Number(i.unitPrice) === 0);
   const top = [...leaf].sort((a, b) => Number(b.totalPrice) - Number(a.totalPrice)).slice(0, 8);
   const topSum = top.reduce((n, i) => n + Number(i.totalPrice), 0);
   const stat = (label: string, value: React.ReactNode, warn?: boolean, onClick?: () => void, hint?: string) => (
@@ -474,7 +475,7 @@ export function BoqTable() {
   const dataShown = sorted.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   // 造价师视角：合价合计随筛选联动，未定价项计数常显
   const sumShown = sorted.reduce((n, i) => (i.isHeader ? n : n + Number(i.totalPrice)), 0);
-  const unpriced = items.reduce((n, i) => n + (!i.isHeader && Number(i.unitPrice) === 0 ? 1 : 0), 0);
+  const unpriced = items.reduce((n, i) => n + (isPricableItem(i) && Number(i.unitPrice) === 0 ? 1 : 0), 0);
 
   const toggleUnit = (v: string) => {
     const next = new Set(unitSel ?? units.map((u) => u.v));
@@ -576,7 +577,14 @@ export function BoqTable() {
               >
                 <td className="xl-rn">{i + 1}</td>
                 <td className="mono text-neutral-500">{it.code}</td>
-                <td className="max-w-72 truncate" title={it.name}>{it.name}</td>
+                <td className="max-w-72 truncate" title={it.name}>
+                  {it.name}
+                  {it.feeType && it.feeType !== "分部分项" && (
+                    <span className="ml-1 rounded bg-neutral-100 px-1 py-px text-[10px] text-neutral-500">
+                      {it.feeType}
+                    </span>
+                  )}
+                </td>
                 <td className="max-w-56 truncate text-neutral-500" title={it.rawFeature}>
                   {it.rawFeature}
                 </td>
@@ -587,14 +595,14 @@ export function BoqTable() {
                     className={cn(
                       "xl-edit mono text-right",
                       editing?.id === it.id && editing.field === f && "xl-active",
-                      f === "unitPrice" && Number(it.unitPrice) === 0 &&
+                      f === "unitPrice" && Number(it.unitPrice) === 0 && isPricableItem(it) &&
                         "bg-[var(--warning-soft-bg)] font-medium",
-                      f === "unitPrice" && Number(it.unitPrice) === 0 &&
+                      f === "unitPrice" && Number(it.unitPrice) === 0 && isPricableItem(it) &&
                         "text-[var(--warning-soft-fg)]"
                     )}
                     title={
                       f === "unitPrice" && Number(it.unitPrice) === 0
-                        ? "未定价 — 双击补价"
+                        ? isPricableItem(it) ? "未定价 — 双击补价" : "总额计价行（无量价）"
                         : "双击编辑"
                     }
                     onDoubleClick={() => {
@@ -619,7 +627,17 @@ export function BoqTable() {
                         className="w-20 border-0 bg-transparent px-0 py-0 text-right text-[12.5px] outline-none"
                       />
                     ) : f === "unitPrice" ? (
-                      fmtMoney(it[f])
+                      <>
+                        {fmtMoney(it[f])}
+                        {Number(it.mainMaterialPrice ?? 0) > 0 && (
+                          <div
+                            className="text-[10px] font-normal text-neutral-400"
+                            title="主材暂估价（组价输入）"
+                          >
+                            材 {fmtMoney(it.mainMaterialPrice)}
+                          </div>
+                        )}
+                      </>
                     ) : (
                       it[f]
                     )}
