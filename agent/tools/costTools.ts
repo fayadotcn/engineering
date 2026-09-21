@@ -5,7 +5,7 @@ import { aggregateByCategory, aggregateByDiscipline, projectTotals } from "@cost
 import { adjustQuantitiesToTarget } from "@cost-engine/adjust";
 import { D, decStr, round3, sum, withTax } from "@cost-engine/money";
 import { feeSummary } from "@cost-engine/fees";
-import { getFact, parseRateValue, parseAmountValue } from "@project/facts";
+import { getFact, parseRateValue, loadFeeParams } from "@project/facts";
 import type { DiffRow } from "@shared/types";
 
 registerTool({
@@ -57,25 +57,7 @@ registerTool({
   schema: z.object({}),
   handler: async (ctx) => {
     const items = await listBoq(ctx.projectId);
-    const rate = async (key: string) => {
-      const f = await getFact(ctx.projectId, key);
-      const v = parseRateValue(f?.value);
-      return { v: D(v ?? 0), set: v !== null };
-    };
-    const measure = await rate("措施费率");
-    const regulation = await rate("规费费率");
-    const provRate = await rate("暂列金额率");
-    const provFact = await getFact(ctx.projectId, "暂列金额");
-    const provAmtVal = parseAmountValue(provFact?.value);
-    const taxF = await getFact(ctx.projectId, "税率");
-    const taxRateVal = parseRateValue(taxF?.value);
-    const tax = { v: D(taxRateVal ?? 0.09), set: taxRateVal !== null };
-    const r = feeSummary(items, {
-      measureRate: measure.v, regulationRate: regulation.v,
-      provisionalRate: provRate.v, provisionalAmount: D(provAmtVal ?? 0),
-      taxRate: tax.v,
-      set: { measure: measure.set, regulation: regulation.set, provisional: provRate.set || provAmtVal !== null, tax: tax.set },
-    });
+    const r = feeSummary(items, await loadFeeParams(ctx.projectId));
     return {
       observation: {
         grandTotal: r.grandTotal, preTax: r.preTax, unpricedCount: r.unpricedCount,

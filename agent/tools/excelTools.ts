@@ -218,65 +218,92 @@ registerTool({
 
     const { projectTotals, aggregateByDiscipline, aggregateByCategory } = await import("@cost-engine/aggregate");
     const { findSameItemDifferentPrice, findPriceAnomalies } = await import("@cost-engine/compare");
-    const { getFacts, parseRateValue } = await import("@project/facts");
+    const { feeSummary } = await import("@cost-engine/fees");
+    const { getFacts, loadFeeParams } = await import("@project/facts");
     const ExcelJS = (await import("exceljs")).default;
 
     const totals = projectTotals(items);
     const facts = await getFacts(ctx.projectId);
+    const fee = feeSummary(items, await loadFeeParams(ctx.projectId));
     const wb = new ExcelJS.Workbook();
+    const bold = { font: { bold: true } };
+    const moneyFmt = "#,##0.00";
 
     // 汇总
     const s1 = wb.addWorksheet("项目汇总");
-    s1.addRow(["造价分析报告"]);
+    const t = s1.addRow(["造价分析报告"]);
+    t.font = { bold: true, size: 14 };
     s1.addRow(["生成时间", new Date().toLocaleString("zh-CN")]);
     s1.addRow([]);
     s1.addRow(["清单项数", totals.itemCount]);
     s1.addRow(["已定价项数", totals.pricedCount]);
     s1.addRow(["合价合计（不含税）", totals.totalAmount]);
-    const taxFact = facts.find((f) => f.key === "税率");
-    const taxRate = parseRateValue(taxFact?.value);
-    if (taxFact && taxRate !== null) {
-      const withTaxAmt = D(totals.totalAmount).times(1 + taxRate);
-      s1.addRow([`税率 ${taxFact.value}`, `含税合计 ${withTaxAmt.toFixed(2)} 元`]);
+    s1.addRow(["含税工程造价", fee.grandTotal]);
+
+    // 费用汇总（取费表）
+    const sFee = wb.addWorksheet("费用汇总");
+    const fh = sFee.addRow(["序号", "费用名称", "计算基础", "费率", "金额（元）", "备注"]);
+    fh.font = bold.font;
+    for (const r of fee.rows) {
+      const row = sFee.addRow([r.seq, r.name, r.basis, r.rate ?? "", Number(r.amount), r.note ?? ""]);
+      row.getCell(5).numFmt = moneyFmt;
+      if (r.level !== "leaf") row.font = bold.font;
     }
+    sFee.columns = [{ width: 8 }, { width: 26 }, { width: 30 }, { width: 10 }, { width: 16 }, { width: 40 }];
+
+    // 分部分项清单
+    const sBoq = wb.addWorksheet("分部分项清单");
+    const bh = sBoq.addRow(["序号", "项目编码", "项目名称", "项目特征", "单位", "工程量", "综合单价", "合价"]);
+    bh.font = bold.font;
+    items.forEach((it, i) => {
+      if (it.isHeader) {
+        const r = sBoq.addRow(["", "", it.name, "", "", "", "", ""]);
+        r.font = bold.font;
+        return;
+      }
+      const r = sBoq.addRow([i + 1, it.code, it.name, it.rawFeature, it.unit, Number(it.quantity), Number(it.unitPrice), Number(it.totalPrice)]);
+      r.getCell(7).numFmt = moneyFmt;
+      r.getCell(8).numFmt = moneyFmt;
+    });
+    sBoq.columns = [{ width: 6 }, { width: 16 }, { width: 30 }, { width: 40 }, { width: 8 }, { width: 12 }, { width: 12 }, { width: 14 }];
 
     // 占比
     const s2 = wb.addWorksheet("专业占比");
-    s2.addRow(["专业", "金额", "占比", "项数"]);
+    s2.addRow(["专业", "金额", "占比", "项数"]).font = bold.font;
     for (const d of aggregateByDiscipline(items).slices)
-      s2.addRow([d.label, d.amount, `${(d.share * 100).toFixed(1)}%`, d.count]);
+      s2.addRow([d.label, Number(d.amount), `${(d.share * 100).toFixed(1)}%`, d.count]);
     const s3 = wb.addWorksheet("材料占比");
-    s3.addRow(["材料类别", "金额", "占比", "项数"]);
+    s3.addRow(["材料类别", "金额", "占比", "项数"]).font = bold.font;
     for (const c of aggregateByCategory(items).slices)
-      s3.addRow([c.label, c.amount, `${(c.share * 100).toFixed(1)}%`, c.count]);
+      s3.addRow([c.label, Number(c.amount), `${(c.share * 100).toFixed(1)}%`, c.count]);
 
     // 台账
     const s4 = wb.addWorksheet("项目台账");
-    s4.addRow(["类型", "键", "值", "来源", "置信度"]);
+    s4.addRow(["类型", "键", "值", "来源", "置信度"]).font = bold.font;
     for (const f of facts) s4.addRow([f.factType, f.key, f.value, f.source, f.confidence]);
 
     // 异常
     const s5 = wb.addWorksheet("异常摘要");
-    s5.addRow(["类型", "组/项", "明细"]);
+    s5.addRow(["类型", "组/项", "明细"]).font = bold.font;
     for (const g of findSameItemDifferentPrice(items))
       s5.addRow(["相同项不同价", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
     for (const g of findPriceAnomalies(items))
       s5.addRow(["单价异常", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
 
-    for (const s of [s1, s2, s3, s4, s5]) s.columns.forEach((c) => { c.width = 22; });
+    for (const s of [s1, s2, s3, s4, s5]) s.columns.forEach((c) => { if (!c.width) c.width = 22; });
 
     const out = Buffer.from(await wb.xlsx.writeBuffer());
     const filename = args.filename ?? `造价分析报告_${new Date().toISOString().slice(0, 10)}.xlsx`;
     const artifact = await saveArtifact(ctx, out, filename);
     return {
-      observation: { artifactId: artifact.id, sheets: 5, total: totals.totalAmount },
+      observation: { artifactId: artifact.id, sheets: 7, total: totals.totalAmount, grandTotal: fee.grandTotal },
       views: [{
         kind: "exportResult",
         id: `view:report:${artifact.id}`,
         title: "分析报告",
         artifactId: artifact.id,
         filename: artifact.label,
-        summary: `汇总/专业/材料/台账/异常 5 个 sheet，合计 ${totals.totalAmount} 元`,
+        summary: `汇总/取费/清单/专业/材料/台账/异常 7 个 sheet，含税造价 ${fee.grandTotal} 元`,
       }],
       receipts: [{
         actionType: "EXPORT",
@@ -285,7 +312,7 @@ registerTool({
         after: { artifactId: artifact.id },
         reversible: false,
       }],
-      message: `已生成「${filename}」：项目汇总 + 专业/材料占比 + 台账 + 异常摘要`,
+      message: `已生成「${filename}」：费用汇总（含税 ${fee.grandTotal} 元）+ 分部分项清单 + 占比/台账/异常`,
     };
   },
 });

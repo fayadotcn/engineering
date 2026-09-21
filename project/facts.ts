@@ -80,3 +80,25 @@ export function parseAmountValue(raw: string | null | undefined): number | null 
   const v = wan ? Number(wan[1]) * 10000 : Number(s);
   return Number.isFinite(v) ? v : null;
 }
+
+/** 加载取费参数（台账事实 → FeeParams），供 cost.feeSummary 工具与报告导出共用。 */
+export async function loadFeeParams(projectId: string): Promise<import("@cost-engine/fees").FeeParams> {
+  const { D } = await import("@cost-engine/money");
+  const rate = async (key: string) => {
+    const f = await getFact(projectId, key);
+    const v = parseRateValue(f?.value);
+    return { v: D(v ?? 0), set: v !== null };
+  };
+  const [measure, regulation, provRate, provFact, taxF] = await Promise.all([
+    rate("措施费率"), rate("规费费率"), rate("暂列金额率"),
+    getFact(projectId, "暂列金额"), getFact(projectId, "税率"),
+  ]);
+  const provAmt = parseAmountValue(provFact?.value);
+  const tax = parseRateValue(taxF?.value);
+  return {
+    measureRate: measure.v, regulationRate: regulation.v,
+    provisionalRate: provRate.v, provisionalAmount: D(provAmt ?? 0),
+    taxRate: D(tax ?? 0.09),
+    set: { measure: measure.set, regulation: regulation.set, provisional: provRate.set || provAmt !== null, tax: tax !== null },
+  };
+}
