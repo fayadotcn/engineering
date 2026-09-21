@@ -12,6 +12,7 @@ import type {
 } from "@shared/types";
 import { DISCIPLINE_LABEL } from "@shared/types";
 import { ArrowDown, ArrowUp, ChevronDown, Download, FileSpreadsheet, AlertTriangle, Funnel, X } from "lucide-react";
+import { ConfirmDialog, EmptyState, toast } from "./primitives";
 
 const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -210,7 +211,14 @@ export function BoqTable() {
 
   const commit = async () => {
     if (!editing) return;
-    await patchItem(editing.id, { [editing.field]: draft });
+    const v = draft.trim();
+    if (v !== "" && isNaN(Number(v))) {
+      toast.error("请输入数字");
+      setEditing(null);
+      return;
+    }
+    const ok = await patchItem(editing.id, { [editing.field]: v });
+    if (!ok) toast.error("保存失败，请重试");
     setEditing(null);
   };
 
@@ -251,6 +259,9 @@ export function BoqTable() {
   const shown = sorted.slice(0, limit);
   const dataTotal = items.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   const dataShown = sorted.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
+  // 造价师视角：合价合计随筛选联动，未定价项计数常显
+  const sumShown = sorted.reduce((n, i) => (i.isHeader ? n : n + Number(i.totalPrice)), 0);
+  const unpriced = items.reduce((n, i) => n + (!i.isHeader && Number(i.unitPrice) === 0 ? 1 : 0), 0);
 
   const toggleUnit = (v: string) => {
     const next = new Set(unitSel ?? units.map((u) => u.v));
@@ -341,7 +352,11 @@ export function BoqTable() {
                 </td>
               </tr>
             ) : (
-              <tr key={it.id}>
+              <tr
+                key={it.id}
+                className={cn(Number(it.quantity) === 0 && "opacity-45")}
+                title={Number(it.quantity) === 0 ? "工程量为 0" : undefined}
+              >
                 <td className="xl-rn">{i + 1}</td>
                 <td className="mono text-neutral-500">{it.code}</td>
                 <td className="max-w-72 truncate" title={it.name}>{it.name}</td>
@@ -354,9 +369,17 @@ export function BoqTable() {
                     key={f}
                     className={cn(
                       "xl-edit mono text-right",
-                      editing?.id === it.id && editing.field === f && "xl-active"
+                      editing?.id === it.id && editing.field === f && "xl-active",
+                      f === "unitPrice" && Number(it.unitPrice) === 0 &&
+                        "bg-[var(--warning-soft-bg)] font-medium",
+                      f === "unitPrice" && Number(it.unitPrice) === 0 &&
+                        "text-[var(--warning-soft-fg)]"
                     )}
-                    title="双击编辑"
+                    title={
+                      f === "unitPrice" && Number(it.unitPrice) === 0
+                        ? "未定价 — 双击补价"
+                        : "双击编辑"
+                    }
                     onDoubleClick={() => {
                       setEditing({ id: it.id, field: f });
                       setDraft(it[f]);
@@ -374,6 +397,8 @@ export function BoqTable() {
                         }}
                         className="w-20 border-0 bg-transparent px-0 py-0 text-right text-[12.5px] outline-none"
                       />
+                    ) : f === "unitPrice" ? (
+                      fmtMoney(it[f])
                     ) : (
                       it[f]
                     )}
@@ -394,11 +419,36 @@ export function BoqTable() {
         </button>
       )}
       {!items.length && (
-        <div className="flex h-40 items-center justify-center text-xs text-neutral-400">
-          清单为空 — 在左侧上传 Excel 清单文件
-        </div>
+        <EmptyState
+          icon={<FileSpreadsheet size={22} />}
+          title="清单为空"
+          hint="在左侧上传 Excel 清单文件"
+        />
       )}
       </div>
+      {items.length > 0 && (
+        <div className="flex items-center gap-3 border-t border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
+          <span className="text-[11.5px] text-neutral-500">
+            合价合计
+            <b className="mono ml-1.5 text-[12.5px] font-medium text-neutral-800">
+              {fmtMoney(sumShown)}
+            </b>
+            <span className="ml-1">元</span>
+            {filtering && <span className="ml-1 text-neutral-400">（筛选口径）</span>}
+          </span>
+          {unpriced > 0 && (
+            <span
+              className="rounded px-1.5 py-0.5 text-[11px]"
+              style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
+            >
+              {unpriced} 项未定价
+            </span>
+          )}
+          <span className="ml-auto text-[11px] text-neutral-400">
+            {dataShown === dataTotal ? `${dataTotal} 行` : `${dataShown} / ${dataTotal} 行`}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -481,11 +531,7 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
           </tbody>
         </table>
       </div>
-      {!view.rows.length && (
-        <div className="flex h-40 items-center justify-center text-xs text-neutral-400">
-          未发现异常 ✓
-        </div>
-      )}
+      {!view.rows.length && <EmptyState title="未发现异常" />}
     </div>
   );
 }
@@ -555,7 +601,11 @@ export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: 
 
 /* ---------------- 占比图 ---------------- */
 
-const PALETTE = ["#171717", "#525252", "#a3a3a3", "#2563eb", "#60a5fa", "#93c5fd", "#d4d4d4", "#b45309", "#f59e0b", "#dc2626"];
+// 暖纸系 muted 调色板：深松绿为主，递推到浅灰绿，语义色只点缀
+const PALETTE = [
+  "#465d50", "#6b8577", "#8fa89a", "#b3c4ba", "#cfdad4",
+  "#4a6a7a", "#7b96a3", "#a07a45", "#c9a167", "#a44742",
+];
 
 export function Breakdown({ view }: { view: Extract<WorkspaceView, { kind: "breakdown" }> }) {
   const total = Number(view.total);
@@ -646,11 +696,37 @@ export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff"
 /* ---------------- 定额测算 ---------------- */
 
 export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "quotaResult" }> }) {
+  const matched = view.rows.filter((r) => r.quotaCode).length;
+  const needMain = view.rows.filter((r) => r.needsMainPrice).length;
+  const deviant = view.rows.filter(
+    (r) => r.deviation !== null && Math.abs(Number(r.deviation)) > 20
+  ).length;
   return (
     <div className="h-full overflow-auto p-4">
-      <div className="mb-3 text-[11.5px] text-neutral-400">
-        综合单价 = 人工+辅材+机械 + 主材价×耗量 + (人工+机械)×(管理费{(view.mgmtRate * 100).toFixed(0)}%+利润{(view.profitRate * 100).toFixed(0)}%)
-        <span className="ml-2">· 内置参考定额，接入正式定额库后自动替换</span>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11.5px]">
+        <span className="text-neutral-400">
+          综合单价 = 人工+辅材+机械 + 主材价×耗量 + (人工+机械)×(管理费
+          {(view.mgmtRate * 100).toFixed(0)}%+利润{(view.profitRate * 100).toFixed(0)}%)
+        </span>
+        <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-neutral-500">
+          匹配 {matched}/{view.rows.length}
+        </span>
+        {needMain > 0 && (
+          <span
+            className="rounded px-1.5 py-0.5"
+            style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
+          >
+            {needMain} 项缺主材价
+          </span>
+        )}
+        {deviant > 0 && (
+          <span
+            className="rounded px-1.5 py-0.5"
+            style={{ background: "var(--danger-soft-bg)", color: "var(--danger-soft-fg)" }}
+          >
+            {deviant} 项偏差 &gt;20%
+          </span>
+        )}
       </div>
       <div className="xl-sheet overflow-hidden rounded-lg">
       <table className="xl-table">
@@ -876,15 +952,28 @@ export function ExportResult({ view }: { view: Extract<WorkspaceView, { kind: "e
   );
 }
 
+const FILE_STATUS: Record<string, { label: string; cls: string }> = {
+  PARSED: { label: "已解析", cls: "bg-[var(--success-soft-bg)] text-[var(--success-soft-fg)]" },
+  FAILED: { label: "解析失败", cls: "bg-[var(--danger-soft-bg)] text-[var(--danger-soft-fg)]" },
+  PARSING: { label: "解析中", cls: "bg-[var(--warning-soft-bg)] text-[var(--warning-soft-fg)]" },
+};
+
 export function FileList() {
   const { files, refreshMeta, reloadBoq } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
-  const remove = async (id: string, name: string) => {
-    if (!confirm(`删除「${name}」及其导入的全部数据？`)) return;
-    setBusy(id);
-    await fetch(`/api/files/${id}`, { method: "DELETE" });
-    await Promise.all([refreshMeta(), reloadBoq()]);
+  const [pendingDel, setPendingDel] = useState<{ id: string; name: string } | null>(null);
+  const remove = async () => {
+    if (!pendingDel) return;
+    setBusy(pendingDel.id);
+    const res = await fetch(`/api/files/${pendingDel.id}`, { method: "DELETE" });
+    setPendingDel(null);
     setBusy(null);
+    if (res.ok) {
+      toast.success(`已删除「${pendingDel.name}」及其导入数据`);
+      await Promise.all([refreshMeta(), reloadBoq()]);
+    } else {
+      toast.error("删除失败，请重试");
+    }
   };
   return (
     <div className="h-full overflow-auto p-4">
@@ -912,10 +1001,19 @@ export function FileList() {
                 <td>
                   <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-500">{f.kindLabel}</span>
                 </td>
-                <td className="text-[11.5px] text-neutral-500">{f.status}</td>
+                <td>
+                  <span
+                    className={cn(
+                      "rounded px-1.5 py-0.5 text-[11px]",
+                      FILE_STATUS[f.status]?.cls ?? "bg-neutral-100 text-neutral-500"
+                    )}
+                  >
+                    {FILE_STATUS[f.status]?.label ?? f.status}
+                  </span>
+                </td>
                 <td className="text-center">
                   <button
-                    onClick={() => remove(f.id, f.filename)}
+                    onClick={() => setPendingDel({ id: f.id, name: f.filename })}
                     disabled={busy === f.id}
                     className="invisible rounded px-1.5 py-0.5 text-[11px] text-red-500 hover:bg-red-50 group-hover:visible disabled:opacity-40"
                   >
@@ -927,9 +1025,17 @@ export function FileList() {
           </tbody>
         </table>
       </div>
-      {!files.length && (
-        <div className="flex h-40 items-center justify-center text-xs text-neutral-400">还没有文件</div>
-      )}
+      {!files.length && <EmptyState icon={<FileSpreadsheet size={22} />} title="还没有文件" />}
+      <ConfirmDialog
+        open={!!pendingDel}
+        danger
+        title={`删除「${pendingDel?.name ?? ""}」？`}
+        description="将同时删除该文件导入的全部清单/询价数据，此操作不可撤销（会记录删除回执）。"
+        confirmText="删除"
+        busy={!!busy}
+        onConfirm={remove}
+        onCancel={() => setPendingDel(null)}
+      />
     </div>
   );
 }

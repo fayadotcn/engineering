@@ -6,8 +6,9 @@ import {
   FactList, FileCompareView, FileList, QuotaResult, QuotationMatch,
 } from "./views";
 import type { WorkspaceView } from "@shared/types";
+import { toast } from "./primitives";
 import {
-  ArrowUp, Check, ChevronDown, ChevronRight, CircleCheck, CircleX,
+  ArrowLeft, ArrowUp, Check, ChevronDown, ChevronRight, CircleCheck, CircleX,
   FileSpreadsheet, Loader2, Paperclip, Receipt, ShieldQuestion, Sparkles, Wrench, X,
 } from "lucide-react";
 
@@ -53,7 +54,10 @@ function RevertButton({ receiptId }: { receiptId: string }) {
         const res = await fetch(`/api/receipts/${receiptId}/revert`, { method: "POST" });
         if (res.ok) {
           setDone(true);
+          toast.success("已撤销该修改");
           await s.reloadBoq();
+        } else {
+          toast.error("撤销失败 — 该回执可能已被撤销或不可撤销");
         }
         setBusy(false);
       }}
@@ -295,8 +299,13 @@ function Block({ b }: { b: ConvBlock }) {
     return (
       <div className="fadein flex justify-end">
         <div className="flex max-w-[85%] items-center gap-2 rounded-lg border border-neutral-200 bg-[var(--surface)] px-3 py-2 text-[13px]">
-          <FileSpreadsheet size={14} className="text-neutral-400" />
-          {b.filename}
+          {b.uploading ? (
+            <Loader2 size={14} className="spin text-[var(--brand-accent)]" />
+          ) : (
+            <FileSpreadsheet size={14} className="text-neutral-400" />
+          )}
+          <span className="truncate">{b.filename}</span>
+          {b.uploading && <span className="text-[11px] text-neutral-400">上传中</span>}
         </div>
       </div>
     );
@@ -339,17 +348,21 @@ function ViewRenderer({ view }: { view: WorkspaceView }) {
 export function Workbench({ projectId }: { projectId: string }) {
   const s = useStore();
   const [input, setInput] = useState("");
+  const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
 
   useEffect(() => {
     void s.init(projectId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // 智能跟随：用户上翻阅读时不强制拉到底
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [s.blocks.length]);
+    const el = scrollRef.current;
+    if (el && nearBottom.current) el.scrollTo({ top: el.scrollHeight });
+  }, [s.blocks]);
 
   const send = () => {
     const t = input.trim();
@@ -359,22 +372,45 @@ export function Workbench({ projectId }: { projectId: string }) {
   };
 
   const activeView = s.views.find((v) => v.id === s.activeViewId) ?? s.views[s.views.length - 1];
-  const factChips = s.facts.filter((f) => ["地区", "税率", "价格文件", "电缆品牌"].includes(f.key));
+  const factChips = s.facts.filter((f) =>
+    ["地区", "税率", "价格文件", "电缆品牌", "管理费率", "利润率"].includes(f.key)
+  );
 
   return (
     <div className="flex h-screen">
       {/* left: Agent conversation */}
       <div
-        className="flex w-[400px] shrink-0 flex-col border-r border-neutral-200 bg-[var(--surface)]"
-        onDragOver={(e) => e.preventDefault()}
+        className={`relative flex w-[400px] shrink-0 flex-col border-r border-neutral-200 bg-[var(--surface)] transition-colors ${dragging ? "drop-armed" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer.types.includes("Files")) setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+        }}
         onDrop={(e) => {
           e.preventDefault();
+          setDragging(false);
           const f = e.dataTransfer.files?.[0];
           if (f) void s.upload(f);
         }}
       >
+        {dragging && <div className="drop-overlay">松开上传文件</div>}
         <div className="border-b border-neutral-100 px-4 py-3">
-          <div className="text-[13px] font-medium">{s.projectName || "…"}</div>
+          <div className="flex items-center gap-2">
+            <a
+              href="/"
+              className="icon-btn -ml-1.5 flex h-6 w-6"
+              title="返回项目列表"
+            >
+              <ArrowLeft size={13} />
+            </a>
+            {s.ready ? (
+              <div className="truncate text-[13px] font-medium">{s.projectName || "未命名项目"}</div>
+            ) : (
+              <div className="skeleton h-4 w-32" />
+            )}
+          </div>
           {factChips.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {factChips.map((f) => (
@@ -391,18 +427,28 @@ export function Workbench({ projectId }: { projectId: string }) {
           )}
         </div>
 
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <div
+          ref={scrollRef}
+          className="flex-1 space-y-3 overflow-y-auto px-4 py-4"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          }}
+        >
           {!s.blocks.length && (
             <div className="mt-16 space-y-4 px-2">
-              <p className="text-[13px] text-neutral-500">
+              <p className="text-[13px] leading-relaxed text-neutral-500">
                 上传清单 / 询价 Excel，然后直接告诉我做什么。
+                <span className="mt-1 block text-[11.5px] text-neutral-400">
+                  文件也可以直接拖进来
+                </span>
               </p>
               <div className="space-y-1.5">
                 {[
                   "检查相同项不同单价，工程量为0的不用管",
                   "把询价文件里的材料价格更新到当前项目",
+                  "按定额测算综合单价，对比偏差",
                   "分析电缆、桥架、管道、阀门各占多少",
-                  "导出修改后的清单",
                 ].map((t) => (
                   <button
                     key={t}
@@ -492,24 +538,42 @@ export function Workbench({ projectId }: { projectId: string }) {
         {s.views.length > 0 && (
           <div className="flex items-center gap-px overflow-x-auto border-b border-neutral-200 bg-[var(--surface)] px-2">
             {s.views.map((v) => (
-              <button
+              <div
                 key={v.id}
-                onClick={() => s.setActiveView(v.id)}
                 className={
-                  "whitespace-nowrap border-b-2 px-3 py-2 text-[12px] " +
+                  "group/tab flex items-center whitespace-nowrap border-b-2 " +
                   (v.id === activeView?.id
-                    ? "border-[var(--brand-accent)] font-medium text-neutral-900"
-                    : "border-transparent text-neutral-500 hover:text-neutral-800")
+                    ? "border-[var(--brand-accent)]"
+                    : "border-transparent hover:border-neutral-300")
                 }
               >
-                {v.title}
-              </button>
+                <button
+                  onClick={() => s.setActiveView(v.id)}
+                  className={
+                    "px-3 py-2 pr-1.5 text-[12px] transition-colors " +
+                    (v.id === activeView?.id
+                      ? "font-medium text-neutral-900"
+                      : "text-neutral-500 hover:text-neutral-800")
+                  }
+                >
+                  {v.title}
+                </button>
+                {s.views.length > 1 && (
+                  <button
+                    onClick={() => s.closeView(v.id)}
+                    className="mr-1.5 flex h-4 w-4 items-center justify-center rounded text-neutral-300 opacity-0 transition-opacity hover:bg-neutral-200 hover:text-neutral-600 group-hover/tab:opacity-100"
+                    title="关闭"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}
         <div className="min-h-0 flex-1">
           {activeView ? (
-            <ViewRenderer key={activeView.id + s.boqVersion} view={activeView} />
+            <ViewRenderer key={activeView.id} view={activeView} />
           ) : (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">

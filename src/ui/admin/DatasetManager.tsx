@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import { ChevronDown, FileSpreadsheet, Loader2, Trash2, Upload } from "lucide-react";
+import { ConfirmDialog, toast } from "../primitives";
 
 interface DatasetDTO {
   id: string;
@@ -31,6 +32,7 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
 
   const toggle = async () => {
     if (!open && !preview && d.kind !== "GENERIC") {
@@ -41,10 +43,16 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
   };
 
   const remove = async () => {
-    if (!confirm(`删除数据集「${d.name}」及其导入的全部 ${d.rowCount} 行数据？`)) return;
+    setConfirmDel(false);
     setBusy(true);
-    await fetch(`/api/admin/datasets/${d.id}`, { method: "DELETE" });
-    onDeleted();
+    const res = await fetch(`/api/admin/datasets/${d.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (res.ok) {
+      toast.success(`已删除数据集「${d.name}」`);
+      onDeleted();
+    } else {
+      toast.error("删除失败，请重试");
+    }
   };
 
   return (
@@ -57,6 +65,14 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
             {d.filename} · {d.status === "FAILED" ? "解析失败" : `${d.rowCount} 行`} · {d.createdAt.slice(0, 10)}
           </div>
         </div>
+        {d.status === "FAILED" && (
+          <span
+            className="rounded px-1.5 py-0.5 text-[11px]"
+            style={{ background: "var(--danger-soft-bg)", color: "var(--danger-soft-fg)" }}
+          >
+            失败
+          </span>
+        )}
         <span className="rounded bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500">{d.kindLabel}</span>
         {d.kind !== "GENERIC" && (
           <button
@@ -68,7 +84,7 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
           </button>
         )}
         <button
-          onClick={remove}
+          onClick={() => setConfirmDel(true)}
           disabled={busy}
           className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
           title="删除数据集"
@@ -76,6 +92,16 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
           {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={13} />}
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmDel}
+        danger
+        title={`删除数据集「${d.name}」？`}
+        description={`将删除导入的全部 ${d.rowCount} 行数据与源文件，所有项目立即失去该数据。`}
+        confirmText="删除"
+        busy={busy}
+        onConfirm={remove}
+        onCancel={() => setConfirmDel(false)}
+      />
       {open && preview && (
         <div className="max-h-72 overflow-auto border-t border-neutral-100">
           <table className="xl-table text-[12px]">
@@ -128,7 +154,13 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
     fd.append("kind", kind);
     const res = await fetch("/api/admin/datasets", { method: "POST", body: fd });
     setBusy(false);
-    if (!res.ok) { alert("上传失败"); return; }
+    if (!res.ok) {
+      toast.error(`「${f.name}」上传失败`);
+      return;
+    }
+    const ds = await res.json();
+    if (ds.status === "FAILED") toast.error(`「${f.name}」解析失败 — 请检查表头格式`);
+    else toast.success(`已导入 ${ds.rowCount} 行`);
     await refresh();
   };
 

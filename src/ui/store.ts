@@ -15,7 +15,7 @@ export type ConvBlock =
   | { type: "tool"; tool: string; status: string; ms?: number; runId: string; args?: string; resultMsg?: string }
   | { type: "receipt"; receiptId: string; summary: string; actionType: string; runId: string }
   | { type: "confirm"; confirmId: string; runId: string; tool: string; description: string; decided?: "approved" | "rejected" }
-  | { type: "upload"; filename: string }
+  | { type: "upload"; filename: string; uploading?: boolean }
   | { type: "error"; text: string; runId?: string };
 
 interface FileMeta {
@@ -35,16 +35,18 @@ interface State {
   views: WorkspaceView[];
   activeViewId: string | null;
   running: boolean;
+  ready: boolean;
   boqVersion: number;
 
   init(projectId: string): Promise<void>;
   send(text: string): Promise<void>;
   upload(file: File): Promise<void>;
-  patchItem(id: string, patch: Partial<BoqItemDTO>): Promise<void>;
+  patchItem(id: string, patch: Partial<BoqItemDTO>): Promise<boolean>;
   reloadBoq(): Promise<void>;
   refreshMeta(): Promise<void>;
   streamRun(runId: string): Promise<void>;
   setActiveView(id: string): void;
+  closeView(id: string): void;
   handleEvent(e: AgentEventDTO, runId: string): void;
 }
 
@@ -58,11 +60,12 @@ export const useStore = create<State>((set, get) => ({
   views: [],
   activeViewId: null,
   running: false,
+  ready: false,
   boqVersion: 0,
 
   async init(projectId) {
     if (get().projectId === projectId) return;
-    set({ projectId, blocks: [], views: [], activeViewId: null });
+    set({ projectId, blocks: [], views: [], activeViewId: null, ready: false });
     const [p, items, runs] = await Promise.all([
       fetch(`/api/projects/${projectId}`).then((r) => r.json()),
       fetch(`/api/projects/${projectId}/boq`).then((r) => r.json()),
@@ -133,6 +136,7 @@ export const useStore = create<State>((set, get) => ({
           ? [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }]
           : [],
       activeViewId: activeViewId ?? (items?.length ? "view:boq" : null),
+      ready: true,
     });
   },
 
@@ -143,33 +147,49 @@ export const useStore = create<State>((set, get) => ({
       running: true,
       blocks: [...s.blocks, { type: "user", text }],
     }));
-    const res = await fetch(`/api/projects/${projectId}/agent/runs`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: text }),
-    });
-    const { runId } = await res.json();
-    get().streamRun(runId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/agent/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { runId } = await res.json();
+      if (!runId) throw new Error("no runId");
+      void get().streamRun(runId);
+    } catch {
+      set((s) => ({
+        running: false,
+        blocks: [...s.blocks, { type: "error", text: "请求失败，请检查网络后重试" }],
+      }));
+    }
   },
 
   async streamRun(runId: string) {
-    const res = await fetch(`/api/runs/${runId}/stream`);
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split("\n\n");
-      buf = parts.pop() ?? "";
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data:")) continue;
-        try {
-          get().handleEvent(JSON.parse(line.slice(5)), runId);
-        } catch {}
+    try {
+      const res = await fetch(`/api/runs/${runId}/stream`);
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+          try {
+            get().handleEvent(JSON.parse(line.slice(5)), runId);
+          } catch {}
+        }
       }
+    } catch {
+      set((s) => ({
+        blocks: [...s.blocks, { type: "error", text: "事件流中断，结果可能不完整 — 请重试" }],
+      }));
     }
     set({ running: false });
   },
@@ -179,26 +199,47 @@ export const useStore = create<State>((set, get) => ({
     if (!projectId) return;
     set((s) => ({
       running: true,
-      blocks: [...s.blocks, { type: "upload", filename: file.name }],
+      blocks: [...s.blocks, { type: "upload", filename: file.name, uploading: true }],
     }));
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`/api/projects/${projectId}/files`, {
-      method: "POST",
-      body: fd,
-    });
-    const { runId } = await res.json();
-    if (runId) get().streamRun(runId);
-    else set({ running: false });
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/projects/${projectId}/files`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { runId } = await res.json();
+      // 上传完成，进入解析阶段（事件流接管反馈）
+      set((s) => ({
+        blocks: s.blocks.map((b) =>
+          b.type === "upload" && b.filename === file.name ? { ...b, uploading: false } : b
+        ),
+      }));
+      if (runId) void get().streamRun(runId);
+      else set({ running: false });
+    } catch {
+      set((s) => ({
+        running: false,
+        blocks: [
+          ...s.blocks.map((b) =>
+            b.type === "upload" && b.filename === file.name ? { ...b, uploading: false } : b
+          ),
+          { type: "error", text: `「${file.name}」上传失败，请重试` },
+        ],
+      }));
+    }
   },
 
   async patchItem(id, patch) {
-    await fetch(`/api/boq-items/${id}`, {
+    const res = await fetch(`/api/boq-items/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     });
+    if (!res.ok) return false;
     await get().reloadBoq();
+    return true;
   },
 
   async reloadBoq() {
@@ -217,6 +258,19 @@ export const useStore = create<State>((set, get) => ({
 
   setActiveView(id) {
     set({ activeViewId: id });
+  },
+
+  closeView(id) {
+    set((s) => {
+      const idx = s.views.findIndex((v) => v.id === id);
+      if (idx < 0) return {};
+      const views = s.views.filter((v) => v.id !== id);
+      const activeViewId =
+        s.activeViewId === id
+          ? (views[Math.max(0, idx - 1)]?.id ?? null)
+          : s.activeViewId;
+      return { views, activeViewId };
+    });
   },
 
   handleEvent(e, runId) {
