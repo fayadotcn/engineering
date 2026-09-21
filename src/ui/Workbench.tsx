@@ -33,6 +33,7 @@ const TOOL_LABEL: Record<string, string> = {
   "quota.match": "匹配定额",
   "quota.calculate": "定额组价",
   "quota.applyCalc": "组价写回",
+  "quota.setItemQuota": "人工选定定额",
   "spec.search": "查定额说明",
   "project.setFact": "写入项目事实",
   "cost.calculate": "金额计算",

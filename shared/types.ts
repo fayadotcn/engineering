@@ -49,6 +49,30 @@ export interface BoqSemanticFeature {
 /** 清单费用口径：分部分项 | 单价措施 | 总价措施 | 其他项目（计价表体系分层）。 */
 export type FeeType = "分部分项" | "单价措施" | "总价措施" | "其他项目";
 
+/** 组价方案行：一个清单项 = 若干定额子目组合（管道+试压+冲洗…）。
+ *  金额均为「每清单单位」口径（定额单位倍数已折算）。 */
+export interface PricingPlanLine {
+  quotaCode: string;
+  quotaName: string;
+  /** 每清单单位：人工/辅材/机械/管理费利润 */
+  labor: string;
+  materialAux: string;
+  machine: string;
+  fee: string;
+  /** 主材费 = 主材价 × 耗量；无主材要求时 null */
+  mainMaterialName: string | null;
+  mainQty: string | null;
+  mainPrice: string | null;
+  /** 该行小计（每清单单位） */
+  subtotal: string;
+  /** 建议增列：工作内容缺口推断的配套子目，人工确认前不计入测算价 */
+  suggested?: boolean;
+  /** 人工指定（quota.setItemQuota 写入） */
+  manual?: boolean;
+  /** 该行承担的工作内容/建议理由 */
+  scope?: string;
+}
+
 /** Serialized BoqItem shape sent to client (Decimals -> strings). */
 export interface BoqItemDTO {
   id: string;
@@ -65,6 +89,8 @@ export interface BoqItemDTO {
   unitPrice: string;
   /** 主材/设备暂估价（询价/信息价），是组价输入而非综合单价 */
   mainMaterialPrice: string;
+  /** 组价方案（多定额子目组合）；空数组=未组价，综合单价是原清单价/手工价 */
+  pricingPlan: PricingPlanLine[];
   totalPrice: string;
   feeType: FeeType;
   sectionPath: string;
@@ -274,6 +300,8 @@ export interface FileCompareRow {
   qtyDelta?: string;
   priceDelta?: string;
   totalDelta?: string;
+  /** 量差超基准量15%（GB50500：应重新组价） */
+  qtyOver15?: boolean;
 }
 
 export interface QuotaResultRow {
@@ -300,6 +328,8 @@ export interface QuotaResultRow {
   /** 存在得分相近且基价不同的备选子目 */
   ambiguous?: boolean;
   altQuota?: string | null;
+  /** 组价方案：第1行主项（计入测算价），suggested 行为工作内容缺口的建议增列 */
+  plan?: PricingPlanLine[];
 }
 
 /* ---------------- Agent events (SSE wire + persisted) ---------------- */

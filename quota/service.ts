@@ -1,6 +1,7 @@
+import Decimal from "decimal.js";
 import { D, round2 } from "@cost-engine/money";
 import { QUOTA_LIBRARY, type QuotaEntry } from "./library";
-import type { BoqItemDTO } from "@shared/types";
+import type { BoqItemDTO, PricingPlanLine } from "@shared/types";
 
 // 定额匹配 + 组价。全部确定性计算。
 // 综合单价 = (人工费+辅材费+机械费)/定额倍数 + 主材价×耗量 + (人工+机械)/倍数×(管理费率+利润率)
@@ -144,6 +145,112 @@ export interface QuotaCalcRow {
   /** 存在得分相近且基价不同的备选子目 */
   ambiguous?: boolean;
   altQuota?: string | null; // 备选子目 "code name"
+  /** 组价方案：第 1 行是主项定额（计入测算价），suggested 行是工作内容缺口的建议增列 */
+  plan?: PricingPlanLine[];
+}
+
+/** 单条定额 → 组价方案行（每清单单位口径：定额单位倍数已折算） */
+export function lineFromQuota(
+  item: BoqItemDTO,
+  q: QuotaEntry,
+  opts: { mgmtRate: Decimal.Value; profitRate: Decimal.Value; mainPrice?: number; suggested?: boolean; manual?: boolean; scope?: string }
+): PricingPlanLine {
+  const mgmt = D(opts.mgmtRate), profit = D(opts.profitRate);
+  const perUnit = (v: number) => D(v).div(q.unitScale || 1);
+  const labor = perUnit(q.labor);
+  const aux = perUnit(q.material);
+  const mach = perUnit(q.machine);
+  const fee = labor.plus(mach).mul(mgmt.plus(profit));
+  const main = opts.mainPrice === undefined ? null : D(opts.mainPrice).mul(q.mainQtyPerUnit);
+  const subtotal = labor.plus(aux).plus(mach).plus(fee).plus(main ?? 0);
+  return {
+    quotaCode: q.code,
+    quotaName: q.name,
+    labor: round2(labor).toString(),
+    materialAux: round2(aux).toString(),
+    machine: round2(mach).toString(),
+    fee: round2(fee).toString(),
+    mainMaterialName: q.detail?.mainMaterial ?? null,
+    mainQty: main !== null ? String(q.mainQtyPerUnit) : null,
+    mainPrice: main !== null ? round2(D(opts.mainPrice!)).toString() : null,
+    subtotal: round2(subtotal).toString(),
+    suggested: opts.suggested || undefined,
+    manual: opts.manual || undefined,
+    scope: opts.scope ?? q.detail?.gcnr ?? undefined,
+  };
+}
+
+/** 组价方案合计 → 每清单单位综合单价（只计已确认行，suggested 不计入） */
+export function planPrice(plan: PricingPlanLine[]): Decimal {
+  return plan.filter((l) => !l.suggested).reduce((a, l) => a.plus(D(l.subtotal)), D(0));
+}
+
+// 工作内容缺口分析：主定额 gcnr 没写到的工序 → 在同册找配套子目建议增列。
+// 这是真实组价：给水管道 = 管道安装 + 消毒冲洗 + 支吊架；沟槽/法兰连接的管件另计。
+const SCOPE_NEEDS: {
+  key: string; covered: RegExp; find: RegExp; reason: string;
+  applies?: (item: BoqItemDTO) => boolean;
+}[] = [
+  {
+    key: "管道消毒冲洗", covered: /冲洗|消毒/, find: /消毒.*冲洗|冲洗.*消毒|管道消毒|管道冲洗/,
+    reason: "主定额工作内容未含冲洗消毒，给水/消防管道规范要求另套",
+    applies: (i) => /给水|饮用|消防|喷淋|消火栓|供水/.test(`${i.name}${i.rawFeature}`),
+  },
+  {
+    key: "支吊架", covered: /支吊架|支架|吊架|托钩/, find: /支吊架|管道支架|支架制作.*安装/,
+    reason: "主定额工作内容未含支吊架制作安装",
+  },
+  {
+    key: "水压试验", covered: /水压|试压|压力试验|严密性/, find: /水压试验|压力试验|管道试压/,
+    reason: "主定额工作内容未含水压试验",
+  },
+  {
+    key: "管件", covered: /管件|零件|接头|上零件/, find: /管件.*连接|管件/,
+    reason: "沟槽/法兰/卡压连接的管件为独立主材，定额通常未含",
+    applies: (i) => /沟槽|法兰|卡压/.test(i.features?.connectionMethod ?? ""),
+  },
+];
+
+const i0 = (i: BoqItemDTO) => `${i.name} ${i.rawFeature}`;
+
+function suggestSupplementary(
+  item: BoqItemDTO,
+  q: QuotaEntry,
+  lib: QuotaEntry[],
+  mgmt: Decimal.Value,
+  profit: Decimal.Value
+): PricingPlanLine[] {
+  const pipeish =
+    item.features?.category === "管道" ||
+    /管|给水|排水|喷淋|消火栓|采暖|冷凝水|雨水|污水|风管/.test(i0(item));
+  if (!pipeish) return [];
+  const coveredText = `${q.name} ${q.detail?.gcnr ?? ""}`;
+  const bookPrefix = q.code.slice(0, 2); // SC2020 编号前两位=分册
+  // 直径档归一化：DN100/公称直径100mm以内 → 数字 "100"，只在直径语境里匹配
+  // （不能裸匹配数字——"混凝土基础400×400"不是 DN400）
+  const diaNum = (item.features?.diameter ?? "").replace(/\D/g, "");
+  const diaHit = (name: string) =>
+    !!diaNum && new RegExp(`(直径|DN|Φ|DE|de)\\s*${diaNum}(?![\\d])|${diaNum}\\s*mm`, "i").test(name);
+  const out: PricingPlanLine[] = [];
+  for (const need of SCOPE_NEEDS) {
+    if (out.length >= 3) break;
+    if (need.covered.test(coveredText)) continue; // 主定额已含该工序
+    if (need.applies && !need.applies(item)) continue;
+    // 候选：同册优先 → 名称命中 → 规格档相符优先
+    const cands = lib
+      .filter((c) => c.code !== q.code && need.find.test(c.name))
+      .sort((a, b) => {
+        const sa = (a.code.startsWith(bookPrefix) ? 2 : 0) + (diaHit(a.name) ? 3 : 0);
+        const sb = (b.code.startsWith(bookPrefix) ? 2 : 0) + (diaHit(b.name) ? 3 : 0);
+        return sb - sa;
+      });
+    const c = cands[0];
+    if (!c) continue;
+    // 有规格档的定额若明确不覆盖该项直径，跳过（避免推荐错档子目误导）
+    if (diaNum && /直径\s*\d+/.test(c.name) && !diaHit(c.name)) continue;
+    out.push(lineFromQuota(item, c, { mgmtRate: mgmt, profitRate: profit, suggested: true, scope: need.reason }));
+  }
+  return out;
 }
 
 export function calcQuota(
@@ -198,6 +305,12 @@ export function calcQuota(
       ? null
       : calc.minus(D(item.unitPrice)).div(D(item.unitPrice)).mul(100);
 
+    // 组价方案：主项行 + 工作内容缺口的建议增列行（建议行不计入测算价）
+    const primaryLine = lineFromQuota(item, q, {
+      mgmtRate: mgmt, profitRate: profit, mainPrice,
+    });
+    const plan = [primaryLine, ...suggestSupplementary(item, q, lib, mgmt, profit)];
+
     return {
       ...base,
       quotaCode: q.code,
@@ -217,6 +330,7 @@ export function calcQuota(
       quotaChapter: q.detail?.chapter ?? null,
       quotaBase: q.detail?.jj != null ? String(q.detail.jj) : null,
       quotaMainName: q.detail?.mainMaterial ?? null,
+      plan,
     };
   });
 }

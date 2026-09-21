@@ -637,6 +637,14 @@ export function BoqTable() {
                             材 {fmtMoney(it.mainMaterialPrice)}
                           </div>
                         )}
+                        {(it.pricingPlan?.filter((l) => !l.suggested).length ?? 0) > 0 && (
+                          <div
+                            className="text-[10px] font-normal text-[var(--accent,#7a6a4f)]"
+                            title={it.pricingPlan!.filter((l) => !l.suggested).map((l) => `${l.quotaCode} ${l.quotaName}`).join("\n")}
+                          >
+                            组价×{it.pricingPlan!.filter((l) => !l.suggested).length}
+                          </div>
+                        )}
                       </>
                     ) : (
                       it[f]
@@ -1065,6 +1073,26 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
                       )}
                     </div>
                     {r.quotaGcnr && <div className="text-neutral-500">工作内容：{r.quotaGcnr}</div>}
+                    {(r.plan?.length ?? 0) > 1 && (
+                      <div className="mt-1 border-t border-neutral-200 pt-1">
+                        <div className="mb-0.5 font-medium text-neutral-600">组价方案（{r.plan!.filter((l) => !l.suggested).length} 条已计）</div>
+                        {r.plan!.map((l, li) => (
+                          <div key={li} className="flex items-baseline gap-2 text-neutral-500">
+                            <span className="mono">{l.quotaCode}</span>
+                            <span className="truncate">{l.quotaName}</span>
+                            {l.suggested ? (
+                              <span className="rounded bg-amber-100 px-1 py-px text-[9.5px] text-amber-700" title={l.scope}>建议增列</span>
+                            ) : l.manual ? (
+                              <span className="rounded bg-neutral-200 px-1 py-px text-[9.5px] text-neutral-600">人工指定</span>
+                            ) : null}
+                            <span className="ml-auto mono">{l.subtotal}</span>
+                          </div>
+                        ))}
+                        <div className="text-[10.5px] text-neutral-400">
+                          建议增列的子目不计入测算价，确认后用「为该项增列定额」写入组价方案
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -1171,6 +1199,15 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
         <span className="text-neutral-500">
           差额合计 <b className="mono text-neutral-800">{fmtMoney(s.totalDelta)}</b> 元
         </span>
+        {(s as { qtyOver15?: number }).qtyOver15 ? (
+          <span
+            className="rounded px-1.5 py-0.5 text-[11px]"
+            style={{ background: "var(--danger-soft-bg)", color: "var(--danger-soft-fg)" }}
+            title="GB50500：工程量偏差超15%应重新组价/调整综合单价"
+          >
+            {(s as { qtyOver15?: number }).qtyOver15} 项量差&gt;15% 应调价
+          </span>
+        ) : null}
         <div className="ml-auto flex gap-1">
           {[
             ["DIFF", `差异 ${s.total - s.same}`],
@@ -1217,6 +1254,15 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
                   <span className={cn("rounded px-1.5 py-0.5 text-[10.5px]", CMP_STYLE[r.status])}>
                     {CMP_LABEL[r.status]}
                   </span>
+                  {r.qtyOver15 && (
+                    <span
+                      className="ml-1 rounded px-1 py-px text-[9.5px] font-medium"
+                      style={{ background: "var(--danger-soft-bg)", color: "var(--danger-soft-fg)" }}
+                      title="量差超15%，应重新组价"
+                    >
+                      &gt;15%
+                    </span>
+                  )}
                 </td>
                 <td className="mono text-right">{r.aQty ?? "—"}</td>
                 <td className={cn("mono text-right", r.qtyDelta && "font-medium text-blue-700")}>{r.bQty ?? "—"}</td>

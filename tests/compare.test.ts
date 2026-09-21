@@ -24,6 +24,7 @@ const item = (
   quantity: qty,
   unitPrice: price,
   mainMaterialPrice: "0",
+  pricingPlan: [],
   feeType: "分部分项",
   totalPrice: (parseFloat(qty) * parseFloat(price)).toFixed(2),
   sectionPath: "",

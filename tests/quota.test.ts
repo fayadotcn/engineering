@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcQuota } from "../quota/service";
+import { calcQuota, planPrice } from "../quota/service";
 import type { QuotaEntry } from "../quota/library";
 import type { BoqItemDTO } from "../shared/types";
 
@@ -48,5 +48,52 @@ describe("calcQuota 组价语义", () => {
       lib, threshold: 0, mainPrices: { "镀锌钢管|": 1 },
     });
     expect(r.mainMaterial).toBe("100.98"); // 99×1.02，而非 1×1.02
+  });
+});
+
+describe("组价方案：工作内容缺口的配套子目建议", () => {
+  const pipeLib: QuotaEntry[] = [
+    {
+      code: "5H0001", name: "给水管道安装 DN100", unit: "10m", unitScale: 10,
+      labor: 150, material: 30, machine: 5, mainQtyPerUnit: 1.015,
+      detail: { gcnr: "切管、套丝、管道安装、水压试验。" }, // 含试压，不含冲洗/支架
+      match: { category: "管道" },
+    },
+    {
+      code: "5H0332", name: "管道消毒、冲洗 公称直径100mm以内", unit: "100m", unitScale: 100,
+      labor: 50, material: 10, machine: 2, mainQtyPerUnit: 1, match: {},
+    },
+    {
+      code: "5G0131", name: "管道支吊架制作、安装", unit: "100kg", unitScale: 100,
+      labor: 300, material: 50, machine: 20, mainQtyPerUnit: 1, match: {},
+    },
+  ];
+  const pipeItem = () =>
+    item({
+      name: "给水镀锌钢管", features: { category: "管道", material: "镀锌钢管", diameter: "DN100" },
+      mainMaterialPrice: "52",
+    });
+
+  it("gcnr 未含的工序（冲洗/支吊架）生成建议增列行，已含的（试压）不建议", () => {
+    const [r] = calcQuota([pipeItem()], { lib: pipeLib, threshold: 0, mgmtRate: 0.16, profitRate: 0.09 });
+    const plan = r.plan ?? [];
+    const suggested = plan.filter((l) => l.suggested);
+    expect(plan[0].quotaCode).toBe("5H0001");
+    expect(suggested.map((l) => l.quotaCode)).toEqual(
+      expect.arrayContaining(["5H0332", "5G0131"])
+    );
+    // 试压已在主定额工作内容里，不建议
+    expect(suggested.every((l) => !/试压|水压/.test(l.quotaName))).toBe(true);
+    // 连接方式非沟槽/法兰 → 不建议管件
+    expect(suggested.every((l) => !/管件/.test(l.quotaName))).toBe(true);
+  });
+
+  it("建议行不计入测算价，planPrice 只合计已确认行", () => {
+    const [r] = calcQuota([pipeItem()], { lib: pipeLib, threshold: 0, mgmtRate: 0.16, profitRate: 0.09 });
+    const plan = r.plan ?? [];
+    // 测算价 = 仅主项：15 + 3 + 0.5 + 52×1.015 + (15.5×0.25) = 15+3+0.5+52.78+3.875 = 75.155
+    expect(r.calcPrice).toBe("75.16");
+    expect(planPrice(plan).toFixed(2)).toBe("75.16");
+    expect(planPrice(plan.filter((l) => !l.suggested)).toFixed(2)).toBe(planPrice(plan).toFixed(2));
   });
 });

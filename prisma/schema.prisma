@@ -68,6 +68,7 @@ model BoqItem {
   quantity      Decimal  @default(0)
   unitPrice     Decimal  @default(0)   // 综合单价（人材机管利五要素），不是材料价
   mainMaterialPrice Decimal @default(0) // 主材/设备暂估价（询价或信息价，组价输入）
+  pricingPlan   String   @default("[]") // JSON PricingPlanLine[]：组价方案（一清单项可挂多定额子目）
   totalPrice    Decimal  @default(0)
   feeType       String   @default("分部分项") // 分部分项 | 单价措施 | 总价措施 | 其他项目 | 规费税金
   sectionPath   String   @default("") // e.g. "电气设备安装工程/配电箱"

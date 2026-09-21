@@ -59,6 +59,8 @@ MODEL_NAME=deepseek-chat
 - **造价专业语义红线（资深造价师口径）**：
   - `unitPrice` 是**综合单价**（人材机管利五要素组价结果）；`mainMaterialPrice` 是**主材暂估价**（询价/信息价，组价输入）。材料价/询价/材料库价**只能写 mainMaterialPrice，绝不写 unitPrice**——综合单价由定额组价生成。
   - 组价链路：`material.fillFromLibrary`/`applyQuotation` 写主材暂估价 → `quota.calculate` 测算（人材机+主材价×耗量+取费）→ `quota.applyCalc`（确认门）写回综合单价。缺主材价的项测算**不完整**：不算偏差、applyCalc 默认跳过。
+  - **组价方案 `pricingPlan`**：一个清单项可挂多条定额子目（PricingPlanLine[] JSON）。`calcQuota` 产出主项行+工作内容缺口的建议增列行（`suggested`，不计入测算价——gcnr 未含的冲洗消毒/支吊架/试压/管件在同册找配套子目，直径档按数字归一化匹配）；`quota.applyCalc` 把已确认行写入 `pricingPlan`；`quota.setItemQuota`（确认门）人工 replace/append 子目并重算综合单价——存疑匹配的专业处置出口。
+  - **±15% 量差调价预警**：`compareBoqSets` 对两版清单量差>15% 的行标 `qtyOver15`（GB50500 触发线，应重新组价），对审视图出危险徽标+计数。
   - `feeType` 计价表分层：分部分项 | 单价措施 | 总价措施 | 其他项目。表-11/表-12（总价措施/其他项目）只有名称+金额也必须导入（安全文明施工费是真钱）；表-04 汇总/规费税金表不导入（计算结果非清单项）。`isPricableItem()` 判定可计价项——总价措施/其他项目单价为 0 属正常，不算未定价。
   - 规费基数是**定额人工费**（四川安装口径），不是分部分项费：`quota.calculate` 测算后把 Σ(定额人工×量) 写台账 `定额人工费`，`feeSummary` 有真基数用真基数，否则退回简化口径并标注。
   - 总价控制：`quantity.adjust` 默认调**综合单价**（下浮/上浮，合规手段），`mode=quantity` 才调工程量（改变图纸口径，慎用）。

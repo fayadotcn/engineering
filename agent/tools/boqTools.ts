@@ -227,8 +227,9 @@ registerTool({
       ],
       message:
         `对审完成：${fileA.filename} vs ${fileB.filename} — 一致 ${summary.same} 项，` +
-        `价差 ${summary.priceDiff} 项，量差 ${summary.qtyDiff} 项，` +
-        `仅A ${summary.onlyA} 项，仅B ${summary.onlyB} 项，总额差 ${summary.totalDelta} 元`,
+        `价差 ${summary.priceDiff} 项，量差 ${summary.qtyDiff} 项` +
+        (summary.qtyOver15 ? `（其中 ${summary.qtyOver15} 项量差>15%，按 GB50500 应重新组价）` : "") +
+        `，仅A ${summary.onlyA} 项，仅B ${summary.onlyB} 项，总额差 ${summary.totalDelta} 元`,
     };
   },
 });

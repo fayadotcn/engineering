@@ -25,6 +25,7 @@ const item = (
   quantity: qty,
   unitPrice: price,
   mainMaterialPrice: "0",
+  pricingPlan: [],
   feeType: "分部分项",
   totalPrice: (parseFloat(qty) * parseFloat(price)).toFixed(2),
   sectionPath: "",
@@ -76,5 +77,24 @@ describe("compareBoqSets", () => {
     const s = compareSummary(compareBoqSets(a, b));
     expect(s.same).toBe(1);
     expect(s.totalDelta).toBe("0.00");
+  });
+
+  it("量差超15%标记 qtyOver15（GB50500 调价触发线），≤15% 不标", () => {
+    const a = [
+      item("镀锌钢管", "DN100", "m", "100", "85", "C001"),
+      item("电缆", "YJV-4x25", "m", "100", "60", "C002"),
+      item("桥架", "200x100", "m", "100", "45", "C003"),
+    ];
+    const b = [
+      item("镀锌钢管", "DN100", "m", "120", "85", "C001", "fB"), // +20% → 触发
+      item("电缆", "YJV-4x25", "m", "110", "60", "C002", "fB"),  // +10% → 不触发
+      item("桥架", "200x100", "m", "80", "45", "C003", "fB"),   // -20% → 触发
+    ];
+    const rows = compareBoqSets(a, b);
+    const by = (code: string) => rows.find((r) => r.code === code)!;
+    expect(by("C001").qtyOver15).toBe(true);
+    expect(by("C002").qtyOver15).toBeUndefined();
+    expect(by("C003").qtyOver15).toBe(true);
+    expect(compareSummary(rows).qtyOver15).toBe(2);
   });
 });

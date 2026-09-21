@@ -2,7 +2,7 @@ import { z } from "zod";
 import { registerTool } from "./registry";
 import { listBoq } from "@boq/service";
 import { listQuotations } from "@material/service";
-import { calcQuota, matchQuota, top2Quota, mainPriceKey, getQuotaLibrary } from "@quota/service";
+import { calcQuota, matchQuota, top2Quota, mainPriceKey, getQuotaLibrary, lineFromQuota, planPrice } from "@quota/service";
 import { findLibraryPrice } from "@dataset/service";
 import { getFact, setFact, parseRateValue } from "@project/facts";
 import { D, sum } from "@cost-engine/money";
@@ -281,7 +281,11 @@ registerTool({
     const { updateBoqItems } = await import("@boq/service");
     const { before, after } = await updateBoqItems(
       ctx.projectId,
-      writable.map((r) => ({ id: r.itemId, patch: { unitPrice: r.calcPrice! } }))
+      writable.map((r) => ({
+        id: r.itemId,
+        // 综合单价=组价方案合计；pricingPlan 只落已确认行（suggested 不计入）
+        patch: { unitPrice: r.calcPrice!, pricingPlan: (r.plan ?? []).filter((l) => !l.suggested) },
+      }))
     );
     const diffRows: DiffRow[] = [];
     for (const b of before) {
@@ -309,6 +313,93 @@ registerTool({
         after: after.map((a) => ({ id: a.id, name: a.name, unitPrice: a.unitPrice })),
       }],
       message: `已把定额测算综合单价写回 ${writable.length} 项${skipped.length ? `；${skipped.length} 项缺主材价跳过` : ""}`,
+    };
+  },
+});
+
+// 人工选定定额：存疑匹配/未匹配项的专业处置出口。
+// replace=替换主项子目；append=增列配套子目（冲洗/支吊架/试压等）。
+// 综合单价 = 组价方案合计，写回 pricingPlan + unitPrice（确认门）。
+registerTool({
+  name: "quota.setItemQuota",
+  description: "人工为清单项指定定额子目：replace 替换主项（处置存疑匹配），append 增列配套子目（冲洗/支吊架/试压等）。综合单价按组价方案合计重算",
+  implemented: true,
+  schema: z.object({
+    itemId: z.string().describe("清单项 id"),
+    quotaCode: z.string().describe("定额编号，如 5H0332"),
+    mode: z.enum(["replace", "append"]).optional().describe("replace=替换主项（默认）；append=增列到组价方案"),
+    clear: z.boolean().optional().describe("true=清除该项组价方案（恢复清单原价不变，仅清方案）"),
+  }),
+  confirm: (a: { quotaCode?: string; mode?: string; clear?: boolean }) =>
+    a.clear ? "将清除该清单项的组价方案" : `将把定额 ${a.quotaCode} ${a.mode === "append" ? "增列到组价方案" : "设为主项定额"}，综合单价按方案合计重算`,
+  handler: async (ctx, args: { itemId: string; quotaCode: string; mode?: "replace" | "append"; clear?: boolean }) => {
+    const items = await listBoq(ctx.projectId);
+    const it = items.find((x) => x.id === args.itemId);
+    if (!it) return { observation: { error: "清单项不存在" } };
+    const { updateBoqItems } = await import("@boq/service");
+
+    if (args.clear) {
+      const { before, after } = await updateBoqItems(ctx.projectId, [
+        { id: it.id, patch: { pricingPlan: [] } },
+      ]);
+      return {
+        observation: { cleared: true },
+        receipts: [{
+          actionType: "BOQ_UPDATE",
+          summary: `清除组价方案：${it.name}（综合单价保留 ${it.unitPrice}）`,
+          before, after,
+        }],
+        message: `已清除「${it.name}」的组价方案，综合单价保留现值 ${it.unitPrice}`,
+      };
+    }
+
+    const lib = await getQuotaLibrary();
+    const q = lib.find((e) => e.code === args.quotaCode);
+    if (!q) return { observation: { error: `定额库中无 ${args.quotaCode}，可用 quota.search 检索` } };
+
+    const mgmtRate = parseRateValue((await getFact(ctx.projectId, "管理费率"))?.value) ?? 0.16;
+    const profitRate = parseRateValue((await getFact(ctx.projectId, "利润率"))?.value) ?? 0.09;
+
+    // 主材价沿用清单项主材暂估价
+    const ownMain = Number(it.mainMaterialPrice ?? 0);
+    const line = lineFromQuota(it, q, {
+      mgmtRate, profitRate,
+      mainPrice: ownMain > 0 ? ownMain : undefined,
+      manual: true,
+    });
+
+    const existing = (it.pricingPlan ?? []).filter((l) => !l.suggested);
+    const plan =
+      args.mode === "append" ? [...existing, line] : [line];
+    const price = planPrice(plan);
+
+    const { before, after } = await updateBoqItems(ctx.projectId, [
+      { id: it.id, patch: { unitPrice: price.toFixed(2), pricingPlan: plan } },
+    ]);
+    const a = after[0];
+    return {
+      observation: {
+        itemId: it.id, quota: `${q.code} ${q.name}`, mode: args.mode ?? "replace",
+        planLines: plan.length, unitPrice: price.toFixed(2),
+        needsMainPrice: ownMain <= 0 && !!q.detail?.mainMaterial,
+      },
+      views: [
+        {
+          kind: "diff", id: `view:diff:${ctx.runId}`, title: "组价方案更新", receiptId: "",
+          rows: [{
+            itemId: it.id, code: it.code, name: it.name, field: "unitPrice",
+            before: it.unitPrice, after: a?.unitPrice ?? "",
+          }],
+        },
+        { kind: "boqTable", id: "view:boq", title: "工程量清单" },
+      ],
+      receipts: [{
+        actionType: "PRICE_APPLY",
+        summary: `人工组价：${it.name} ${args.mode === "append" ? "增列" : "套用"} ${q.code} ${q.name}，综合单价 ${it.unitPrice} → ${price.toFixed(2)}（方案 ${plan.length} 条）`,
+        before, after,
+      }],
+      message: `「${it.name}」组价方案已更新（${plan.length} 条子目），综合单价 ${it.unitPrice} → ${price.toFixed(2)}` +
+        (ownMain <= 0 && q.detail?.mainMaterial ? `；注意该子目主材「${q.detail.mainMaterial}」暂无暂估价` : ""),
     };
   },
 });

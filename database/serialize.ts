@@ -3,6 +3,7 @@ import { fromJson } from "@shared/json";
 import type {
   BoqItemDTO,
   BoqSemanticFeature,
+  PricingPlanLine,
   CostFactDTO,
   Discipline,
   QuotationItemDTO,
@@ -22,6 +23,7 @@ export function toBoqDTO(it: BoqItem): BoqItemDTO {
     quantity: it.quantity.toString(),
     unitPrice: it.unitPrice.toString(),
     mainMaterialPrice: it.mainMaterialPrice.toString(),
+    pricingPlan: fromJson<PricingPlanLine[]>(it.pricingPlan, []),
     totalPrice: it.totalPrice.toString(),
     feeType: it.feeType as BoqItemDTO["feeType"],
     sectionPath: it.sectionPath,

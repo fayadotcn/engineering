@@ -95,6 +95,8 @@ export interface BoqPatch {
   unitPrice?: string;
   /** 主材暂估价：组价输入，写入不影响 合价=量×综合单价 */
   mainMaterialPrice?: string;
+  /** 组价方案（PricingPlanLine[]），组价写回/人工选定定额时更新 */
+  pricingPlan?: unknown[];
   quantity?: string;
   name?: string;
   rawFeature?: string;
@@ -132,6 +134,9 @@ export async function updateBoqItems(
         ...(patch.rawFeature !== undefined ? { rawFeature: patch.rawFeature } : {}),
         ...(patch.mainMaterialPrice !== undefined
           ? { mainMaterialPrice: round2(D(patch.mainMaterialPrice)) }
+          : {}),
+        ...(patch.pricingPlan !== undefined
+          ? { pricingPlan: toJson(patch.pricingPlan) }
           : {}),
         quantity: qty,
         unitPrice: price,
