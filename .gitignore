@@ -7,3 +7,6 @@ prisma/dev.db*
 next-env.d.ts
 fixtures/out/
 dev.log
+
+# local secrets
+.env
