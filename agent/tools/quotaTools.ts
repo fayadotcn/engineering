@@ -6,6 +6,7 @@ import { calcQuota, matchQuota, top2Quota, mainPriceKey, getQuotaLibrary, lineFr
 import { findLibraryPrice } from "@dataset/service";
 import { getFact, setFact, parseRateValue } from "@project/facts";
 import { D, sum } from "@cost-engine/money";
+import type Decimal from "decimal.js";
 import { isPricableItem } from "@shared/types";
 import type { DiffRow } from "@shared/types";
 
@@ -180,10 +181,16 @@ registerTool({
       (r) => r.deviation !== null && Math.abs(Number(r.deviation)) > 20
     );
     // 定额人工费合计 → 台账（规费基数是人工费而非分部分项费，四川安装口径）
+    // 同时按定额分册(5G/5H/5I…)存明细——措施费系数(脚手架/超高/高层)按册取人工费基数
     const laborBase = sum(
       done.map((r) => D(r.labor ?? 0).mul(D(r.quantity)))
     );
-    if (done.length)
+    const laborByBook: Record<string, Decimal> = {};
+    for (const r of done) {
+      const book = (r.quotaCode ?? "").match(/^(5[A-Z])/)?.[1] ?? "通用";
+      laborByBook[book] = (laborByBook[book] ?? D(0)).plus(D(r.labor ?? 0).mul(D(r.quantity)));
+    }
+    if (done.length) {
       await setFact(ctx.projectId, {
         factType: "取费基数",
         key: "定额人工费",
@@ -193,6 +200,16 @@ registerTool({
         createdBy: "agent",
         agentRunId: ctx.runId,
       });
+      await setFact(ctx.projectId, {
+        factType: "取费基数",
+        key: "定额人工费明细",
+        value: JSON.stringify(Object.fromEntries(Object.entries(laborByBook).map(([k, v]) => [k, v.toFixed(2)]))),
+        source: "INFERRED",
+        confidence: 0.7,
+        createdBy: "agent",
+        agentRunId: ctx.runId,
+      });
+    }
     return {
       observation: {
         total: leaf.length,

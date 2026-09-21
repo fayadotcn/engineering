@@ -174,12 +174,42 @@ export async function getDatasetRows(id: string, limit = 200) {
       total: await prisma.quotaRow.count({ where: { datasetId: id } }),
     };
   }
+  if (ds.kind === "GENERIC" && ds.meta.includes('"MEASURE_FEE"')) {
+    try {
+      const meta = JSON.parse(ds.meta) as { fees?: { name: string; book: string; category: string; base: string; tiers: { tier: string; rate: number }[] }[] };
+      const fees = meta.fees ?? [];
+      return {
+        kind: ds.kind,
+        columns: ["费用项目", "分册", "类别", "计算基数", "费率档"],
+        rows: fees.slice(0, limit).map((f) => [
+          f.name, f.book, f.category, f.base,
+          f.tiers.map((t) => `${t.tier}:${(t.rate * 100).toFixed(2).replace(/\.?0+$/, "")}%`).join(" / "),
+        ]),
+        total: fees.length,
+      };
+    } catch { /* fallthrough */ }
+  }
   return { kind: ds.kind, columns: [], rows: [], total: ds.rowCount };
 }
 
 export async function setDatasetActive(id: string, active: boolean) {
   const ds = await prisma.dataset.update({ where: { id }, data: { active } });
   return { id: ds.id, active: ds.active };
+}
+
+// 措施费系数库（四川2020 ps_fy/ps_fl 导入，GENERIC Dataset 的 meta.fees）
+// 停用数据集 → 返回空数组，措施费计取自然跳过。
+export async function getMeasureFeeRates() {
+  const ds = await prisma.dataset.findFirst({
+    where: { active: true, meta: { contains: '"MEASURE_FEE"' } },
+  });
+  if (!ds) return [];
+  try {
+    const meta = JSON.parse(ds.meta) as { fees?: import("@cost-engine/measureFee").MeasureFeeRate[] };
+    return meta.fees ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export async function deleteDataset(id: string) {

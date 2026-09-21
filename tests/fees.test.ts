@@ -18,7 +18,7 @@ const item = (totalPrice: string, unitPrice = "1", feeType: BoqItemDTO["feeType"
 
 const params = (o: Partial<Parameters<typeof feeSummary>[1]> = {}) => ({
   measureRate: D(0), regulationRate: D(0), provisionalRate: D(0),
-  provisionalAmount: D(0), taxRate: D(0.09), laborBase: null,
+  provisionalAmount: D(0), taxRate: D(0.09), laborBase: null, coeffMeasureFee: D(0),
   set: { measure: false, regulation: false, provisional: false, tax: false },
   ...o,
 });
@@ -87,6 +87,16 @@ describe("feeSummary 取费汇总", () => {
     }));
     expect(noLabor.rows.find((x) => x.seq === "四")?.amount).toBe("2000.00");
     expect(noLabor.rows.find((x) => x.seq === "四")?.basis).toContain("简化基数");
+  });
+
+  it("系数措施费与导入措施清单叠加", () => {
+    const r = feeSummary(
+      [item("100000"), item("14295.78", "0", "总价措施")],
+      params({ coeffMeasureFee: D(2500) })
+    );
+    // 措施费 = 导入真值 14295.78 + 系数措施费 2500
+    expect(r.rows.find((x) => x.seq === "二")?.amount).toBe("16795.78");
+    expect(r.rows.find((x) => x.seq === "二")?.basis).toContain("系数措施费");
   });
 
   it("总价措施/其他项目行不计入未定价数", () => {

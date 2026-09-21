@@ -24,6 +24,8 @@ export interface FeeParams {
   taxRate: Decimal;
   /** 定额人工费合计（定额测算写入台账）；null = 未测算，规费退回简化口径 */
   laborBase: Decimal | null;
+  /** 官方系数措施费合计（cost.measureFees 计取写入台账）：脚手架/超高/高层增加费等 */
+  coeffMeasureFee: Decimal;
   /** 各费率是否来自台账（false=未设置，行内注明） */
   set: { measure: boolean; regulation: boolean; provisional: boolean; tax: boolean };
 }
@@ -64,9 +66,11 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
   const importedMeasure = sum(measureItems.map((i) => i.totalPrice));
   const importedOther = sum(otherItems.map((i) => i.totalPrice));
 
-  // 措施费：导入了措施表用真值；否则费率估算（注明）
-  const measure = importedMeasure.gt(0)
-    ? importedMeasure
+  // 措施费构成：导入的措施清单真值 + 官方系数计取（脚手架/超高/高层，cost.measureFees 写台账）；
+  // 两者皆无才退费率估算并注明
+  const coeffFee = params.coeffMeasureFee;
+  const measure = importedMeasure.plus(coeffFee).gt(0)
+    ? importedMeasure.plus(coeffFee)
     : boqTotal.mul(params.measureRate);
   // 其他项目费：导入了其他项目表用真值；否则暂列金额估算
   const other = importedOther.gt(0)
@@ -92,14 +96,18 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
     },
     {
       seq: "二", name: "措施项目费",
-      basis: importedMeasure.gt(0)
-        ? `Σ 措施清单合价（单价措施+总价措施，${measureItems.length} 项）`
-        : "分部分项工程费 × 费率（估算）",
-      rate: importedMeasure.gt(0) ? null : pct(params.measureRate),
+      basis: [
+        importedMeasure.gt(0) ? `Σ 措施清单合价（${measureItems.length} 项）` : "",
+        coeffFee.gt(0) ? `系数措施费 ${coeffFee.toFixed(2)}（脚手架/超高/高层等，川标费率）` : "",
+      ].filter(Boolean).join(" + ") || "分部分项工程费 × 费率（估算）",
+      rate: importedMeasure.plus(coeffFee).gt(0) ? null : pct(params.measureRate),
       amount: measure.toFixed(2), level: "leaf",
-      note: importedMeasure.gt(0)
-        ? "按导入的措施项目清单计价表"
-        : unset(params.set.measure, "措施费率设为x%") ?? "费率估算口径，导入总价措施表后将改用真值",
+      note: importedMeasure.plus(coeffFee).gt(0)
+        ? [
+            importedMeasure.gt(0) ? "按导入的措施项目清单计价表" : "",
+            coeffFee.gt(0) ? "含「措施费计取」结果" : "",
+          ].filter(Boolean).join("；") || undefined
+        : unset(params.set.measure, "措施费率设为x% 或先做「措施费计取」") ?? "费率估算口径",
     },
     {
       seq: "三", name: "其他项目费",

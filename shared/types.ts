@@ -218,6 +218,18 @@ export type WorkspaceView =
       grandTotal: string;
       unpricedCount: number;
     }
+  | {
+      kind: "measureFee";
+      id: string;
+      title: string;
+      rows: {
+        name: string; book: string; category: string; tier: string;
+        basis: string; rate: string; amount: string;
+        laborPart: string | null; materialPart: string | null; machinePart: string | null;
+      }[];
+      total: string;
+      skipped: { name: string; reason: string }[];
+    }
   | { kind: "overview"; id: string; title: string }
   | { kind: "receipts"; id: string; title: string }
   | {

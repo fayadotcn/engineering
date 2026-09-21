@@ -87,6 +87,10 @@ export class RulePlanner implements Planner {
         steps: [{ tool: "report.exportExcel", args: {}, activity: "正在导出 Excel" }],
       };
 
+    // 措施费系数计取（脚手架/超高/高层增加费，川标官方费率表）
+    if (/措施费|脚手架|超高增加|高层.*增加费|檐口|操作物高度|系统调整费|系数.*计取/.test(m))
+      return { steps: [{ tool: "cost.measureFees", args: {}, activity: "正在按川标系数计取措施费" }] };
+
     // 费用汇总/取费（无目标金额时）：分部分项→措施→规费→税金→含税造价
     if (/费用汇总|取费|造价汇总|汇总表|含税总价|总价是多少|总造价|费用构成/.test(m))
       return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用" }] };

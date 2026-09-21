@@ -5,7 +5,7 @@ import { aggregateByCategory, aggregateByDiscipline, projectTotals } from "@cost
 import { adjustToTarget } from "@cost-engine/adjust";
 import { D, decStr, round3, sum, withTax } from "@cost-engine/money";
 import { feeSummary } from "@cost-engine/fees";
-import { getFact, parseRateValue, loadFeeParams } from "@project/facts";
+import { getFact, setFact, parseRateValue, loadFeeParams } from "@project/facts";
 import type { DiffRow } from "@shared/types";
 
 registerTool({
@@ -70,6 +70,81 @@ registerTool({
         },
       ],
       message: `含税工程造价 ${r.grandTotal} 元（税前 ${r.preTax} 元）${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}`,
+    };
+  },
+});
+
+// 措施费系数计取（四川2020 官方费率表）：脚手架搭拆费按册平费率、
+// 超高/高层增加费按操作物高度/檐口高度选档，基数=定额测算的分册定额人工费。
+// 计取结果写台账「系数措施费」，费用汇总表自动采用。
+registerTool({
+  name: "cost.measureFees",
+  description: "措施费系数计取（四川2020官方费率）：脚手架搭拆/超高/高层建筑增加费按分册定额人工费×费率档计取。需先「定额测算」产生分册人工费基数；檐口高度/操作物高度取台账",
+  implemented: true,
+  schema: z.object({
+    eaveHeight: z.number().optional().describe("檐口高度(m)，缺省读台账「檐口高度」"),
+    workHeight: z.number().optional().describe("操作物高度(m)，缺省读台账「操作物高度」"),
+    systemAdjust: z.array(z.string()).optional().describe("启用的系统调整费，如 ['采暖','通风空调']"),
+    specialEnv: z.array(z.string()).optional().describe("启用的特殊环境费，如 ['洞库','同时进行']"),
+  }),
+  handler: async (ctx, args: { eaveHeight?: number; workHeight?: number; systemAdjust?: string[]; specialEnv?: string[] }) => {
+    const { computeMeasureFees } = await import("@cost-engine/measureFee");
+    const { getMeasureFeeRates } = await import("@dataset/service");
+    const rates = await getMeasureFeeRates();
+    if (!rates.length)
+      return { observation: { error: "措施费系数库未导入或已停用（后台数据集「四川2020措施费系数」）" } };
+
+    const laborFact = await getFact(ctx.projectId, "定额人工费明细");
+    let laborByBook: Record<string, ReturnType<typeof D>> = {};
+    try {
+      const raw = JSON.parse(laborFact?.value ?? "{}") as Record<string, string>;
+      laborByBook = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, D(v)]));
+    } catch { /* empty */ }
+    if (!Object.values(laborByBook).some((v) => v.gt(0)))
+      return { observation: { error: "无分册定额人工费基数——请先「定额测算」" } };
+
+    const num = async (key: string) => {
+      const f = await getFact(ctx.projectId, key);
+      const v = Number(String(f?.value ?? "").replace(/[m米\s]/g, ""));
+      return Number.isFinite(v) && v > 0 ? v : null;
+    };
+    const list = async (key: string) =>
+      String((await getFact(ctx.projectId, key))?.value ?? "")
+        .split(/[,，、\s]+/).filter(Boolean).filter((s) => !/^(0|否|无|false)$/i.test(s));
+
+    const settings = {
+      eaveHeight: args.eaveHeight ?? (await num("檐口高度")),
+      workHeight: args.workHeight ?? (await num("操作物高度")),
+      systemAdjust: args.systemAdjust ?? (await list("系统调整费")),
+      specialEnv: args.specialEnv ?? (await list("特殊环境费")),
+    };
+    const r = computeMeasureFees(rates, laborByBook, settings);
+
+    if (D(r.total).gt(0)) {
+      await setFact(ctx.projectId, {
+        factType: "取费基数", key: "系数措施费", value: r.total,
+        source: "INFERRED", confidence: 0.8, createdBy: "agent", agentRunId: ctx.runId,
+      });
+      await setFact(ctx.projectId, {
+        factType: "取费基数", key: "系数措施费明细",
+        value: JSON.stringify(r.lines.map((l) => ({ name: l.name, book: l.book, amount: l.amount }))),
+        source: "INFERRED", confidence: 0.8, createdBy: "agent", agentRunId: ctx.runId,
+      });
+    }
+
+    return {
+      observation: {
+        lines: r.lines.length, total: r.total,
+        laborByBook: Object.fromEntries(Object.entries(laborByBook).map(([k, v]) => [k, v.toFixed(2)])),
+        settings, skipped: r.skipped.length,
+      },
+      views: [{
+        kind: "measureFee", id: `view:mfee:${ctx.runId}`, title: "措施费计取（四川2020系数）",
+        rows: r.lines, total: r.total, skipped: r.skipped,
+      }],
+      message:
+        `措施费计取：${r.lines.length} 项合计 ${r.total} 元（已写入台账「系数措施费」，费用汇总表自动采用）` +
+        (r.skipped.length ? `；${r.skipped.length} 项未计取（檐口/操作高度或系统调整费未设置）` : ""),
     };
   },
 });
