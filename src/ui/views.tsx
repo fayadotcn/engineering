@@ -199,19 +199,21 @@ function ExcelHead({
    造价总监第一眼视角：总额 / 体量 / 未定价 / TOP 大项（帕累托）/ 最近变更 */
 
 export function OverviewView() {
-  const { items, files, receipts, facts, gotoBoqItem } = useStore();
+  const { items, files, receipts, facts, gotoBoqItem, send } = useStore();
   const leaf = items.filter((i) => !i.isHeader);
   const total = leaf.reduce((n, i) => n + Number(i.totalPrice), 0);
   const unpriced = leaf.filter((i) => Number(i.unitPrice) === 0);
   const top = [...leaf].sort((a, b) => Number(b.totalPrice) - Number(a.totalPrice)).slice(0, 8);
   const topSum = top.reduce((n, i) => n + Number(i.totalPrice), 0);
-  const stat = (label: string, value: React.ReactNode, warn?: boolean) => (
+  const stat = (label: string, value: React.ReactNode, warn?: boolean, onClick?: () => void, hint?: string) => (
     <div
-      className="rounded-xl border px-4 py-3"
+      onClick={onClick}
+      className={cn("rounded-xl border px-4 py-3", onClick && "cursor-pointer transition-colors hover:border-[var(--hairline-strong)]")}
       style={{
         borderColor: warn ? "color-mix(in srgb, var(--warning-soft-fg) 35%, transparent)" : "var(--hairline)",
         background: warn ? "var(--warning-soft-bg)" : "var(--surface)",
       }}
+      title={hint}
     >
       <div className="text-[11px] text-neutral-400">{label}</div>
       <div className="mono mt-1 text-[18px] font-medium tracking-tight" style={warn ? { color: "var(--warning-soft-fg)" } : undefined}>
@@ -229,7 +231,11 @@ export function OverviewView() {
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             {stat("合价合计", <>{fmtMoney(total)}<span className="ml-1 text-[11px] font-normal text-neutral-400">元</span></>)}
             {stat("清单项", leaf.length)}
-            {stat("未定价", unpriced.length, unpriced.length > 0)}
+            {stat(
+              "未定价", unpriced.length, unpriced.length > 0,
+              unpriced.length > 0 ? () => void send("用材料库补齐未定价项") : undefined,
+              "点击让 Agent 用材料库补价"
+            )}
             {stat("TOP8 大项占比", `${total ? ((topSum / total) * 100).toFixed(1) : 0}%`)}
           </div>
 

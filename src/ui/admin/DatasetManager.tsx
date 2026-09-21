@@ -10,6 +10,7 @@ interface DatasetDTO {
   name: string;
   filename: string;
   status: string;
+  active: boolean;
   rowCount: number;
   createdAt: string;
 }
@@ -42,6 +43,18 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
     setOpen(!open);
   };
 
+  const toggleActive = async () => {
+    const res = await fetch(`/api/admin/datasets/${d.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ active: !d.active }),
+    });
+    if (res.ok) {
+      toast.success(d.active ? `已停用「${d.name}」— 匹配/测算不再引用` : `已启用「${d.name}」`);
+      onDeleted(); // 复用刷新
+    } else toast.error("操作失败");
+  };
+
   const remove = async () => {
     setConfirmDel(false);
     setBusy(true);
@@ -56,7 +69,7 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-[var(--surface)]">
+    <div className={cn("overflow-hidden rounded-xl border border-neutral-200 bg-[var(--surface)]", !d.active && "opacity-55")}>
       <div className="flex items-center gap-3 px-4 py-3">
         <FileSpreadsheet size={15} className="shrink-0 text-neutral-400" />
         <div className="min-w-0 flex-1">
@@ -83,6 +96,19 @@ function DatasetCard({ d, onDeleted }: { d: DatasetDTO; onDeleted: () => void })
             <ChevronDown size={11} className={cn("transition-transform", open && "rotate-180")} />
           </button>
         )}
+        <button
+          onClick={toggleActive}
+          className="flex h-5 w-9 items-center rounded-full px-0.5 transition-colors"
+          style={{ background: d.active ? "var(--brand-accent)" : "var(--hairline-strong)" }}
+          title={d.active ? "已启用 — 点击停用" : "已停用 — 点击启用"}
+        >
+          <span
+            className={cn(
+              "h-4 w-4 rounded-full bg-white shadow transition-transform",
+              d.active && "translate-x-4"
+            )}
+          />
+        </button>
         <button
           onClick={() => setConfirmDel(true)}
           disabled={busy}

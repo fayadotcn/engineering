@@ -133,6 +133,7 @@ export async function listDatasets() {
     name: d.name,
     filename: d.filename,
     status: d.status,
+    active: d.active,
     rowCount: d.rowCount,
     materialRows: d._count.materialPrices,
     quotaRows: d._count.quotaRows,
@@ -176,6 +177,11 @@ export async function getDatasetRows(id: string, limit = 200) {
   return { kind: ds.kind, columns: [], rows: [], total: ds.rowCount };
 }
 
+export async function setDatasetActive(id: string, active: boolean) {
+  const ds = await prisma.dataset.update({ where: { id }, data: { active } });
+  return { id: ds.id, active: ds.active };
+}
+
 export async function deleteDataset(id: string) {
   const ds = await prisma.dataset.findUnique({ where: { id } });
   if (!ds) return false;
@@ -186,15 +192,23 @@ export async function deleteDataset(id: string) {
   return true;
 }
 
+/** 只读启用中的数据集（active=false 的数据保留但不参与匹配） */
+const ACTIVE_DATASET = { OR: [{ datasetId: null }, { dataset: { active: true } }] };
+
 /** 全局材料价格库检索（供 Agent 工具消费） */
 export async function searchMaterialPrices(query: string, limit = 30) {
   const q = query.trim();
   const rows = await prisma.materialPrice.findMany({
-    where: q ? { OR: [
-      { name: { contains: q } },
-      { spec: { contains: q } },
-      { brand: { contains: q } },
-    ] } : {},
+    where: {
+      AND: [
+        ACTIVE_DATASET,
+        q ? { OR: [
+          { name: { contains: q } },
+          { spec: { contains: q } },
+          { brand: { contains: q } },
+        ] } : {},
+      ],
+    },
     include: { dataset: { select: { name: true } } },
     take: limit,
     orderBy: { createdAt: "desc" },
@@ -214,7 +228,7 @@ export async function searchMaterialPrices(query: string, limit = 30) {
 /** 主材价模糊查找（定额测算用）：名称命中 + 规格尽量一致 */
 export async function findLibraryPrice(name: string, spec: string): Promise<number | null> {
   const rows = await prisma.materialPrice.findMany({
-    where: { name: { contains: name.slice(0, 6) } },
+    where: { AND: [ACTIVE_DATASET, { name: { contains: name.slice(0, 6) } }] },
     take: 50,
   });
   const norm = (s: string) => s.replace(/\s/g, "").replace(/X/gi, "x").toUpperCase();
@@ -228,4 +242,41 @@ export async function findLibraryPrice(name: string, spec: string): Promise<numb
       return Number(r.price);
   }
   return rows.length && !ns ? Number(rows[0].price) : null;
+}
+
+/** 为清单项在材料库里找最佳价（返回行与置信度，供缺价补价预览） */
+export async function matchLibraryForItem(item: {
+  name: string;
+  unit?: string;
+  features?: { material?: string; diameter?: string; specification?: string };
+}): Promise<{ row: { id: string; name: string; spec: string; unit: string; brand: string; price: string; source: string }; score: number } | null> {
+  const key = (item.features?.material ?? item.name).slice(0, 6);
+  const rows = await prisma.materialPrice.findMany({
+    where: { AND: [ACTIVE_DATASET, { name: { contains: key } }] },
+    include: { dataset: { select: { name: true } } },
+    take: 50,
+  });
+  if (!rows.length) return null;
+  const norm = (s: string) => s.replace(/\s/g, "").replace(/X/gi, "x").toUpperCase();
+  const spec = norm(item.features?.diameter ?? item.features?.specification ?? "");
+  let best: (typeof rows)[number] | null = null;
+  let score = 0;
+  for (const r of rows) {
+    const rs = norm(r.spec);
+    let s = 40; // 名称命中基础分
+    if (spec && rs === spec) s += 50;
+    else if (spec && rs && (rs.includes(spec) || spec.includes(rs))) s += 30;
+    else if (!spec) s += 20;
+    if (r.unit && item.unit && r.unit === item.unit) s += 10;
+    if (s > score) { score = s; best = r; }
+  }
+  if (!best) return null;
+  return {
+    row: {
+      id: best.id, name: best.name, spec: best.spec, unit: best.unit,
+      brand: best.brand, price: best.price.toString(),
+      source: best.dataset?.name ?? "材料库",
+    },
+    score,
+  };
 }

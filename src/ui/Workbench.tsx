@@ -27,6 +27,8 @@ const TOOL_LABEL: Record<string, string> = {
   "material.applyQuotation": "写回询价",
   "material.search": "搜索材料",
   "material.getPriceHistory": "价格历史",
+  "material.matchLibrary": "材料库匹配",
+  "material.fillFromLibrary": "材料库补价",
   "boq.compareFiles": "清单对审",
   "quota.match": "匹配定额",
   "quota.calculate": "定额组价",

@@ -199,6 +199,7 @@ model Dataset {
   storageKey String
   sizeBytes  Int      @default(0)
   status     String   @default("PARSED") // PARSED | FAILED
+  active     Boolean  @default(true)   // 停用后不参与匹配/测算，但数据保留
   rowCount   Int      @default(0)
   meta       String   @default("{}") // JSON: sheets, errors
   createdAt  DateTime @default(now())

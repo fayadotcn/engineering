@@ -2,7 +2,7 @@ import { z } from "zod";
 import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import { listQuotations } from "@material/service";
-import { searchMaterialPrices } from "@dataset/service";
+import { searchMaterialPrices, matchLibraryForItem } from "@dataset/service";
 import { matchQuotations } from "@cost-engine/match";
 import type { DiffRow } from "@shared/types";
 
@@ -130,6 +130,107 @@ registerTool({
         },
       ],
       message: `询价 ${quotes.length} 条：匹配 ${matched.length} 条，未询到价 ${unmatched.length} 条已标记`,
+    };
+  },
+});
+
+// 缺价补价：未定价清单项 × 全局材料库。两步——matchLibrary 出预览表，
+// fillFromLibrary 确认后写回（复用 quotationMatch / diff 视图）。
+registerTool({
+  name: "material.matchLibrary",
+  description: "用全局材料价格库为未定价清单项找参考价，输出匹配预览（不写数据）",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const unpriced = items.filter((i) => !i.isHeader && Number(i.unitPrice) === 0);
+    const rows = [];
+    const misses: typeof unpriced = [];
+    for (const it of unpriced) {
+      const m = await matchLibraryForItem(it);
+      if (!m || m.score < 60) { misses.push(it); continue; }
+      rows.push({
+        quotationItemId: `lib:${it.id}`,
+        materialName: it.name,
+        spec: it.features?.diameter ?? it.features?.specification ?? "",
+        brand: m.row.brand,
+        price: m.row.price,
+        matchedBoqItemIds: [it.id],
+        matchedNames: [`${m.row.name} ${m.row.spec} ¥${m.row.price}（${m.row.source}）`],
+        confidence: m.score,
+        status: m.score >= 80 ? ("MATCHED" as const) : ("LOW_CONFIDENCE" as const),
+      });
+    }
+    return {
+      observation: { unpriced: unpriced.length, matched: rows.length, missed: misses.length },
+      views: rows.length
+        ? [{
+            kind: "quotationMatch" as const,
+            id: "view:lib-match",
+            title: "材料库补价预览",
+            rows,
+            unmatched: misses.map((i) => ({
+              id: i.id, materialName: i.name, spec: "", unit: i.unit,
+              brand: "", price: "0", sheetName: "", features: {},
+            })),
+          }]
+        : [],
+      message: rows.length
+        ? `材料库匹配到 ${rows.length}/${unpriced.length} 个未定价项，确认后可批量写回（说「确认补价」）`
+        : `未定价 ${unpriced.length} 项在材料库中没有命中`,
+    };
+  },
+});
+
+registerTool({
+  name: "material.fillFromLibrary",
+  description: "把材料库匹配价写回未定价清单项的综合单价（需确认，生成 Diff 与回执）",
+  implemented: true,
+  confirm: () => "将把材料库匹配价写回全部未定价清单项的综合单价",
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const unpriced = items.filter((i) => !i.isHeader && Number(i.unitPrice) === 0);
+    const patches: { id: string; unitPrice: string }[] = [];
+    const misses: string[] = [];
+    for (const it of unpriced) {
+      const m = await matchLibraryForItem(it);
+      if (!m || m.score < 60) { misses.push(it.name); continue; }
+      patches.push({ id: it.id, unitPrice: m.row.price });
+    }
+    if (!patches.length)
+      return { observation: { applied: 0 }, message: "没有可写回的匹配价" };
+
+    const { before, after } = await updateBoqItems(
+      ctx.projectId,
+      patches.map((p) => ({ id: p.id, patch: { unitPrice: p.unitPrice } }))
+    );
+    const diffRows: DiffRow[] = [];
+    for (const b of before) {
+      const a = after.find((x) => x.id === b.id)!;
+      diffRows.push({
+        itemId: b.id, code: b.code, name: b.name,
+        field: "unitPrice", before: b.unitPrice, after: a.unitPrice,
+      });
+      if (b.totalPrice !== a.totalPrice)
+        diffRows.push({
+          itemId: b.id, code: b.code, name: b.name,
+          field: "totalPrice", before: b.totalPrice, after: a.totalPrice,
+        });
+    }
+    return {
+      observation: { applied: patches.length, missed: misses.length },
+      views: [
+        { kind: "diff", id: `view:diff:${ctx.runId}`, title: "材料库补价 Diff", receiptId: "", rows: diffRows },
+        { kind: "boqTable", id: "view:boq", title: "工程量清单" },
+      ],
+      receipts: [{
+        actionType: "PRICE_APPLY",
+        summary: `材料库补价：${patches.length} 项写入综合单价（${misses.length} 项未命中）`,
+        before: before.map((b) => ({ id: b.id, name: b.name, unitPrice: b.unitPrice })),
+        after: after.map((a) => ({ id: a.id, name: a.name, unitPrice: a.unitPrice })),
+      }],
+      message: `已用材料库价格为 ${patches.length} 个清单项补价${misses.length ? `；${misses.length} 项未命中，需另行询价` : ""}`,
     };
   },
 });

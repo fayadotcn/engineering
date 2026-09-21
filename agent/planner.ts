@@ -147,6 +147,17 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 缺价补价：用材料库补齐未定价项
+    if (/补价|补齐|缺价|未定价|没价|套价/.test(m)) {
+      const apply = /补|填|写|套/.test(m) && !/预览|看看|查/.test(m);
+      const steps: StepOrFn[] = [
+        { tool: "material.matchLibrary", args: {}, activity: "正在用材料库匹配未定价项" },
+      ];
+      if (apply)
+        steps.push({ tool: "material.fillFromLibrary", args: {}, activity: "正在写回材料库价格" });
+      return { steps };
+    }
+
     // 材料价格历史
     if (/价格历史|历史价|历次询价|价格走势|价格轨迹/.test(m)) {
       const nameMatch = m.match(

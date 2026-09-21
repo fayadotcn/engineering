@@ -13,7 +13,9 @@ const toRe = (v: unknown) =>
 export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
   try {
     const { prisma } = await import("@database/client");
-    const rows = await prisma.quotaRow.findMany();
+    const rows = await prisma.quotaRow.findMany({
+      where: { OR: [{ datasetId: null }, { dataset: { active: true } }] },
+    });
     const db: QuotaEntry[] = rows.map((r) => {
       const mk = JSON.parse(r.matchKeys || "{}") as Record<string, string>;
       return {
