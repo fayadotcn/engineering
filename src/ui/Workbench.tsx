@@ -3,13 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { useStore, type ConvBlock } from "./store";
 import {
   AnomalyTable, BoqTable, Breakdown, DiffView, DocumentView, ExportResult,
-  FactList, FileCompareView, FileList, QuotaResult, QuotationMatch,
+  FactList, FileCompareView, FileList, OverviewView, QuotaResult, QuotationMatch,
+  ReceiptsView,
 } from "./views";
 import type { WorkspaceView } from "@shared/types";
 import { toast } from "./primitives";
 import {
   ArrowLeft, ArrowUp, Check, ChevronDown, ChevronRight, CircleCheck, CircleX,
-  FileSpreadsheet, Loader2, Paperclip, Receipt, ShieldQuestion, Sparkles, Wrench, X,
+  Download, FileSpreadsheet, Loader2, Paperclip, Receipt, ShieldQuestion, Sparkles, Wrench, X,
 } from "lucide-react";
 
 const TOOL_LABEL: Record<string, string> = {
@@ -286,7 +287,47 @@ function groupBlocks(blocks: ConvBlock[]): RenderItem[] {
   return out;
 }
 
+/* Agent 消息 markdown-lite：**粗体**、- 列表、`代码`、### 小节 */
+function MdLite({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const inline = (s: string, key: number) => {
+    const parts = s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+    return (
+      <span key={key}>
+        {parts.map((p, i) =>
+          p.startsWith("**") && p.endsWith("**") ? (
+            <b key={i} className="font-medium text-neutral-900">{p.slice(2, -2)}</b>
+          ) : p.startsWith("`") && p.endsWith("`") ? (
+            <code key={i} className="mono rounded bg-neutral-100 px-1 text-[11.5px]">{p.slice(1, -1)}</code>
+          ) : (
+            p
+          )
+        )}
+      </span>
+    );
+  };
+  return (
+    <div className="text-[13px] leading-relaxed text-neutral-800">
+      {lines.map((l, i) => {
+        const t = l.trim();
+        if (/^#{1,4}\s/.test(t))
+          return <div key={i} className="mt-2 first:mt-0 text-[13px] font-medium text-neutral-900">{inline(t.replace(/^#{1,4}\s/, ""), i)}</div>;
+        if (/^[-•]\s/.test(t) || /^\d+[.、)]\s/.test(t))
+          return (
+            <div key={i} className="flex gap-1.5 pl-1">
+              <span className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-neutral-300" />
+              <span>{inline(t.replace(/^[-•]\s|^\d+[.、)]\s/, ""), i)}</span>
+            </div>
+          );
+        if (!t) return <div key={i} className="h-2" />;
+        return <div key={i}>{inline(l, i)}</div>;
+      })}
+    </div>
+  );
+}
+
 function Block({ b }: { b: ConvBlock }) {
+  const [copied, setCopied] = useState(false);
   if (b.type === "user")
     return (
       <div className="fadein flex justify-end">
@@ -311,8 +352,18 @@ function Block({ b }: { b: ConvBlock }) {
     );
   if (b.type === "agent")
     return (
-      <div className="fadein whitespace-pre-wrap px-1 text-[13px] leading-relaxed text-neutral-800">
-        {b.text}
+      <div className="fadein group/msg relative px-1">
+        <MdLite text={b.text} />
+        <button
+          onClick={async () => {
+            await navigator.clipboard.writeText(b.text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          className="absolute -right-1 -top-1 rounded px-1.5 py-0.5 text-[10.5px] text-neutral-300 opacity-0 transition-opacity hover:bg-[var(--hover)] hover:text-neutral-600 group-hover/msg:opacity-100"
+        >
+          {copied ? "已复制" : "复制"}
+        </button>
       </div>
     );
   return null;
@@ -322,6 +373,10 @@ function ViewRenderer({ view }: { view: WorkspaceView }) {
   switch (view.kind) {
     case "boqTable":
       return <BoqTable />;
+    case "overview":
+      return <OverviewView />;
+    case "receipts":
+      return <ReceiptsView />;
     case "anomalyTable":
       return <AnomalyTable view={view} />;
     case "quotationMatch":
@@ -349,9 +404,16 @@ export function Workbench({ projectId }: { projectId: string }) {
   const s = useStore();
   const [input, setInput] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [scrolledUp, setScrolledUp] = useState(false);
+  const [panelW, setPanelW] = useState(400);
+  useEffect(() => {
+    const v = Number(localStorage.getItem("conv-panel-w"));
+    if (v >= 320 && v <= 560) setPanelW(v);
+  }, []);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
+  const dragW = useRef<{ x: number; w: number } | null>(null);
 
   useEffect(() => {
     void s.init(projectId);
@@ -363,6 +425,26 @@ export function Workbench({ projectId }: { projectId: string }) {
     const el = scrollRef.current;
     if (el && nearBottom.current) el.scrollTo({ top: el.scrollHeight });
   }, [s.blocks]);
+
+  // 左栏宽度拖拽（记录到 localStorage）
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (!dragW.current) return;
+      const w = Math.max(320, Math.min(560, dragW.current.w + e.clientX - dragW.current.x));
+      setPanelW(w);
+    };
+    const up = () => {
+      if (dragW.current) localStorage.setItem("conv-panel-w", String(panelW));
+      dragW.current = null;
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, [panelW]);
 
   const send = () => {
     const t = input.trim();
@@ -380,7 +462,8 @@ export function Workbench({ projectId }: { projectId: string }) {
     <div className="flex h-screen">
       {/* left: Agent conversation */}
       <div
-        className={`relative flex w-[400px] shrink-0 flex-col border-r border-neutral-200 bg-[var(--surface)] transition-colors ${dragging ? "drop-armed" : ""}`}
+        className={`relative flex shrink-0 flex-col border-r border-neutral-200 bg-[var(--surface)] transition-colors ${dragging ? "drop-armed" : ""}`}
+        style={{ width: panelW }}
         onDragOver={(e) => {
           e.preventDefault();
           if (e.dataTransfer.types.includes("Files")) setDragging(true);
@@ -391,11 +474,20 @@ export function Workbench({ projectId }: { projectId: string }) {
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          const f = e.dataTransfer.files?.[0];
-          if (f) void s.upload(f);
+          const fs = [...(e.dataTransfer.files ?? [])];
+          fs.forEach((f) => void s.upload(f));
         }}
       >
-        {dragging && <div className="drop-overlay">松开上传文件</div>}
+        {dragging && <div className="drop-overlay">松开上传文件（可多选）</div>}
+        {/* 宽度拖拽手柄 */}
+        <div
+          className="absolute -right-[3px] top-0 z-20 h-full w-[6px] cursor-col-resize hover:bg-[var(--brand-soft)]"
+          onMouseDown={(e) => {
+            dragW.current = { x: e.clientX, w: panelW };
+            document.body.style.cursor = "col-resize";
+            e.preventDefault();
+          }}
+        />
         <div className="border-b border-neutral-100 px-4 py-3">
           <div className="flex items-center gap-2">
             <a
@@ -432,7 +524,9 @@ export function Workbench({ projectId }: { projectId: string }) {
           className="flex-1 space-y-3 overflow-y-auto px-4 py-4"
           onScroll={(e) => {
             const el = e.currentTarget;
-            nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            nearBottom.current = near;
+            setScrolledUp(!near);
           }}
         >
           {!s.blocks.length && (
@@ -478,17 +572,29 @@ export function Workbench({ projectId }: { projectId: string }) {
             </div>
           )}
         </div>
+        {scrolledUp && (
+          <button
+            onClick={() => {
+              scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+              nearBottom.current = true;
+              setScrolledUp(false);
+            }}
+            className="fadein absolute bottom-28 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-neutral-200 bg-[var(--surface)] px-3 py-1.5 text-[11.5px] text-neutral-500 shadow-[var(--shadow-md)] transition-colors hover:text-neutral-800"
+          >
+            ↓ 回到最新
+          </button>
+        )}
 
         <div className="p-3">
           <div className="composer-shell">
             <input
               ref={fileRef}
               type="file"
+              multiple
               accept=".xlsx,.xls,.pdf,.csv"
               className="hidden"
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void s.upload(f);
+                [...(e.target.files ?? [])].forEach((f) => void s.upload(f));
                 e.target.value = "";
               }}
             />
@@ -569,6 +675,18 @@ export function Workbench({ projectId }: { projectId: string }) {
                 )}
               </div>
             ))}
+            <div className="ml-auto flex items-center gap-1 pr-1.5">
+              {s.items.length > 0 && (
+                <button
+                  onClick={() => void s.send("导出修改后的清单")}
+                  disabled={s.running}
+                  className="icon-btn flex h-6 items-center gap-1 rounded-md px-2 text-[11px] disabled:opacity-40"
+                  title="导出清单 Excel"
+                >
+                  <Download size={12} /> 导出
+                </button>
+              )}
+            </div>
           </div>
         )}
         <div className="min-h-0 flex-1">

@@ -265,6 +265,13 @@ body {
 .xl-table tbody tr:hover td {
   background: var(--hover);
 }
+/* 选中行（Excel 行选中态） */
+.xl-table tbody tr.xl-sel td {
+  background: color-mix(in srgb, var(--brand-soft) 55%, var(--surface));
+}
+.xl-table tbody tr.xl-sel td:first-child {
+  box-shadow: inset 2px 0 0 var(--brand-accent);
+}
 .xl-table tbody tr:hover td.xl-rn {
   background: var(--active);
   color: var(--ink-2);

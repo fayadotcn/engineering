@@ -195,21 +195,208 @@ function ExcelHead({
   );
 }
 
+/* ---------------- 项目总览 ----------------
+   造价总监第一眼视角：总额 / 体量 / 未定价 / TOP 大项（帕累托）/ 最近变更 */
+
+export function OverviewView() {
+  const { items, files, receipts, facts, gotoBoqItem } = useStore();
+  const leaf = items.filter((i) => !i.isHeader);
+  const total = leaf.reduce((n, i) => n + Number(i.totalPrice), 0);
+  const unpriced = leaf.filter((i) => Number(i.unitPrice) === 0);
+  const top = [...leaf].sort((a, b) => Number(b.totalPrice) - Number(a.totalPrice)).slice(0, 8);
+  const topSum = top.reduce((n, i) => n + Number(i.totalPrice), 0);
+  const stat = (label: string, value: React.ReactNode, warn?: boolean) => (
+    <div
+      className="rounded-xl border px-4 py-3"
+      style={{
+        borderColor: warn ? "color-mix(in srgb, var(--warning-soft-fg) 35%, transparent)" : "var(--hairline)",
+        background: warn ? "var(--warning-soft-bg)" : "var(--surface)",
+      }}
+    >
+      <div className="text-[11px] text-neutral-400">{label}</div>
+      <div className="mono mt-1 text-[18px] font-medium tracking-tight" style={warn ? { color: "var(--warning-soft-fg)" } : undefined}>
+        {value}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="h-full space-y-5 overflow-auto p-5">
+      {!leaf.length ? (
+        <EmptyState icon={<FileSpreadsheet size={24} />} title="还没有清单数据" hint="在左侧上传 Excel 清单文件后，这里会显示项目体检结果" />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            {stat("合价合计", <>{fmtMoney(total)}<span className="ml-1 text-[11px] font-normal text-neutral-400">元</span></>)}
+            {stat("清单项", leaf.length)}
+            {stat("未定价", unpriced.length, unpriced.length > 0)}
+            {stat("TOP8 大项占比", `${total ? ((topSum / total) * 100).toFixed(1) : 0}%`)}
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+            {/* TOP 大项：帕累托视角 */}
+            <section className="xl-sheet overflow-hidden rounded-xl">
+              <div className="border-b border-neutral-100 px-3.5 py-2 text-[12px] font-medium text-neutral-600">
+                金额 TOP 大项
+                <span className="ml-1.5 text-[11px] font-normal text-neutral-400">点击定位到清单</span>
+              </div>
+              <div>
+                {top.map((it) => {
+                  const share = total ? Number(it.totalPrice) / total : 0;
+                  return (
+                    <button
+                      key={it.id}
+                      onClick={() => gotoBoqItem(it.code || it.name)}
+                      className="flex w-full items-center gap-3 border-b border-neutral-100 px-3.5 py-2 text-left transition-colors last:border-0 hover:bg-[var(--hover)]"
+                    >
+                      <span className="mono w-24 shrink-0 truncate text-[11px] text-neutral-400">{it.code}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12.5px]">{it.name}</span>
+                      <span className="h-1 w-24 shrink-0 rounded bg-neutral-100">
+                        <span
+                          className="block h-1 rounded"
+                          style={{ width: `${Math.min(100, share * 400)}%`, background: "var(--brand-accent)" }}
+                        />
+                      </span>
+                      <span className="mono w-20 shrink-0 text-right text-[12px]">{fmtMoney(it.totalPrice)}</span>
+                      <span className="mono w-12 shrink-0 text-right text-[11px] text-neutral-400">
+                        {(share * 100).toFixed(1)}%
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* 项目信息 + 最近变更 */}
+            <div className="space-y-4">
+              <section className="rounded-xl border border-neutral-200 bg-[var(--surface)] px-3.5 py-3">
+                <div className="text-[12px] font-medium text-neutral-600">项目台账</div>
+                <div className="mt-2 space-y-1.5">
+                  {facts.slice(0, 6).map((f) => (
+                    <div key={f.id} className="flex justify-between text-[12px]">
+                      <span className="text-neutral-500">{f.key}</span>
+                      <span className="mono text-neutral-700">{f.value}</span>
+                    </div>
+                  ))}
+                  {!facts.length && <div className="text-[11.5px] text-neutral-400">暂无 — 可对 Agent 说「税率设为9%」</div>}
+                </div>
+                <div className="mt-2.5 border-t border-neutral-100 pt-2 text-[11px] text-neutral-400">
+                  {files.length} 个文件 · {receipts.length} 条变更记录
+                </div>
+              </section>
+              <section className="rounded-xl border border-neutral-200 bg-[var(--surface)] px-3.5 py-3">
+                <div className="text-[12px] font-medium text-neutral-600">最近变更</div>
+                <div className="mt-2 space-y-1.5">
+                  {receipts.slice(0, 4).map((r) => (
+                    <div key={r.id} className="truncate text-[11.5px] text-neutral-500" title={r.summary}>
+                      <span className="text-neutral-300">{r.createdAt.slice(5, 16).replace("T", " ")}</span>{" "}
+                      {r.summary}
+                    </div>
+                  ))}
+                  {!receipts.length && <div className="text-[11.5px] text-neutral-400">暂无变更</div>}
+                </div>
+              </section>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 变更记录 ----------------
+   回执聚合面板：每一次数据修改可追溯、可撤销 */
+
+const ACTION_LABEL: Record<string, string> = {
+  BOQ_UPDATE: "清单修改", PRICE_APPLY: "询价写回", QUANTITY_ADJUST: "工程量反算",
+  FILE_IMPORT: "文件导入", FILE_DELETE: "文件删除", EXPORT: "导出",
+  USER_EDIT: "手动编辑", FACT_SET: "台账写入", REVERT: "撤销",
+};
+
+export function ReceiptsView() {
+  const { receipts, reloadBoq } = useStore();
+  const [busy, setBusy] = useState<string | null>(null);
+  const revert = async (id: string) => {
+    setBusy(id);
+    const res = await fetch(`/api/receipts/${id}/revert`, { method: "POST" });
+    setBusy(null);
+    if (res.ok) {
+      toast.success("已撤销该修改");
+      await reloadBoq();
+      useStore.getState().refreshMeta();
+    } else {
+      toast.error("撤销失败 — 该操作不可撤销或已被撤销");
+    }
+  };
+  return (
+    <div className="h-full overflow-auto p-4">
+      <div className="xl-sheet overflow-hidden rounded-lg">
+        <table className="xl-table">
+          <thead>
+            <tr>
+              <th className="xl-rn"></th>
+              <th className="w-32">时间</th>
+              <th className="w-24">类型</th>
+              <th>内容</th>
+              <th className="w-16">来源</th>
+              <th className="w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {receipts.map((r, i) => (
+              <tr key={r.id} className="group">
+                <td className="xl-rn">{i + 1}</td>
+                <td className="mono text-[11px] text-neutral-400">
+                  {r.createdAt.slice(5, 16).replace("T", " ")}
+                </td>
+                <td>
+                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-500">
+                    {ACTION_LABEL[r.actionType] ?? r.actionType}
+                  </span>
+                </td>
+                <td className="max-w-96 truncate text-neutral-600" title={r.summary}>{r.summary}</td>
+                <td className="text-[11px] text-neutral-400">{r.createdBy === "user" ? "手动" : "Agent"}</td>
+                <td className="text-center">
+                  {r.reversible && r.actionType !== "REVERT" ? (
+                    <button
+                      onClick={() => revert(r.id)}
+                      disabled={busy === r.id}
+                      className="invisible rounded px-1.5 py-0.5 text-[11px] text-neutral-500 hover:bg-[var(--hover)] hover:text-neutral-800 group-hover:visible disabled:opacity-40"
+                    >
+                      {busy === r.id ? "…" : "撤销"}
+                    </button>
+                  ) : (
+                    <span className="text-[10.5px] text-neutral-300">
+                      {r.actionType === "REVERT" ? "" : "不可撤销"}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!receipts.length && <EmptyState title="暂无变更记录" hint="所有数据修改都会在这里留痕" />}
+    </div>
+  );
+}
+
 /* ---------------- 清单表 ---------------- */
 
 type BoqSortKey = "code" | "name" | "quantity" | "unitPrice" | "totalPrice";
 
 export function BoqTable() {
-  const { items, patchItem } = useStore();
+  const { items, patchItem, boqQuery, setBoqQuery } = useStore();
+  const query = boqQuery;
   const [editing, setEditing] = useState<{ id: string; field: "unitPrice" | "quantity" } | null>(null);
   const [draft, setDraft] = useState("");
   const [limit, setLimit] = useState(300);
-  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
   const [colText, setColText] = useState({ code: "", name: "", feature: "" });
   const [unitSel, setUnitSel] = useState<Set<string> | null>(null); // null = 全选
   const [sort, setSort] = useState<{ key: BoqSortKey; dir: SortDir } | null>(null);
 
-  const commit = async () => {
+  const commit = async (moveTab?: boolean) => {
     if (!editing) return;
     const v = draft.trim();
     if (v !== "" && isNaN(Number(v))) {
@@ -217,9 +404,27 @@ export function BoqTable() {
       setEditing(null);
       return;
     }
-    const ok = await patchItem(editing.id, { [editing.field]: v });
-    if (!ok) toast.error("保存失败，请重试");
+    const cur = editing;
     setEditing(null);
+    const ok = await patchItem(cur.id, { [cur.field]: v });
+    if (!ok) toast.error("保存失败，请重试");
+    if (moveTab) {
+      // 同行下一个字段，或下一行第一个字段
+      const idx = leafIds.indexOf(cur.id);
+      const next =
+        cur.field === "quantity"
+          ? { id: cur.id, field: "unitPrice" as const }
+          : idx >= 0 && idx + 1 < leafIds.length
+            ? { id: leafIds[idx + 1], field: "quantity" as const }
+            : null;
+      if (next) {
+        const it = items.find((x) => x.id === next.id);
+        if (it) {
+          setEditing(next);
+          setDraft(it[next.field]);
+        }
+      }
+    }
   };
 
   const units = useMemo(() => {
@@ -257,6 +462,8 @@ export function BoqTable() {
       })
     : filtered;
   const shown = sorted.slice(0, limit);
+  // 有序叶子行（Tab 跳格沿当前排序/筛选顺序走）
+  const leafIds = sorted.filter((i) => !i.isHeader).map((i) => i.id);
   const dataTotal = items.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   const dataShown = sorted.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   // 造价师视角：合价合计随筛选联动，未定价项计数常显
@@ -276,7 +483,7 @@ export function BoqTable() {
   };
 
   const clearAll = () => {
-    setQuery("");
+    setBoqQuery("");
     setColText({ code: "", name: "", feature: "" });
     setUnitSel(null);
     setSort(null);
@@ -289,7 +496,7 @@ export function BoqTable() {
         <Funnel size={12} className="shrink-0 text-neutral-400" />
         <input
           value={query}
-          onChange={(e) => { setQuery(e.target.value); setLimit(300); }}
+          onChange={(e) => { setBoqQuery(e.target.value); setLimit(300); }}
           placeholder="搜索名称 / 编码 / 特征…"
           className="h-7 w-56 rounded-md border border-neutral-200 bg-[var(--surface)] px-2.5 text-[12px] outline-none focus:border-[var(--brand-accent)]"
         />
@@ -354,8 +561,12 @@ export function BoqTable() {
             ) : (
               <tr
                 key={it.id}
-                className={cn(Number(it.quantity) === 0 && "opacity-45")}
+                className={cn(
+                  Number(it.quantity) === 0 && "opacity-45",
+                  selected === it.id && "xl-sel"
+                )}
                 title={Number(it.quantity) === 0 ? "工程量为 0" : undefined}
+                onClick={() => setSelected(it.id)}
               >
                 <td className="xl-rn">{i + 1}</td>
                 <td className="mono text-neutral-500">{it.code}</td>
@@ -390,9 +601,13 @@ export function BoqTable() {
                         autoFocus
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
-                        onBlur={commit}
+                        onBlur={() => void commit()}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") commit();
+                          if (e.key === "Enter") void commit();
+                          if (e.key === "Tab") {
+                            e.preventDefault();
+                            void commit(true);
+                          }
                           if (e.key === "Escape") setEditing(null);
                         }}
                         className="w-20 border-0 bg-transparent px-0 py-0 text-right text-[12.5px] outline-none"
@@ -463,6 +678,7 @@ const ANOMALY_BADGE: Record<string, string> = {
 };
 
 export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "anomalyTable" }> }) {
+  const { gotoBoqItem } = useStore();
   let rn = 0;
   return (
     <div className="h-full overflow-auto p-4">
@@ -477,6 +693,7 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
               <th className="w-12">单位</th>
               <th className="w-20 text-right">工程量</th>
               <th className="w-24 text-right">综合单价</th>
+              <th className="w-12"></th>
             </tr>
           </thead>
           <tbody>
@@ -487,7 +704,7 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                 <Fragment key={gi}>
                   <tr className="xl-group">
                     <td className="xl-rn"></td>
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <div className="flex items-center gap-2">
                         <AlertTriangle size={12} className="text-amber-600" />
                         <span>{g.label}</span>
@@ -504,7 +721,7 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                     const p = Number(it.unitPrice);
                     rn += 1;
                     return (
-                      <tr key={it.id}>
+                      <tr key={it.id} className="group">
                         <td className="xl-rn">{rn}</td>
                         <td className="mono text-neutral-500">{it.code || "—"}</td>
                         <td className="max-w-56 truncate" title={it.name}>{it.name}</td>
@@ -521,6 +738,15 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                           )}
                         >
                           {fmtMoney(it.unitPrice)}
+                        </td>
+                        <td className="w-12 text-center">
+                          <button
+                            onClick={() => gotoBoqItem(it.code || it.name)}
+                            className="invisible rounded px-1.5 py-0.5 text-[11px] text-neutral-400 hover:bg-[var(--active)] hover:text-neutral-700 group-hover:visible"
+                            title="在清单中定位"
+                          >
+                            定位
+                          </button>
                         </td>
                       </tr>
                     );

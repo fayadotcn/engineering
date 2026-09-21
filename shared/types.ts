@@ -91,6 +91,15 @@ export interface CostFactDTO {
   createdAt: string;
 }
 
+export interface ReceiptDTO {
+  id: string;
+  actionType: string;
+  summary: string;
+  reversible: boolean;
+  createdBy: string;
+  createdAt: string;
+}
+
 /* ---------------- Workspace views ---------------- */
 
 export type WorkspaceView =
@@ -156,6 +165,8 @@ export type WorkspaceView =
       pages: string[];
     }
   | { kind: "factList"; id: string; title: string; facts: CostFactDTO[] }
+  | { kind: "overview"; id: string; title: string }
+  | { kind: "receipts"; id: string; title: string }
   | {
       kind: "exportResult";
       id: string;

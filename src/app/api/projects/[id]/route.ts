@@ -2,11 +2,17 @@ import { NextResponse } from "next/server";
 import { getProject } from "@project/service";
 import { toFactDTO } from "@database/serialize";
 import { FILE_KIND_LABEL, type FileKind } from "@shared/types";
+import { prisma } from "@database/client";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const p = await getProject(id);
   if (!p) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const receipts = await prisma.actionReceipt.findMany({
+    where: { projectId: id },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
   return NextResponse.json({
     id: p.id,
     name: p.name,
@@ -25,6 +31,14 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       label: a.label,
       kind: a.kind,
       createdAt: a.createdAt,
+    })),
+    receipts: receipts.map((r) => ({
+      id: r.id,
+      actionType: r.actionType,
+      summary: r.summary,
+      reversible: r.reversible,
+      createdBy: r.createdBy,
+      createdAt: r.createdAt.toISOString(),
     })),
   });
 }

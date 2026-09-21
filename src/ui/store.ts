@@ -4,6 +4,7 @@ import type {
   AgentEventDTO,
   BoqItemDTO,
   CostFactDTO,
+  ReceiptDTO,
   WorkspaceView,
 } from "@shared/types";
 
@@ -30,6 +31,7 @@ interface State {
   projectName: string;
   files: FileMeta[];
   facts: CostFactDTO[];
+  receipts: ReceiptDTO[];
   items: BoqItemDTO[];
   blocks: ConvBlock[];
   views: WorkspaceView[];
@@ -37,6 +39,8 @@ interface State {
   running: boolean;
   ready: boolean;
   boqVersion: number;
+  /** 清单表全局搜索框（异常定位等跨组件联动用） */
+  boqQuery: string;
 
   init(projectId: string): Promise<void>;
   send(text: string): Promise<void>;
@@ -47,6 +51,9 @@ interface State {
   streamRun(runId: string): Promise<void>;
   setActiveView(id: string): void;
   closeView(id: string): void;
+  setBoqQuery(q: string): void;
+  /** 跳转到清单视图并过滤到目标项（编码或名称） */
+  gotoBoqItem(key: string): void;
   handleEvent(e: AgentEventDTO, runId: string): void;
 }
 
@@ -55,6 +62,7 @@ export const useStore = create<State>((set, get) => ({
   projectName: "",
   files: [],
   facts: [],
+  receipts: [],
   items: [],
   blocks: [],
   views: [],
@@ -62,6 +70,7 @@ export const useStore = create<State>((set, get) => ({
   running: false,
   ready: false,
   boqVersion: 0,
+  boqQuery: "",
 
   async init(projectId) {
     if (get().projectId === projectId) return;
@@ -128,14 +137,19 @@ export const useStore = create<State>((set, get) => ({
       projectName: p.name,
       files: p.files ?? [],
       facts: p.facts ?? [],
+      receipts: p.receipts ?? [],
       items: items ?? [],
       blocks,
-      views: views.length
-        ? views
-        : items?.length
-          ? [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }]
-          : [],
-      activeViewId: activeViewId ?? (items?.length ? "view:boq" : null),
+      views: [
+        { kind: "overview", id: "view:overview", title: "项目总览" },
+        ...(views.length
+          ? views
+          : items?.length
+            ? [{ kind: "boqTable", id: "view:boq", title: "工程量清单" } as WorkspaceView]
+            : []),
+        { kind: "receipts", id: "view:receipts", title: "变更记录" },
+      ],
+      activeViewId: activeViewId ?? "view:overview",
       ready: true,
     });
   },
@@ -166,30 +180,45 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async streamRun(runId: string) {
-    try {
-      const res = await fetch(`/api/runs/${runId}/stream`);
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data:")) continue;
-          try {
-            get().handleEvent(JSON.parse(line.slice(5)), runId);
-          } catch {}
+    // 事件服务端已持久化并支持重放（seq 递增）——断线重连后按 seq 去重
+    const seen = new Set<number>();
+    let attempts = 0;
+    for (;;) {
+      try {
+        const res = await fetch(`/api/runs/${runId}/stream`);
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let finished = false;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          buf = parts.pop() ?? "";
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data:")) continue;
+            try {
+              const e = JSON.parse(line.slice(5)) as AgentEventDTO;
+              if (e.seq !== undefined && seen.has(e.seq)) continue;
+              if (e.seq !== undefined) seen.add(e.seq);
+              if (e.type === "run_finished") finished = true;
+              get().handleEvent(e, runId);
+            } catch {}
+          }
         }
+        if (finished || ++attempts > 1) break; // 跑完或已重连过一次
+      } catch {
+        if (++attempts > 1) {
+          set((s) => ({
+            blocks: [...s.blocks, { type: "error", text: "事件流中断，结果可能不完整 — 请重试" }],
+          }));
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 600)); // 静默重连一次
       }
-    } catch {
-      set((s) => ({
-        blocks: [...s.blocks, { type: "error", text: "事件流中断，结果可能不完整 — 请重试" }],
-      }));
     }
     set({ running: false });
   },
@@ -253,7 +282,25 @@ export const useStore = create<State>((set, get) => ({
     const { projectId } = get();
     if (!projectId) return;
     const p = await fetch(`/api/projects/${projectId}`).then((r) => r.json());
-    set({ projectName: p.name, files: p.files ?? [], facts: p.facts ?? [] });
+    set({
+      projectName: p.name,
+      files: p.files ?? [],
+      facts: p.facts ?? [],
+      receipts: p.receipts ?? [],
+    });
+  },
+
+  setBoqQuery(q) {
+    set({ boqQuery: q });
+  },
+
+  gotoBoqItem(key) {
+    set((s) => {
+      const views = s.views.some((v) => v.id === "view:boq")
+        ? s.views
+        : [...s.views, { kind: "boqTable", id: "view:boq", title: "工程量清单" } as WorkspaceView];
+      return { views, activeViewId: "view:boq", boqQuery: key };
+    });
   },
 
   setActiveView(id) {
@@ -325,6 +372,17 @@ export const useStore = create<State>((set, get) => ({
                 runId,
               },
             ],
+            receipts: [
+              {
+                id: p.receiptId,
+                actionType: p.actionType,
+                summary: p.summary,
+                reversible: true,
+                createdBy: "agent",
+                createdAt: new Date().toISOString(),
+              },
+              ...s.receipts,
+            ].slice(0, 50),
           };
         case "confirm_request": {
           const blocks = s.blocks.map((b) =>
