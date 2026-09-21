@@ -270,6 +270,10 @@ export interface QuotaResultRow {
   calcPrice: string | null;
   deviation: string | null;
   needsMainPrice: boolean;
+  quotaGcnr?: string | null;
+  quotaFb?: string | null;
+  quotaBase?: string | null;
+  quotaMainName?: string | null;
 }
 
 /* ---------------- Agent events (SSE wire + persisted) ---------------- */

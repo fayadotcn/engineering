@@ -18,6 +18,7 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
     });
     const db: QuotaEntry[] = rows.map((r) => {
       const mk = JSON.parse(r.matchKeys || "{}") as Record<string, string>;
+      const raw = JSON.parse(r.raw || "{}") as { gcnr?: string; fb?: string; jj?: number; mainMaterial?: string };
       return {
         code: r.code,
         name: r.name,
@@ -27,6 +28,7 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
         material: Number(r.material),
         machine: Number(r.machine),
         mainQtyPerUnit: r.mainQtyPerUnit || 1,
+        detail: { gcnr: raw.gcnr, fb: raw.fb, jj: raw.jj, mainMaterial: raw.mainMaterial },
         match: {
           category: mk.category,
           system: mk.system,
@@ -99,6 +101,11 @@ export interface QuotaCalcRow {
   calcPrice: string | null; // 测算综合单价
   deviation: string | null; // vs 清单单价 %
   needsMainPrice: boolean;
+  /** 定额解释详情：工程内容/分册/基价/主材名 */
+  quotaGcnr?: string | null;
+  quotaFb?: string | null;
+  quotaBase?: string | null;
+  quotaMainName?: string | null;
 }
 
 export function calcQuota(
@@ -158,6 +165,10 @@ export function calcQuota(
       calcPrice: round2(calc).toString(),
       deviation: dev === null ? null : dev.toFixed(1),
       needsMainPrice: needsMain,
+      quotaGcnr: q.detail?.gcnr ?? null,
+      quotaFb: q.detail?.fb ?? null,
+      quotaBase: q.detail?.jj != null ? String(q.detail.jj) : null,
+      quotaMainName: q.detail?.mainMaterial ?? null,
     };
   });
 }

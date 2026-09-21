@@ -928,6 +928,7 @@ export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff"
 /* ---------------- 定额测算 ---------------- */
 
 export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "quotaResult" }> }) {
+  const [open, setOpen] = useState<string | null>(null);
   const matched = view.rows.filter((r) => r.quotaCode).length;
   const needMain = view.rows.filter((r) => r.needsMainPrice).length;
   const deviant = view.rows.filter(
@@ -978,12 +979,26 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
           </tr>
         </thead>
         <tbody>
-          {view.rows.map((r, ri) => (
-            <tr key={r.itemId}>
+          {view.rows.map((r, ri) => {
+            const expanded = open === r.itemId;
+            const hasDetail = !!(r.quotaCode && (r.quotaGcnr || r.quotaFb || r.quotaBase || r.quotaMainName));
+            return (
+            <Fragment key={r.itemId}>
+            <tr
+              key={r.itemId}
+              className={cn(hasDetail && "cursor-pointer")}
+              onClick={() => hasDetail && setOpen(expanded ? null : r.itemId)}
+              title={hasDetail ? "点击查看定额工作内容" : undefined}
+            >
               <td className="xl-rn">{ri + 1}</td>
               <td className="max-w-40 truncate" title={r.name}>{r.name}</td>
               <td className="text-neutral-500">
-                {r.quotaCode ? <span className="mono text-[11px]">{r.quotaCode}</span> : "—"}
+                {r.quotaCode ? (
+                  <span className="mono inline-flex items-center gap-1 text-[11px]">
+                    {hasDetail && <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />}
+                    {r.quotaCode}
+                  </span>
+                ) : "—"}
               </td>
               <td className="mono text-right">{r.labor ?? "—"}</td>
               <td className="mono text-right">{r.materialAux ?? "—"}</td>
@@ -1001,7 +1016,25 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
                 {r.deviation !== null ? `${Number(r.deviation) > 0 ? "+" : ""}${r.deviation}%` : "—"}
               </td>
             </tr>
-          ))}
+            {expanded && (
+              <tr>
+                <td className="xl-rn"></td>
+                <td colSpan={10} className="whitespace-normal!" style={{ background: "var(--sidebar)" }}>
+                  <div className="space-y-1 py-1.5 text-[11.5px] leading-relaxed">
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                      <span className="font-medium text-neutral-700">{r.quotaCode} {r.quotaName}</span>
+                      {r.quotaFb && <span className="text-neutral-500">分册：{r.quotaFb}</span>}
+                      {r.quotaBase && <span className="text-neutral-500">基价：<span className="mono">{r.quotaBase}</span> 元/{r.quotaCode ? "定额单位" : ""}</span>}
+                      {r.quotaMainName && <span className="text-neutral-500">主材：{r.quotaMainName}</span>}
+                    </div>
+                    {r.quotaGcnr && <div className="text-neutral-500">工作内容：{r.quotaGcnr}</div>}
+                  </div>
+                </td>
+              </tr>
+            )}
+            </Fragment>
+            );
+          })}
         </tbody>
       </table>
       </div>
