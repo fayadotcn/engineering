@@ -10,6 +10,7 @@ function boqSheet(): SheetInspection {
     headerRow: 2,
     headerCells: ["序号", "项目编码", "项目名称", "项目特征", "计量单位", "工程量", "综合单价", "合价"],
     sample: [],
+    merged: false,
     colCount: 8,
     rowCount: 22,
     columns: { code: 1, name: 2, spec: 3, unit: 4, quantity: 5, unitPrice: 6, totalPrice: 7 },
