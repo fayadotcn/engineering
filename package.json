@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/run-harness.mjs --dev",
+    "web:url": "node scripts/web-url.mjs",
     "build": "prisma generate && node scripts/build-harness.mjs && next build",
     "start": "node scripts/run-harness.mjs",
     "harness:build": "node scripts/build-harness.mjs",

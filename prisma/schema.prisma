@@ -145,7 +145,7 @@ model AgentRun {
   project     Project  @relation(fields: [projectId], references: [id])
   userMessage String
   status      String   @default("RUNNING") // RUNNING | AWAITING_CONFIRM | DONE | FAILED
-  planner     String   @default("rule")    // rule | llm
+  planner     String   @default("rule")    // rule | llm（早期）| import（确定性文件导入）| harness（Harness 会话工具调用）
   pendingAction String @default("{}")    // JSON {confirmId,tool,args,description} while AWAITING_CONFIRM
   summary     String   @default("")
   createdAt   DateTime @default(now())

@@ -26,22 +26,6 @@ export function HarnessBridge() {
         document.documentElement.dataset.theme = event.data.dark ? "dark" : "light";
         return;
       }
-      if (event.data?.type === "installation:upload") {
-        const { projectId, files, requestId } = event.data;
-        if (pathname !== `/p/${projectId}` || !Array.isArray(files) || !files.every(file => file instanceof File)) return;
-        try {
-          const { useStore } = await import("./store");
-          if (useStore.getState().running) throw new Error("请先完成当前导入或映射确认");
-          const previousError = useStore.getState().blocks.filter(b => b.type === "error").at(-1);
-          for (const file of files) {
-            await useStore.getState().upload(file);
-            const error = useStore.getState().blocks.filter(b => b.type === "error").at(-1);
-            if (error && error !== previousError) throw new Error(error.text);
-          }
-          window.parent.postMessage({ type: "installation:uploadFinished", requestId, ok: true }, origin);
-        } catch (error) { window.parent.postMessage({ type: "installation:uploadFinished", requestId, ok: false, text: error instanceof Error ? error.message : "导入失败" }, origin); }
-        return;
-      }
       if (event.data?.type !== "installation:linkSession") return;
       const { projectId, sessionId, requestId } = event.data;
       if (typeof projectId !== "string" || typeof sessionId !== "string") return;

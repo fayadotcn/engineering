@@ -20,6 +20,11 @@ export type ConvBlock =
   | { type: "upload"; filename: string; uploading?: boolean }
   | { type: "error"; text: string; runId?: string };
 
+/** 流程中间的视图：会随任务推送，但不该替用户把面板切过去（映射页绝大多数时候不该被看到）。 */
+const WORKING_VIEWS = new Set<WorkspaceView["kind"]>(["columnMapping", "document"]);
+const FIXED_VIEWS = new Set(["view:overview", "view:files", "view:boq", "view:facts", "view:receipts"]);
+let loadVersion = 0;
+
 interface FileMeta {
   id: string;
   filename: string;
@@ -42,6 +47,8 @@ interface State {
   activeViewId: string | null;
   lastViewEvent: string | null;
   running: boolean;
+  agentRunning: boolean;
+  closedViewIds: string[];
   ready: boolean;
   boqVersion: number;
   /** 清单表全局搜索框（异常定位等跨组件联动用） */
@@ -54,6 +61,7 @@ interface State {
   reloadBoq(): Promise<void>;
   refreshMeta(): Promise<void>;
   streamRun(runId: string): Promise<void>;
+  confirmImport(runId: string, approve: boolean): Promise<void>;
   setActiveView(id: string): void;
   closeView(id: string): void;
   /** 同 id 视图替换（列映射保存后服务端回传的最新视图） */
@@ -79,26 +87,27 @@ export const useStore = create<State>((set, get) => ({
   activeViewId: null,
   lastViewEvent: null,
   running: false,
+  agentRunning: false,
+  closedViewIds: [],
   ready: false,
   boqVersion: 0,
   boqQuery: "",
 
   async init(projectId, refresh = false) {
-    const previousView = refresh && get().projectId === projectId ? get().activeViewId : null;
-    const localViews = refresh ? get().views.filter(v => ["overview", "fileList", "boqTable", "factList", "receipts"].includes(v.kind)) : [];
-    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, loadingError: null });
+    const version = ++loadVersion;
+    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, closedViewIds: [], loadingError: null, boqQuery: "" });
     try {
-    const [p, items, runs] = await Promise.all([
+    const [p, items, runs, summary] = await Promise.all([
       fetch(`/api/projects/${projectId}`).then(async r => { if (!r.ok) throw new Error("项目不存在或暂时无法读取"); return r.json(); }),
       fetch(`/api/projects/${projectId}/boq`).then(async r => { if (!r.ok) throw new Error("清单读取失败"); return r.json(); }),
       fetch(`/api/projects/${projectId}/runs`).then(async r => { if (!r.ok) throw new Error("任务记录读取失败"); return r.json(); }),
+      fetch(`/api/projects/${projectId}/summary`).then(async r => { if (!r.ok) throw new Error("汇总读取失败"); return r.json(); }),
     ]);
-    if (get().projectId !== projectId) return;
+    if (get().projectId !== projectId || version !== loadVersion) return;
 
     // replay persisted runs into conversation blocks + workspace views
     const blocks: ConvBlock[] = [];
     const views: WorkspaceView[] = [];
-    let activeViewId: string | null = null;
     let lastViewEvent: string | null = null;
     for (const run of runs ?? []) {
       const ingest = run.userMessage.match(/(?:分析并|重新)导入文件「(.+)」/);
@@ -145,12 +154,31 @@ export const useStore = create<State>((set, get) => ({
           if (!v.kind) continue;
           const idx = views.findIndex((x) => x.id === v.id);
           if (idx >= 0) views[idx] = v; else views.push(v);
-          activeViewId = v.id;
+          // 重放只把视图挂回所属对象，不决定用户当前看什么
           lastViewEvent = `${run.id}:${e.seq}`;
         }
       }
+      // 超时或失败的任务不能再显示为可批准的导入。
+      if (run.status && run.status !== "AWAITING_CONFIRM" && run.status !== "RUNNING") {
+        for (const b of blocks) if (b.type === "confirm" && b.runId === run.id && !b.decided) b.decided = "rejected";
+      }
     }
 
+    // 常驻对象视图与 Agent 推送的视图共用同一套 id（view:boq / view:files / view:facts），
+    // 因此重复时不会出现同一对象两个标签。
+    const seedViews: WorkspaceView[] = [
+      { kind: "overview", id: "view:overview", title: "项目总览" },
+      { kind: "fileList", id: "view:files", title: "项目资料" },
+      { kind: "boqTable", id: "view:boq", title: "工程清单" },
+      { kind: "factList", id: "view:facts", title: "计价条件", facts: p.facts ?? [] },
+      { kind: "receipts", id: "view:receipts", title: "变更记录" },
+    ];
+    const projectViews: WorkspaceView[] = [
+      ...seedViews.filter(v => !views.some(x => x.id === v.id)),
+      ...views,
+    ].filter(v => !get().closedViewIds.includes(v.id) || FIXED_VIEWS.has(v.id));
+    // 看什么是用户的选择：Agent 推来的视图只入列，不切换当前打开的结果
+    const opening = get().activeViewId ?? "view:overview";
     set({
       projectName: p.name,
       harnessSessionId: p.harnessSessionId ?? "",
@@ -158,31 +186,22 @@ export const useStore = create<State>((set, get) => ({
       facts: p.facts ?? [],
       receipts: p.receipts ?? [],
       items: items ?? [],
+      summary,
       blocks,
-      views: [
-        { kind: "overview", id: "view:overview", title: "项目总览" },
-        ...localViews.filter(v => !["view:overview", "view:receipts"].includes(v.id) && !views.some(x => x.id === v.id)),
-        ...(views.length
-          ? views
-          : items?.length
-            ? [{ kind: "boqTable", id: "view:boq", title: "工程量清单" } as WorkspaceView]
-            : []),
-        { kind: "receipts", id: "view:receipts", title: "变更记录" },
-      ],
-      activeViewId: refresh && lastViewEvent && lastViewEvent !== get().lastViewEvent ? activeViewId : previousView ?? "view:overview",
+      views: projectViews,
+      activeViewId: opening.startsWith("empty:") || projectViews.some(v => v.id === opening) ? opening : "view:overview",
       lastViewEvent,
       ready: true,
       loadingError: null,
     });
-    await get().reloadBoq();
     } catch (error) {
-      if (get().projectId === projectId) set({ ready: true, loadingError: error instanceof Error ? error.message : "加载失败" });
+      if (get().projectId === projectId && version === loadVersion) set({ ready: true, loadingError: error instanceof Error ? error.message : "加载失败" });
     }
   },
 
   async send(text) {
-    const { projectId, running } = get();
-    if (!projectId || running || !text.trim()) return;
+    const { projectId, running, agentRunning } = get();
+    if (!projectId || running || agentRunning || !text.trim()) return;
     if (window.parent === window) { toast.info("请在 Harness 的造价工作台中发起任务（主入口端口 3210）"); return; }
     const harnessOrigin = sessionStorage.getItem("installation:harnessOrigin");
     if (!harnessOrigin) { toast.error("Harness 会话连接未建立，请从主入口打开工作台"); return; }
@@ -212,6 +231,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async streamRun(runId: string) {
+    const projectId = get().projectId;
     // 事件服务端已持久化并支持重放（seq 递增）——断线重连后按 seq 去重
     const seen = new Set<number>();
     let attempts = 0;
@@ -234,14 +254,21 @@ export const useStore = create<State>((set, get) => ({
             if (!line.startsWith("data:")) continue;
             try {
               const e = JSON.parse(line.slice(5)) as AgentEventDTO;
+              if (get().projectId !== projectId) { await reader.cancel(); return; }
               if (e.seq !== undefined && seen.has(e.seq)) continue;
               if (e.seq !== undefined) seen.add(e.seq);
               if (e.type === "run_finished") finished = true;
               get().handleEvent(e, runId);
+              if (e.type === "confirm_request" || e.type === "run_finished") {
+                await reader.cancel();
+                set({ running: false });
+                return;
+              }
             } catch {}
           }
         }
-        if (finished || ++attempts > 1) break; // 跑完或已重连过一次
+        if (finished) break;
+        throw new Error("事件流提前结束");
       } catch {
         if (++attempts > 1) {
           set((s) => ({
@@ -252,7 +279,22 @@ export const useStore = create<State>((set, get) => ({
         await new Promise((r) => setTimeout(r, 600)); // 静默重连一次
       }
     }
-    set({ running: false });
+    if (get().projectId === projectId) set({ running: false });
+  },
+
+  async confirmImport(runId, approve) {
+    if (get().running) return;
+    set({ running: true });
+    try {
+      const res = await fetch(`/api/runs/${runId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approve }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "确认失败");
+      set(s => ({ blocks: s.blocks.map(b => b.type === "confirm" && b.runId === runId ? { ...b, decided: approve ? "approved" : "rejected" } : b) }));
+      if (approve) await get().streamRun(runId);
+      await Promise.all([get().refreshMeta(), get().reloadBoq()]);
+      toast.success(approve ? "导入任务已处理，请查看资料状态" : "已取消本次导入");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "确认失败"); }
+    finally { set({ running: false }); }
   },
 
   async upload(file) {
@@ -269,7 +311,7 @@ export const useStore = create<State>((set, get) => ({
         method: "POST",
         body: fd,
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error((await res.json()).error ?? `上传失败（${res.status}）`);
       const { runId, duplicate, file: existed } = await res.json();
       if (duplicate) {
         // 内容相同的文件已导入过：去掉上传占位块，不占用 run
@@ -291,14 +333,15 @@ export const useStore = create<State>((set, get) => ({
       await get().refreshMeta();
       if (runId) await get().streamRun(runId);
       else set({ running: false });
-    } catch {
+      await Promise.all([get().refreshMeta(), get().reloadBoq()]);
+    } catch (error) {
       set((s) => ({
         running: false,
         blocks: [
           ...s.blocks.map((b) =>
             b.type === "upload" && b.filename === file.name ? { ...b, uploading: false } : b
           ),
-          { type: "error", text: `「${file.name}」上传失败，请重试` },
+          { type: "error", text: `「${file.name}」：${error instanceof Error ? error.message : "上传失败，请重试"}` },
         ],
       }));
     }
@@ -356,7 +399,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setActiveView(id) {
-    set({ activeViewId: id });
+    set(s => ({ activeViewId: id, closedViewIds: s.closedViewIds.filter(v => v !== id) }));
   },
 
   replaceView(view) {
@@ -366,15 +409,16 @@ export const useStore = create<State>((set, get) => ({
   },
 
   closeView(id) {
+    if (FIXED_VIEWS.has(id)) return;
     set((s) => {
       const idx = s.views.findIndex((v) => v.id === id);
       if (idx < 0) return {};
       const views = s.views.filter((v) => v.id !== id);
       const activeViewId =
         s.activeViewId === id
-          ? (views[Math.max(0, idx - 1)]?.id ?? null)
+          ? "view:overview"
           : s.activeViewId;
-      return { views, activeViewId };
+      return { views, activeViewId, closedViewIds: [...s.closedViewIds, id] };
     });
   },
 
@@ -508,11 +552,14 @@ export const useStore = create<State>((set, get) => ({
         }
         case "workspace_patch": {
           const view = p.view as WorkspaceView;
+          if (!view?.kind) return {};
           const idx = s.views.findIndex((v) => v.id === view.id);
           const views = [...s.views];
           if (idx >= 0) views[idx] = view;
           else views.push(view);
-          return { views, activeViewId: view.id, lastViewEvent: `${runId}:${e.seq}` };
+          // 不抢焦点：仅当当前没有任何打开的结果时补位，且工作视图（列映射/文档）永不自动弹出
+          const activeViewId = WORKING_VIEWS.has(view.kind) ? s.activeViewId : s.activeViewId ?? view.id;
+          return { views, activeViewId, lastViewEvent: `${runId}:${e.seq}` };
         }
         case "error":
           return { blocks: [...s.blocks, { type: "error", text: p.text, runId }] };

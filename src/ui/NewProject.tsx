@@ -11,8 +11,6 @@ export function NewProject() {
   useEffect(() => {
     const origin = new URLSearchParams(location.search).get("harnessOrigin");
     if (origin) sessionStorage.setItem("installation:harnessOrigin", origin);
-    const parentOrigin = origin ?? sessionStorage.getItem("installation:harnessOrigin");
-    if (parentOrigin && window.parent !== window) window.parent.postMessage({ type: "installation:location" }, parentOrigin);
   }, []);
 
   const create = async () => {

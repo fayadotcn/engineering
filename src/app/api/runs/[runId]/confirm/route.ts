@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { resolveConfirm } from "@agent/pending";
+import { preflight } from "@shared/cors";
 import { z } from "zod";
+
+// Harness 面板在确认卡上直接批准导入，因此这条路由要能应答跨源预检。
+export const OPTIONS = preflight;
 
 // Approve / reject a paused confirm-flagged tool call.
 export async function POST(
