@@ -315,9 +315,9 @@ export function OverviewView() {
    回执聚合面板：每一次数据修改可追溯、可撤销 */
 
 const ACTION_LABEL: Record<string, string> = {
-  BOQ_UPDATE: "清单修改", PRICE_APPLY: "询价写回", QUANTITY_ADJUST: "工程量反算",
+  BOQ_UPDATE: "清单修改", PRICE_APPLY: "价格写回", QUANTITY_ADJUST: "总价调整",
   FILE_IMPORT: "文件导入", FILE_DELETE: "文件删除", EXPORT: "导出",
-  USER_EDIT: "手动编辑", FACT_SET: "台账写入", REVERT: "撤销",
+  USER_EDIT: "手动编辑", FACT_SET: "台账写入", REVERT: "撤销", SETTINGS_UPDATE: "计价设置", PROJECT_CREATE: "新建工程",
 };
 
 export function ReceiptsView() {
@@ -354,7 +354,7 @@ export function ReceiptsView() {
               <tr key={r.id} className="group">
                 <td className="xl-rn">{i + 1}</td>
                 <td className="mono text-[11px] text-neutral-400">
-                  {r.createdAt.slice(5, 16).replace("T", " ")}
+                    {new Date(r.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}
                 </td>
                 <td>
                   <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-500">

@@ -17,6 +17,13 @@ export async function POST(req: Request) {
 
   const filename = (form.get("filename") as string | null)?.trim() || file.name;
   const buffer = Buffer.from(await file.arrayBuffer());
-  const ds = await createDataset(kind as DatasetKind, filename, buffer);
+  // 上传时可选带的行级默认值（材料价格库：地区/期次/价格类型/品牌）
+  const text = (k: string) => (form.get(k) as string | null)?.trim() || undefined;
+  const ds = await createDataset(kind as DatasetKind, filename, buffer, {
+    brand: text("brand"),
+    region: text("region"),
+    period: text("period"),
+    priceType: text("priceType"),
+  });
   return NextResponse.json(ds);
 }

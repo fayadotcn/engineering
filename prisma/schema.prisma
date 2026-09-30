@@ -23,6 +23,7 @@ model Project {
   workspace   Workspace     @relation(fields: [workspaceId], references: [id])
   name        String
   status      String        @default("ACTIVE") // ACTIVE | ARCHIVED
+  harnessSessionId String   @default("")
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   files       ProjectFile[]
@@ -45,7 +46,8 @@ model ProjectFile {
   // BOQ_TENDER | BOQ_WINNING | BOQ_SETTLEMENT | MATERIAL_QUOTATION
   // OWNER_SUPPLIED | CONTRACT | CHANGE | VISA | DRAWING | UNKNOWN
   status     String   @default("UPLOADED") // UPLOADED | PARSED | FAILED
-  meta       String   @default("{}") // JSON: sheets, rowCounts, parseReport
+  meta       String   @default("{}") // JSON: sheets, rowCounts, parseReport, mapping
+  contentHash String  @default("") // sha1(buffer)，同项目重复上传去重
   createdAt  DateTime @default(now())
   boqItems   BoqItem[]
   quotations QuotationItem[]
@@ -77,12 +79,26 @@ model BoqItem {
   discipline    String   @default("OTHER")
   // ELECTRICAL | PLUMBING | FIRE | HVAC | WEAK_CURRENT | OTHER
   features      String   @default("{}") // JSON BoqSemanticFeature
+  // 原始单元格 {表头标签或列字母: 文本} + __nonNumeric: string[] + __derived: string[]
+  rawCells      String   @default("{}")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@index([projectId])
   @@index([projectId, code])
   @@index([projectId, discipline])
+}
+
+// 已确认的列映射模板：表头指纹 → 列角色/表类型，再次遇到同构表格直接套用
+model ImportTemplate {
+  id          String   @id @default(cuid())
+  fingerprint String   @unique
+  headerText  String
+  sheetType   String   // BOQ | QUOTATION | GENERIC
+  columns     String   @default("{}") // JSON role -> col
+  useCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model QuotationItem {
@@ -201,10 +217,11 @@ model Dataset {
   filename   String
   storageKey String
   sizeBytes  Int      @default(0)
-  status     String   @default("PARSED") // PARSED | FAILED
+  status     String   @default("PARSED") // PENDING | PARSED | FAILED（PENDING=已识别待管理员确认映射后导入）
   active     Boolean  @default(true)   // 停用后不参与匹配/测算，但数据保留
   rowCount   Int      @default(0)
-  meta       String   @default("{}") // JSON: sheets, errors
+  meta       String   @default("{}") // JSON: sheets, mapping, defaults, errors
+  contentHash String  @default("") // sha1(buffer)，同 kind 重复上传去重
   createdAt  DateTime @default(now())
   materialPrices MaterialPrice[]
   quotaRows       QuotaRow[]
@@ -226,8 +243,10 @@ model MaterialPrice {
   features  String   @default("{}") // JSON BoqSemanticFeature
   raw       String   @default("{}")
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([name])
+  @@index([brand])
   @@index([datasetId])
 }
 

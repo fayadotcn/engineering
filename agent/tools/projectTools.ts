@@ -8,11 +8,14 @@ import { FILE_KIND_LABEL, type FileKind } from "@shared/types";
 import { storage } from "@file/storage";
 import { parseWorkbook } from "@file/excel";
 import { classifyFile } from "@file/classify";
-import { importBoqFromSheets } from "@boq/service";
+import { ensureInspection, mappingToView, toSheetMappings } from "@file/inspection";
+import { COLUMN_ROLE_LABEL, type ColumnRole } from "@shared/types";
+import { colLetter } from "@file/excel";
+import { importBoqFromSheets, deleteByFile } from "@boq/service";
 import { importQuotationsFromSheets } from "@material/service";
 import { setFact } from "@project/facts";
-
-const PROVINCES = /海南|四川|广东|广西|湖南|湖北|北京|上海|天津|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|贵州|云南|陕西|甘肃|青海|新疆|西藏|宁夏|内蒙古/;
+import { REGION_RE } from "@dataset/priceParse";
+import { fromJson, toJson } from "@shared/json";
 
 registerTool({
   name: "project.read",
@@ -27,6 +30,8 @@ registerTool({
     if (!p) throw new Error("项目不存在");
     const items = await listBoq(ctx.projectId);
     const facts = await getFacts(ctx.projectId);
+    const currentFacts = facts.filter((fact, index) => facts.findIndex(f => f.key === fact.key) === index);
+    const recentChanges = await prisma.actionReceipt.findMany({ where: { projectId: ctx.projectId }, orderBy: { createdAt: "desc" }, take: 10, select: { summary: true, createdBy: true, createdAt: true } });
     const totals = projectTotals(items);
     return {
       observation: {
@@ -38,7 +43,8 @@ registerTool({
           kindLabel: FILE_KIND_LABEL[f.kind as FileKind] ?? f.kind,
           status: f.status,
         })),
-        facts: facts.map((f) => `${f.key}=${f.value}(${f.source})`),
+        facts: currentFacts.map((f) => ({ key: f.key, value: f.value, source: f.source, confidence: f.confidence })),
+        recentChanges: recentChanges.map(r => ({ ...r, createdAt: r.createdAt.toISOString() })),
         ...totals,
       },
       views: [
@@ -93,6 +99,7 @@ registerTool({
       args.factType ??
       (/税率/.test(args.key) ? "TAX_RATE"
         : /地区|省|市/.test(args.key) ? "REGION"
+        : /价格期|价格日期|信息价|价期/.test(args.key) ? "PRICE_DATE"
         : /品牌/.test(args.key) ? "BRAND"
         : /费率|单价/.test(args.key) ? "RATE"
         : "CUSTOM");
@@ -114,6 +121,7 @@ registerTool({
           summary: `写入事实：${f.key} = ${f.value}（用户提供）`,
           before: {},
           after: { key: f.key, value: f.value },
+          reversible: false,
         },
       ],
       message: `已记入台账：${f.key} = ${f.value}`,
@@ -163,44 +171,133 @@ registerTool({
   },
 });
 
+const SHEET_TYPE_LABEL = { BOQ: "清单", QUOTATION: "询价表", GENERIC: "忽略" } as const;
+
+/**
+ * file.inspect: 识别上传表格的列映射（不写数据），把 columnMapping 视图推到工作区。
+ */
+registerTool({
+  name: "file.inspect",
+  description: "识别上传文件的表格结构与列映射（不导入数据），在右侧打开「列映射」视图供核对",
+  implemented: true,
+  schema: z.object({ fileId: z.string() }),
+  handler: async (ctx, args: { fileId: string }): Promise<ToolResult> => {
+    // 先校验归属，避免给别的项目文件算映射
+    const owned = await prisma.projectFile.findUnique({ where: { id: args.fileId } });
+    if (!owned || owned.projectId !== ctx.projectId) throw new Error("文件不存在");
+    const { file, mapping, isPdf } = await ensureInspection(args.fileId);
+    if (isPdf || !mapping) return { observation: { pdf: true, filename: file.filename } };
+    const sheets = Object.values(mapping);
+    const obs = sheets.map((s) => ({
+      sheetName: s.sheetName,
+      type: s.type,
+      columns: Object.fromEntries(
+        Object.entries(s.columns).map(([k, v]) => [k, v + 1])
+      ),
+      minConfidence: s.minConfidence,
+      templateHit: s.templateHit,
+    }));
+    const summary = sheets
+      .map(
+        (s) =>
+          `${s.sheetName}（${SHEET_TYPE_LABEL[s.type]}，置信 ${Math.round(s.minConfidence * 100)}%）`
+      )
+      .join("、");
+    return {
+      observation: { filename: file.filename, sheets: obs },
+      views: [mappingToView(file, mapping)],
+      message: `识别到 ${sheets.length} 个工作表：${summary}`,
+    };
+  },
+});
+
 /**
  * file.ingest: parse an uploaded file, classify it, import rows, extract facts.
  * Runs inside the agent runtime so the whole ingest is traced.
  */
 registerTool({
   name: "file.ingest",
-  description: "解析上传的文件：识别类型（清单/询价/甲供材等），导入数据并提取项目事实",
+  description: "解析上传的文件：识别类型（清单/询价/甲供材等），导入数据并提取项目事实。导入前先调用 file.inspect 识别列映射",
   implemented: true,
   schema: z.object({ fileId: z.string() }),
+  confirm: async (args: { fileId: string }) => {
+    const { file, mapping, isPdf } = await ensureInspection(args.fileId);
+    if (isPdf || !mapping) return null;
+    const targets = Object.values(mapping).filter(
+      (s) => s.type === "BOQ" || s.type === "QUOTATION"
+    );
+    if (!targets.length) return null;
+    const autoPass = targets.every(
+      (s) => s.templateHit || s.userEdited || s.minConfidence >= 0.9
+    );
+    if (autoPass) return null;
+    // 低置信 sheet 标记待确认，用户可在「列映射」视图里修正后再批准
+    const meta = fromJson<{ mapping?: Record<string, { needsConfirm?: boolean }> }>(file.meta, {});
+    for (const s of targets)
+      if (!(s.templateHit || s.userEdited || s.minConfidence >= 0.9) && meta.mapping?.[s.sheetName])
+        meta.mapping[s.sheetName].needsConfirm = true;
+    await prisma.projectFile.update({
+      where: { id: file.id },
+      data: { meta: JSON.stringify(meta) },
+    });
+    const parts = targets
+      .filter((s) => !(s.templateHit || s.userEdited || s.minConfidence >= 0.9))
+      .map((s) => {
+        const low: string[] = [];
+        let high = 0;
+        for (const [role, col] of Object.entries(s.columns)) {
+          const conf = s.confidence[role] ?? 0.9;
+          if (conf >= 0.9) { high++; continue; }
+          const label = COLUMN_ROLE_LABEL[role as ColumnRole] ?? role;
+          const bare = /裸「单价」/.test(s.evidence[role] ?? "") ? "（裸「单价」按综合单价处理，" : "（";
+          low.push(`${label}=${colLetter(col)}列${bare}置信 ${Math.round(conf * 100)}%）`);
+        }
+        const segs: string[] = [];
+        if (s.typeConfidence < 0.9)
+          segs.push(`类型拿不准（${s.typeEvidence}），暂按「${SHEET_TYPE_LABEL[s.type]}」处理，可在右侧改类型`);
+        segs.push(...low);
+        if (high) segs.push(`另 ${high} 列置信≥90%`);
+        return `表「${s.sheetName}」(${SHEET_TYPE_LABEL[s.type]})：${segs.join("；")}`;
+      });
+    return `将按识别出的列映射导入「${file.filename}」：${parts.join("；")}（置信 ≥90% 的列只报数量）。可在右侧「列映射」视图调整并保存后再点「确认执行」。`.slice(0, 400);
+  },
   handler: async (ctx, args: { fileId: string }): Promise<ToolResult> => {
-    const file = await prisma.projectFile.findUnique({ where: { id: args.fileId } });
-    if (!file || file.projectId !== ctx.projectId) throw new Error("文件不存在");
+    const insp = await ensureInspection(args.fileId);
+    const file = insp.file;
+    if (file.projectId !== ctx.projectId) throw new Error("文件不存在");
     await ctx.emit("activity", { text: `正在解析 ${file.filename}` });
 
     const buffer = await storage.get(file.storageKey);
-    const isPdf = /\.pdf$/i.test(file.filename) || file.mime.includes("pdf");
+    const isPdf = insp.isPdf;
     let sheets = null;
     if (!isPdf) {
       try {
-        sheets = parseWorkbook(buffer);
-      } catch {
-        sheets = null;
+        sheets = insp.mapping
+          ? parseWorkbook(buffer, { mapping: toSheetMappings(insp.mapping) })
+          : parseWorkbook(buffer);
+      } catch (error) {
+        await prisma.projectFile.update({ where: { id: file.id }, data: { status: "FAILED" } });
+        throw new Error(`表格解析失败：${error instanceof Error ? error.message : "文件格式无效"}`);
       }
     }
     let { kind, confidence } = classifyFile(file.filename, sheets, file.mime);
 
     let imported = 0;
     let headers = 0;
+    let nonNumericQty = 0;
+    let derivedUnitPrice = 0;
+    let laborPriceCol = false;
     let pdfPages: string[] | null = null;
     if (sheets) {
       await ctx.emit("activity", { text: "识别到表格结构，正在导入数据" });
-      const { count, headers: h } = await importBoqFromSheets(
-        ctx.projectId,
-        file.id,
-        sheets
-      );
-      imported += count;
-      headers += h;
+      // 重导幂等：先清掉该文件已导入数据
+      await deleteByFile(file.id);
+      const r = await importBoqFromSheets(ctx.projectId, file.id, sheets);
+      imported += r.count;
+      headers += r.headers;
+      nonNumericQty = r.nonNumericQty;
+      derivedUnitPrice = r.derivedUnitPrice;
+      laborPriceCol = r.laborPriceCol;
       imported += await importQuotationsFromSheets(ctx.projectId, file.id, sheets);
     } else if (isPdf) {
       await ctx.emit("activity", { text: "正在提取 PDF 文本层" });
@@ -212,6 +309,7 @@ registerTool({
         const { parseSemanticFeature, inferDiscipline } = await import("@cost-engine/semantic");
         const { lineTotal, round2, round3 } = await import("@cost-engine/money");
         const { toJson } = await import("@shared/json");
+        await deleteByFile(file.id);
         await prisma.boqItem.createMany({
           data: boqLines.map((l, i) => ({
             projectId: ctx.projectId,
@@ -236,6 +334,38 @@ registerTool({
       }
     }
 
+    // 模板学习：确认过/人工改过的映射按表头指纹沉淀，下次同构表直接命中
+    const mapping = insp.mapping;
+    if (mapping) {
+      for (const s of Object.values(mapping)) {
+        if (!s.fingerprint) continue;
+        if (s.templateHit) {
+          await prisma.importTemplate.updateMany({
+            where: { fingerprint: s.fingerprint },
+            data: { useCount: { increment: 1 } },
+          });
+        } else if (s.type !== "GENERIC" && (s.needsConfirm || s.userEdited)) {
+          await prisma.importTemplate.upsert({
+            where: { fingerprint: s.fingerprint },
+            create: {
+              fingerprint: s.fingerprint,
+              headerText: s.headerCells.join(" | "),
+              sheetType: s.type,
+              columns: toJson(s.columns),
+              useCount: 1,
+            },
+            update: {
+              headerText: s.headerCells.join(" | "),
+              sheetType: s.type,
+              columns: toJson(s.columns),
+              useCount: { increment: 1 },
+            },
+          });
+        }
+        s.needsConfirm = false;
+      }
+    }
+
     const meta = {
       sheets:
         sheets?.map((s) => ({
@@ -249,6 +379,7 @@ registerTool({
         })) ?? [],
       pages: pdfPages ?? undefined,
       classifyConfidence: confidence,
+      ...(mapping ? { mapping } : {}),
     };
     await prisma.projectFile.update({
       where: { id: file.id },
@@ -260,7 +391,7 @@ registerTool({
     });
 
     // fact extraction — FILE_EXTRACTED, never INFERRED masquerading
-    const province = file.filename.match(PROVINCES)?.[0];
+    const province = file.filename.match(REGION_RE)?.[0];
     if (province)
       await setFact(ctx.projectId, {
         factType: "REGION",
@@ -308,11 +439,14 @@ registerTool({
           summary: `导入 ${file.filename}：识别为「${FILE_KIND_LABEL[kind]}」，导入 ${imported} 行`,
           before: {},
           after: { kind, imported },
+          reversible: false,
         },
       ],
       message: `已解析「${file.filename}」→ 识别为**${FILE_KIND_LABEL[kind]}**，导入 ${imported} 行数据${
         province ? `，提取事实：地区=${province}` : ""
-      }`,
+      }${nonNumericQty ? `；${nonNumericQty} 行工程量非数值已保留原文` : ""}${
+        derivedUnitPrice ? `；${derivedUnitPrice} 项综合单价由 合价÷工程量 推导` : ""
+      }${laborPriceCol ? "；检测到人工/机械单价列，已保留在原始单元格（成本模型接入后可直接使用）" : ""}`,
     };
   },
 });

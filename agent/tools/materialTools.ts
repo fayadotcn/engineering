@@ -2,10 +2,21 @@ import { z } from "zod";
 import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import { listQuotations } from "@material/service";
-import { searchMaterialPrices, matchLibraryForItem } from "@dataset/service";
+import { searchMaterialPrices, matchLibraryForItem, getPricePrefs } from "@dataset/service";
+import { periodKey } from "@dataset/priceParse";
 import { matchQuotations } from "@cost-engine/match";
 import { isPricableItem } from "@shared/types";
 import type { DiffRow } from "@shared/types";
+
+// 价格偏好提示后缀（matchLibrary / fillFromLibrary 的 message 末尾共用）：
+// 品牌/地区偏好 + 异品牌兜底计数（兜底行已在匹配表 matchedNames 里标出实际品牌）
+const prefNote = (
+  prefs: { brands?: { value: string }[]; region?: string },
+  offBrand: number
+) =>
+  (prefs.brands?.length ? `；品牌偏好：${prefs.brands.map((b) => b.value).join("/")}` : "") +
+  (prefs.region ? `；地区偏好：${prefs.region}` : "") +
+  (offBrand ? `；${offBrand} 项为异品牌兜底价(已在匹配表标注)` : "");
 
 registerTool({
   name: "material.search",
@@ -21,8 +32,9 @@ registerTool({
         x.spec.toLowerCase().includes(q) ||
         x.brand.toLowerCase().includes(q)
     );
-    // 全局材料价格库（后台数据集）作为第二来源
-    const lib = await searchMaterialPrices(args.query, 20);
+    // 全局材料价格库（后台数据集）作为第二来源；价格偏好（品牌/地区/期次）参与排序
+    const prefs = await getPricePrefs(ctx.projectId);
+    const lib = await searchMaterialPrices(args.query, 20, prefs);
     return {
       observation: {
         project: hits.slice(0, 30),
@@ -76,16 +88,28 @@ registerTool({
       }
       note = `未找到「${args.materialName}」，以下为全部询价材料`;
     }
-    // 全局材料库价格作为参考点并入轨迹
-    const libRows = await searchMaterialPrices(args.materialName ?? "", 50);
+    // 全局材料库价格作为参考点并入轨迹（价格偏好参与排序；date 期次优先）
+    const prefs = await getPricePrefs(ctx.projectId);
+    const libRows = await searchMaterialPrices(args.materialName ?? "", 50, prefs);
     for (const r of libRows) {
       const key = `${norm(r.name)}|${norm(r.spec)}`;
       if (q && !norm(r.name).includes(q)) continue;
       const g = filtered.get(key) ?? { name: r.name, spec: r.spec, points: [] };
       if (!g.points.some((p) => p.price === r.price && p.file.startsWith("材料库")))
-        g.points.push({ price: r.price, file: `材料库·${r.source}`, date: r.priceType });
+        g.points.push({ price: r.price, file: `材料库·${r.source}`, date: r.period || r.priceType });
       filtered.set(key, g);
     }
+    // 轨迹点按时间排（期次 YYYY-MM/YYYY-Qn 与 ISO 日期统一到「月」刻度比较）
+    const dateKey = (d: string) => {
+      const p = periodKey(d);
+      if (p) return Math.floor(p / 100) * 12 + (p % 100);
+      const t = Date.parse(d);
+      return Number.isFinite(t)
+        ? new Date(t).getFullYear() * 12 + new Date(t).getMonth()
+        : 0;
+    };
+    for (const g of filtered.values())
+      g.points.sort((a, b) => dateKey(a.date) - dateKey(b.date));
     const changed = [...filtered.values()].filter(
       (g) => new Set(g.points.map((p) => p.price)).size > 1
     );
@@ -143,15 +167,18 @@ registerTool({
   implemented: true,
   schema: z.object({}),
   handler: async (ctx) => {
+    const prefs = await getPricePrefs(ctx.projectId);
     const items = await listBoq(ctx.projectId);
     const unpriced = items.filter((i) =>
       isPricableItem(i) && Number(i.unitPrice) === 0 && Number(i.mainMaterialPrice ?? 0) === 0
     );
     const rows = [];
     const misses: typeof unpriced = [];
+    let offBrand = 0;
     for (const it of unpriced) {
-      const m = await matchLibraryForItem(it);
+      const m = await matchLibraryForItem(it, prefs);
       if (!m || m.score < 60) { misses.push(it); continue; }
+      if (m.notes?.some((n) => n.includes("非指定"))) offBrand++;
       rows.push({
         quotationItemId: `lib:${it.id}`,
         materialName: it.name,
@@ -159,7 +186,7 @@ registerTool({
         brand: m.row.brand,
         price: m.row.price,
         matchedBoqItemIds: [it.id],
-        matchedNames: [`${m.row.name} ${m.row.spec} ¥${m.row.price}（${m.row.source}）`],
+        matchedNames: [`${m.row.name} ${m.row.spec} ¥${m.row.price}（${m.row.source}${m.row.brand ? `·${m.row.brand}` : ""}${m.row.period ? `·${m.row.period}` : ""}${m.row.region ? `·${m.row.region}` : ""}）`],
         confidence: m.score,
         status: m.score >= 80 ? ("MATCHED" as const) : ("LOW_CONFIDENCE" as const),
       });
@@ -178,9 +205,9 @@ registerTool({
             })),
           }]
         : [],
-      message: rows.length
+      message: (rows.length
         ? `材料库匹配到 ${rows.length}/${unpriced.length} 个未定价项的主材价，确认后写入「主材暂估价」（说「确认补价」；综合单价需经定额组价生成）`
-        : `未定价 ${unpriced.length} 项在材料库中没有命中`,
+        : `未定价 ${unpriced.length} 项在材料库中没有命中`) + prefNote(prefs, offBrand),
     };
   },
 });
@@ -192,6 +219,7 @@ registerTool({
   confirm: () => "将把材料库匹配价写入未定价清单项的主材暂估价（组价输入，不改综合单价）",
   schema: z.object({}),
   handler: async (ctx) => {
+    const prefs = await getPricePrefs(ctx.projectId);
     const items = await listBoq(ctx.projectId);
     // 目标：未定价且尚无主材暂估价的可计价项（分部分项/单价措施）
     const unpriced = items.filter((i) =>
@@ -200,9 +228,11 @@ registerTool({
     );
     const patches: { id: string; mainMaterialPrice: string; src: string }[] = [];
     const misses: string[] = [];
+    let offBrand = 0;
     for (const it of unpriced) {
-      const m = await matchLibraryForItem(it);
+      const m = await matchLibraryForItem(it, prefs);
       if (!m || m.score < 60) { misses.push(it.name); continue; }
+      if (m.notes?.some((n) => n.includes("非指定"))) offBrand++;
       patches.push({ id: it.id, mainMaterialPrice: m.row.price, src: `${m.row.name} ${m.row.spec}（${m.row.source}）` });
     }
     if (!patches.length)
@@ -234,7 +264,8 @@ registerTool({
       }],
       message: `已把材料库价格写入 ${patches.length} 个清单项的「主材暂估价」（组价输入，未动综合单价）` +
         `；下一步运行「定额测算并组价写回」生成综合单价` +
-        (misses.length ? `；${misses.length} 项未命中，需另行询价` : ""),
+        (misses.length ? `；${misses.length} 项未命中，需另行询价` : "") +
+        prefNote(prefs, offBrand),
     };
   },
 });

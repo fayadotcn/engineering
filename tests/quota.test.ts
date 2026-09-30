@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcQuota, planPrice } from "../quota/service";
+import { calcQuota, planPrice, quotaLaborTotals } from "../cost-engine/quota";
 import type { QuotaEntry } from "../quota/library";
 import type { BoqItemDTO } from "../shared/types";
 
@@ -25,6 +25,15 @@ const item = (o: Partial<BoqItemDTO> = {}): BoqItemDTO =>
   }) as BoqItemDTO;
 
 describe("calcQuota 组价语义", () => {
+  it("人工费按清单工程量归集到分册，不计入未匹配项", () => {
+    const rows = calcQuota([item(), item({ id: "i2", quantity: "2.5" })], { lib: [{ ...lib[0], code: "5H1" }], threshold: 0 });
+    expect(quotaLaborTotals([...rows, { ...rows[0], quotaCode: null, labor: "999" }])).toEqual({ total: "125.00", byBook: { "5H": "125.00" } });
+  });
+  it("未确认的管理费率、利润率不套用隐藏默认值", () => {
+    const [r] = calcQuota([item({ mainMaterialPrice: "30" })], { lib, threshold: 0 });
+    expect(r.fee).toBe("0");
+    expect(r.calcPrice).toBe("43.1");
+  });
   it("清单项上的主材暂估价优先参与组价（询价/材料库之外的第一来源）", () => {
     const [r] = calcQuota([item({ mainMaterialPrice: "30" })], {
       lib, threshold: 0, mgmtRate: 0.16, profitRate: 0.09,

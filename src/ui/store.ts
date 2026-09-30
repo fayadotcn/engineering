@@ -7,6 +7,7 @@ import type {
   ReceiptDTO,
   WorkspaceView,
 } from "@shared/types";
+import { toast } from "./primitives";
 
 export type ConvBlock =
   | { type: "user"; text: string }
@@ -29,6 +30,9 @@ interface FileMeta {
 interface State {
   projectId: string | null;
   projectName: string;
+  harnessSessionId: string;
+  summary: { itemCount: number; pricedCount: number; pricableCount: number; totalAmount: string; fees: { grandTotal: string; preTax: string; unpricedCount: number; rows: { seq: string; name: string; amount: string; note?: string }[] }; disciplines: { key: string; label: string; amount: string; share: number; count: number }[]; missingSettings: string[] } | null;
+  loadingError: string | null;
   files: FileMeta[];
   facts: CostFactDTO[];
   receipts: ReceiptDTO[];
@@ -36,13 +40,14 @@ interface State {
   blocks: ConvBlock[];
   views: WorkspaceView[];
   activeViewId: string | null;
+  lastViewEvent: string | null;
   running: boolean;
   ready: boolean;
   boqVersion: number;
   /** 清单表全局搜索框（异常定位等跨组件联动用） */
   boqQuery: string;
 
-  init(projectId: string): Promise<void>;
+  init(projectId: string, refresh?: boolean): Promise<void>;
   send(text: string): Promise<void>;
   upload(file: File): Promise<void>;
   patchItem(id: string, patch: Partial<BoqItemDTO>): Promise<boolean>;
@@ -51,6 +56,8 @@ interface State {
   streamRun(runId: string): Promise<void>;
   setActiveView(id: string): void;
   closeView(id: string): void;
+  /** 同 id 视图替换（列映射保存后服务端回传的最新视图） */
+  replaceView(view: WorkspaceView): void;
   setBoqQuery(q: string): void;
   /** 跳转到清单视图并过滤到目标项（编码或名称） */
   gotoBoqItem(key: string): void;
@@ -60,6 +67,9 @@ interface State {
 export const useStore = create<State>((set, get) => ({
   projectId: null,
   projectName: "",
+  harnessSessionId: "",
+  summary: null,
+  loadingError: null,
   files: [],
   facts: [],
   receipts: [],
@@ -67,26 +77,31 @@ export const useStore = create<State>((set, get) => ({
   blocks: [],
   views: [],
   activeViewId: null,
+  lastViewEvent: null,
   running: false,
   ready: false,
   boqVersion: 0,
   boqQuery: "",
 
-  async init(projectId) {
-    if (get().projectId === projectId) return;
-    set({ projectId, blocks: [], views: [], activeViewId: null, ready: false });
+  async init(projectId, refresh = false) {
+    const previousView = refresh && get().projectId === projectId ? get().activeViewId : null;
+    const localViews = refresh ? get().views.filter(v => ["overview", "fileList", "boqTable", "factList", "receipts"].includes(v.kind)) : [];
+    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, loadingError: null });
+    try {
     const [p, items, runs] = await Promise.all([
-      fetch(`/api/projects/${projectId}`).then((r) => r.json()),
-      fetch(`/api/projects/${projectId}/boq`).then((r) => r.json()),
-      fetch(`/api/projects/${projectId}/runs`).then((r) => r.json()),
+      fetch(`/api/projects/${projectId}`).then(async r => { if (!r.ok) throw new Error("项目不存在或暂时无法读取"); return r.json(); }),
+      fetch(`/api/projects/${projectId}/boq`).then(async r => { if (!r.ok) throw new Error("清单读取失败"); return r.json(); }),
+      fetch(`/api/projects/${projectId}/runs`).then(async r => { if (!r.ok) throw new Error("任务记录读取失败"); return r.json(); }),
     ]);
+    if (get().projectId !== projectId) return;
 
     // replay persisted runs into conversation blocks + workspace views
     const blocks: ConvBlock[] = [];
     const views: WorkspaceView[] = [];
     let activeViewId: string | null = null;
+    let lastViewEvent: string | null = null;
     for (const run of runs ?? []) {
-      const ingest = run.userMessage.match(/分析并导入文件「(.+)」/);
+      const ingest = run.userMessage.match(/(?:分析并|重新)导入文件「(.+)」/);
       blocks.push(
         ingest
           ? { type: "upload", filename: ingest[1] }
@@ -112,6 +127,7 @@ export const useStore = create<State>((set, get) => ({
             type: "receipt", receiptId: pl.receiptId, summary: pl.summary,
             actionType: pl.actionType, runId: run.id,
           });
+        else if (e.type === "error") blocks.push({ type: "error", text: pl.text, runId: run.id });
         else if (e.type === "confirm_request")
           blocks.push({
             type: "confirm", confirmId: pl.confirmId, runId: run.id,
@@ -126,15 +142,18 @@ export const useStore = create<State>((set, get) => ({
         }
         else if (e.type === "workspace_patch") {
           const v = pl.view as WorkspaceView;
+          if (!v.kind) continue;
           const idx = views.findIndex((x) => x.id === v.id);
           if (idx >= 0) views[idx] = v; else views.push(v);
           activeViewId = v.id;
+          lastViewEvent = `${run.id}:${e.seq}`;
         }
       }
     }
 
     set({
       projectName: p.name,
+      harnessSessionId: p.harnessSessionId ?? "",
       files: p.files ?? [],
       facts: p.facts ?? [],
       receipts: p.receipts ?? [],
@@ -142,6 +161,7 @@ export const useStore = create<State>((set, get) => ({
       blocks,
       views: [
         { kind: "overview", id: "view:overview", title: "项目总览" },
+        ...localViews.filter(v => !["view:overview", "view:receipts"].includes(v.id) && !views.some(x => x.id === v.id)),
         ...(views.length
           ? views
           : items?.length
@@ -149,34 +169,46 @@ export const useStore = create<State>((set, get) => ({
             : []),
         { kind: "receipts", id: "view:receipts", title: "变更记录" },
       ],
-      activeViewId: activeViewId ?? "view:overview",
+      activeViewId: refresh && lastViewEvent && lastViewEvent !== get().lastViewEvent ? activeViewId : previousView ?? "view:overview",
+      lastViewEvent,
       ready: true,
+      loadingError: null,
     });
+    await get().reloadBoq();
+    } catch (error) {
+      if (get().projectId === projectId) set({ ready: true, loadingError: error instanceof Error ? error.message : "加载失败" });
+    }
   },
 
   async send(text) {
     const { projectId, running } = get();
     if (!projectId || running || !text.trim()) return;
+    if (window.parent === window) { toast.info("请在 Harness 的造价工作台中发起任务（主入口端口 3210）"); return; }
+    const harnessOrigin = sessionStorage.getItem("installation:harnessOrigin");
+    if (!harnessOrigin) { toast.error("Harness 会话连接未建立，请从主入口打开工作台"); return; }
     set((s) => ({
       running: true,
       blocks: [...s.blocks, { type: "user", text }],
     }));
     try {
-      const res = await fetch(`/api/projects/${projectId}/agent/runs`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text }),
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { window.removeEventListener("message", receive); reject(new Error("Harness 未响应，请检查主面板连接")); }, 30000);
+        const receive = async (event: MessageEvent) => {
+          if (event.origin !== harnessOrigin || event.source !== window.parent || event.data?.projectId !== projectId) return;
+          if (!["installation:taskFinished", "installation:taskError"].includes(event.data?.type)) return;
+          clearTimeout(timer); window.removeEventListener("message", receive);
+          if (event.data.type === "installation:taskError") { reject(new Error(event.data.text)); return; }
+          resolve();
+        };
+        window.addEventListener("message", receive);
+        window.parent.postMessage({ type: "installation:task", projectId, text }, harnessOrigin);
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { runId } = await res.json();
-      if (!runId) throw new Error("no runId");
-      void get().streamRun(runId);
-    } catch {
+    } catch (error) {
       set((s) => ({
-        running: false,
-        blocks: [...s.blocks, { type: "error", text: "请求失败，请检查网络后重试" }],
+        blocks: [...s.blocks, { type: "error", text: error instanceof Error ? error.message : "请求失败" }],
       }));
-    }
+      toast.error(error instanceof Error ? error.message : "请求失败");
+    } finally { set({ running: false }); }
   },
 
   async streamRun(runId: string) {
@@ -238,14 +270,26 @@ export const useStore = create<State>((set, get) => ({
         body: fd,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { runId } = await res.json();
+      const { runId, duplicate, file: existed } = await res.json();
+      if (duplicate) {
+        // 内容相同的文件已导入过：去掉上传占位块，不占用 run
+        set((s) => ({
+          running: false,
+          blocks: s.blocks.filter(
+            (b) => !(b.type === "upload" && b.filename === file.name && b.uploading)
+          ),
+        }));
+        toast.success(`「${existed?.filename ?? file.name}」与已上传文件内容相同，已跳过`);
+        return;
+      }
       // 上传完成，进入解析阶段（事件流接管反馈）
       set((s) => ({
         blocks: s.blocks.map((b) =>
           b.type === "upload" && b.filename === file.name ? { ...b, uploading: false } : b
         ),
       }));
-      if (runId) void get().streamRun(runId);
+      await get().refreshMeta();
+      if (runId) await get().streamRun(runId);
       else set({ running: false });
     } catch {
       set((s) => ({
@@ -261,6 +305,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async patchItem(id, patch) {
+    try {
     const res = await fetch(`/api/boq-items/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -268,22 +313,29 @@ export const useStore = create<State>((set, get) => ({
     });
     if (!res.ok) return false;
     await get().reloadBoq();
+    await get().refreshMeta();
     return true;
+    } catch { return false; }
   },
 
   async reloadBoq() {
     const { projectId } = get();
     if (!projectId) return;
-    const items = await fetch(`/api/projects/${projectId}/boq`).then((r) => r.json());
-    set((s) => ({ items, boqVersion: s.boqVersion + 1 }));
+    const [items, summary] = await Promise.all([
+      fetch(`/api/projects/${projectId}/boq`).then(async r => { if (!r.ok) throw new Error("清单读取失败"); return r.json(); }),
+      fetch(`/api/projects/${projectId}/summary`).then(async r => { if (!r.ok) throw new Error("汇总读取失败"); return r.json(); }),
+    ]);
+    if (get().projectId === projectId) set((s) => ({ items, summary, boqVersion: s.boqVersion + 1 }));
   },
 
   async refreshMeta() {
     const { projectId } = get();
     if (!projectId) return;
     const p = await fetch(`/api/projects/${projectId}`).then((r) => r.json());
+    if (get().projectId !== projectId) return;
     set({
       projectName: p.name,
+      harnessSessionId: p.harnessSessionId ?? "",
       files: p.files ?? [],
       facts: p.facts ?? [],
       receipts: p.receipts ?? [],
@@ -305,6 +357,12 @@ export const useStore = create<State>((set, get) => ({
 
   setActiveView(id) {
     set({ activeViewId: id });
+  },
+
+  replaceView(view) {
+    set((s) => ({
+      views: s.views.some(v => v.id === view.id) ? s.views.map((v) => (v.id === view.id ? view : v)) : [...s.views, view],
+    }));
   },
 
   closeView(id) {
@@ -454,7 +512,7 @@ export const useStore = create<State>((set, get) => ({
           const views = [...s.views];
           if (idx >= 0) views[idx] = view;
           else views.push(view);
-          return { views, activeViewId: view.id };
+          return { views, activeViewId: view.id, lastViewEvent: `${runId}:${e.seq}` };
         }
         case "error":
           return { blocks: [...s.blocks, { type: "error", text: p.text, runId }] };

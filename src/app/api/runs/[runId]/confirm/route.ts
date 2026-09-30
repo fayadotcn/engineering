@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { resolveConfirm } from "@agent/pending";
+import { z } from "zod";
 
 // Approve / reject a paused confirm-flagged tool call.
 export async function POST(
@@ -8,7 +9,9 @@ export async function POST(
   { params }: { params: Promise<{ runId: string }> }
 ) {
   const { runId: id } = await params;
-  const { approve } = (await req.json()) as { approve?: boolean };
+  const input = z.object({ approve: z.boolean() }).strict().safeParse(await req.json().catch(() => null));
+  if (!input.success) return NextResponse.json({ error: "请明确批准或取消此导入" }, { status: 400 });
+  const { approve } = input.data;
   const run = await prisma.agentRun.findUnique({ where: { id } });
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (run.status !== "AWAITING_CONFIRM")
@@ -16,7 +19,7 @@ export async function POST(
       { error: `run 不在待确认状态（${run.status}）` },
       { status: 409 }
     );
-  const ok = resolveConfirm(id, approve !== false);
+  const ok = resolveConfirm(id, approve);
   if (!ok) {
     // 服务进程重启导致待确认上下文丢失
     await prisma.agentRun.update({
@@ -28,5 +31,5 @@ export async function POST(
       { status: 410 }
     );
   }
-  return NextResponse.json({ ok: true, approved: approve !== false });
+  return NextResponse.json({ ok: true, approved: approve });
 }

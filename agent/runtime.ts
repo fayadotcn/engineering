@@ -1,18 +1,12 @@
 import { prisma } from "@database/client";
 import { makeEmitter } from "./events";
-import { resolveContext, type RunContext } from "./context";
 import { executeTool } from "./executor";
-import { RulePlanner, type Plan, type PlanStep } from "./planner";
-import { modelConfig, runLLMLoop } from "./llm";
 import { getTool, type ToolContext, type ToolResult } from "./tools/registry";
 import { waitForConfirm } from "./pending";
 import { toJson } from "@shared/json";
 import { randomUUID } from "crypto";
 
-// CostAgent Runtime — the unified loop:
-// user msg -> resolve context -> plan -> execute tools -> observe -> final.
-// LLM plans when a model is configured; RulePlanner keeps the whole loop
-// functional (and fully deterministic) without any key.
+// Deterministic file ingestion only. Harness owns all model conversations.
 
 export interface StartRunInput {
   projectId: string;
@@ -22,11 +16,13 @@ export interface StartRunInput {
 }
 
 export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
+  if (typeof input.extra?.ingestFileId !== "string") throw new Error("请在 Harness 对话面板发起造价任务");
   const run = await prisma.agentRun.create({
     data: {
       projectId: input.projectId,
       userMessage: input.message,
-      planner: modelConfig() ? "llm" : "rule",
+      // 文件导入是确定性流程（文件已知、无决策点），不走 LLM 规划
+      planner: "import",
     },
   });
   // fire-and-forget: events stream via subscribeRun
@@ -51,26 +47,20 @@ async function executeRun(runId: string, input: StartRunInput) {
     emit,
   };
 
-  const ctx = await resolveContext(input.projectId);
-  const useLLM = !!modelConfig();
-  await emit("activity", { text: useLLM ? "正在理解任务" : "正在分析任务" });
+  await emit("activity", { text: "正在分析项目资料" });
 
   const summaries: string[] = [];
+  let cancelled = false;
   // 确认门：confirm 标记的工具先暂停 run，等用户批准才执行。
   // 规则引擎和 LLM 路径都经过这里，行为一致。
   const execute = async (c: ToolContext, t: string, a: unknown): Promise<ToolResult> => {
     const def = getTool(t);
     if (def?.implemented && def.confirm) {
       const parsed = def.schema.safeParse(a ?? {});
-      const description = parsed.success ? def.confirm(parsed.data) : `执行 ${t}`;
+      const description = parsed.success ? await def.confirm(parsed.data) : `执行 ${t}`;
       if (!description) return executeTool(c, t, a); // 本次调用不需要确认
       const confirmId = randomUUID();
-      await c.emit("confirm_request", {
-        confirmId,
-        tool: t,
-        description,
-        args: a as Record<string, unknown>,
-      });
+      const approval = waitForConfirm(runId, t, description);
       await prisma.agentRun.update({
         where: { id: runId },
         data: {
@@ -78,40 +68,30 @@ async function executeRun(runId: string, input: StartRunInput) {
           pendingAction: toJson({ confirmId, tool: t, args: a, description }),
         },
       });
-      const approved = await waitForConfirm(runId, t, description);
+      await c.emit("confirm_request", { confirmId, tool: t, description, args: a as Record<string, unknown> });
+      const approved = await approval;
       await prisma.agentRun.update({
         where: { id: runId },
         data: { status: "RUNNING", pendingAction: "{}" },
       });
       await c.emit("confirm_resolved", { confirmId, approved });
-      if (!approved)
+      if (!approved) {
+        cancelled = true;
         return { observation: { cancelled: true }, message: `已取消：${description}` };
+      }
     }
     return executeTool(c, t, a);
   };
 
   try {
-    if (useLLM) {
-      try {
-        const final = await runLLMLoop(ctx, input.message, toolCtx, execute);
-        summaries.push(final);
-      } catch (e) {
-        // model unreachable -> degrade to rule planner, keep the loop alive
-        await emit("activity", {
-          text: `模型不可用（${e instanceof Error ? e.message.slice(0, 60) : "error"}），切换到内置规则引擎`,
-        });
-        await runPlan(ctx, input, toolCtx, execute, summaries);
-      }
-    } else {
-      await runPlan(ctx, input, toolCtx, execute, summaries);
-    }
+    await ingestFile(String(input.extra!.ingestFileId), toolCtx, execute, summaries);
 
     const summary = summaries.filter(Boolean).join("\n") || "完成。";
     await emit("message", { role: "agent", text: summary });
-    await emit("run_finished", { status: "DONE" });
+    await emit("run_finished", { status: cancelled ? "CANCELLED" : "DONE" });
     await prisma.agentRun.update({
       where: { id: runId },
-      data: { status: "DONE", summary, finishedAt: new Date() },
+      data: { status: cancelled ? "CANCELLED" : "DONE", summary, finishedAt: new Date() },
     });
   } catch (e) {
     await emit("error", { text: e instanceof Error ? e.message : String(e) });
@@ -123,25 +103,17 @@ async function executeRun(runId: string, input: StartRunInput) {
   }
 }
 
-async function runPlan(
-  ctx: RunContext,
-  input: StartRunInput,
+async function ingestFile(
+  fileId: string,
   toolCtx: ToolContext,
   execute: (c: ToolContext, t: string, a: unknown) => Promise<ToolResult>,
   summaries: string[]
 ) {
-  const planner = new RulePlanner();
-  const plan: Plan = await planner.plan(ctx, input.message, input.extra);
-  const results: ToolResult[] = [];
-
-  for (const step of plan.steps) {
-    const resolved: PlanStep | null =
-      typeof step === "function" ? await step(results) : step;
-    if (!resolved) continue;
-    if (resolved.activity) await toolCtx.emit("activity", { text: resolved.activity });
-    const result = await execute(toolCtx, resolved.tool, resolved.args);
-    results.push(result);
+  for (const tool of ["file.inspect", "file.ingest", "project.summary"]) {
+    const result = await execute(toolCtx, tool, tool === "project.summary" ? {} : { fileId });
+    const observation = result.observation as { error?: string; cancelled?: boolean; ok?: boolean; reason?: string } | null;
+    if (observation?.error || observation?.ok === false) throw new Error(observation.error ?? observation.reason ?? "工具执行失败");
     if (result.message) summaries.push(result.message);
+    if (observation?.cancelled) break;
   }
-  if (plan.fallbackMessage) summaries.push(plan.fallbackMessage);
 }

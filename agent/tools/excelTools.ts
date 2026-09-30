@@ -4,8 +4,9 @@ import { registerTool } from "./registry";
 import { listBoq } from "@boq/service";
 import { storage } from "@file/storage";
 import { parseWorkbook, writeBackPrices, buildExportWorkbook, type ColumnMap, type CellPatch } from "@file/excel";
+import { ensureInspection, mappingToView } from "@file/inspection";
 import { fromJson } from "@shared/json";
-import { D } from "@cost-engine/money";
+import { projectTotals } from "@cost-engine/aggregate";
 
 registerTool({
   name: "excel.read",
@@ -26,14 +27,15 @@ registerTool({
   implemented: true,
   schema: z.object({ fileId: z.string(), sheetName: z.string().optional() }),
   handler: async (ctx, args: { fileId: string; sheetName?: string }) => {
-    const file = await prisma.projectFile.findUnique({ where: { id: args.fileId } });
-    if (!file) throw new Error("文件不存在");
-    const meta = fromJson<{ sheets?: { name: string; columns: string[] }[] }>(file.meta, {});
-    const sheets = meta.sheets ?? [];
+    const { file, mapping, isPdf } = await ensureInspection(args.fileId);
+    if (isPdf || !mapping) return { observation: { pdf: true, filename: file.filename } };
+    const view = mappingToView(file, mapping);
+    const sheets = view.kind === "columnMapping" ? view.sheets : [];
     return {
       observation: args.sheetName
-        ? sheets.find((s) => s.name === args.sheetName) ?? sheets[0]
-        : sheets,
+        ? sheets.find((s) => s.sheetName === args.sheetName) ?? sheets[0]
+        : sheets.map((s) => ({ sheetName: s.sheetName, type: s.type, columns: s.columns })),
+      views: [view],
     };
   },
 });
@@ -177,11 +179,9 @@ registerTool({
     const out = await buildExportWorkbook(sheets);
     const filename = args.filename ?? `清单导出_${new Date().toISOString().slice(0, 10)}.xlsx`;
     const artifact = await saveArtifact(ctx, out, filename);
-    const total = items
-      .filter((i) => !i.isHeader)
-      .reduce((a, i) => a.plus(D(i.totalPrice)), D(0));
+    const total = projectTotals(items).totalAmount;
     return {
-      observation: { artifactId: artifact.id, rows: items.length, total: total.toFixed(2) },
+      observation: { artifactId: artifact.id, rows: items.length, total },
       views: [
         {
           kind: "exportResult",
@@ -189,7 +189,7 @@ registerTool({
           title: "导出完成",
           artifactId: artifact.id,
           filename: artifact.label,
-          summary: `${items.filter((i) => !i.isHeader).length} 个清单项，合计 ${total.toFixed(2)} 元`,
+          summary: `${items.filter((i) => !i.isHeader).length} 个清单项，合计 ${total} 元`,
         },
       ],
       receipts: [
@@ -197,11 +197,11 @@ registerTool({
           actionType: "EXPORT",
           summary: `导出 Excel：${filename}`,
           before: {},
-          after: { artifactId: artifact.id, total: total.toFixed(2) },
+          after: { artifactId: artifact.id, total },
           reversible: false,
         },
       ],
-      message: `已导出「${filename}」，合计 ${total.toFixed(2)} 元`,
+      message: `已导出「${filename}」，合计 ${total} 元`,
     };
   },
 });

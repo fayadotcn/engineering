@@ -92,6 +92,8 @@ export interface BoqItemDTO {
   /** 组价方案（多定额子目组合）；空数组=未组价，综合单价是原清单价/手工价 */
   pricingPlan: PricingPlanLine[];
   totalPrice: string;
+  /** 原始单元格（表头标签/列字母 → 文本）+ __nonNumeric/__derived 标记 */
+  rawCells?: Record<string, unknown>;
   feeType: FeeType;
   sectionPath: string;
   isHeader: boolean;
@@ -140,6 +142,41 @@ export interface ReceiptDTO {
   createdBy: string;
   createdAt: string;
 }
+
+/* ---------------- 列映射角色（file/excel.ts 与列映射视图共用） ---------------- */
+
+export type ColumnRole =
+  | "seq" | "code" | "name" | "feature" | "unit" | "quantity"
+  | "unitPrice" | "totalPrice" | "materialName" | "spec" | "brand"
+  | "price" | "laborPrice" | "machinePrice"
+  | "region" | "period" | "priceType";
+
+export const COLUMN_ROLES: ColumnRole[] = [
+  "seq", "code", "name", "feature", "unit", "quantity",
+  "unitPrice", "totalPrice", "materialName", "spec", "brand",
+  "price", "laborPrice", "machinePrice",
+  "region", "period", "priceType",
+];
+
+export const COLUMN_ROLE_LABEL: Record<ColumnRole, string> = {
+  seq: "序号",
+  code: "项目编码",
+  name: "名称",
+  feature: "项目特征",
+  unit: "单位",
+  quantity: "工程量",
+  unitPrice: "综合单价",
+  totalPrice: "合价",
+  materialName: "材料名称",
+  spec: "规格型号",
+  brand: "品牌",
+  price: "材料单价(主材)",
+  laborPrice: "人工单价",
+  machinePrice: "机械单价",
+  region: "地区",
+  period: "价格期",
+  priceType: "价格类型",
+};
 
 /* ---------------- Workspace views ---------------- */
 
@@ -247,7 +284,33 @@ export type WorkspaceView =
       filename: string;
       summary: string;
     }
-  | { kind: "fileList"; id: string; title: string };
+  | { kind: "fileList"; id: string; title: string }
+  | {
+      kind: "columnMapping";
+      id: string;
+      title: string;
+      fileId: string;
+      filename: string;
+      fileStatus: string;
+      sheets: {
+        sheetName: string;
+        type: "BOQ" | "QUOTATION" | "GENERIC";
+        headerRow: number;
+        headerCells: string[];
+        sample: string[][];
+        colCount: number;
+        rowCount: number;
+        columns: Record<string, number>;
+        confidence: Record<string, number>;
+        evidence: Record<string, string>;
+        fingerprint: string | null;
+        templateHit: boolean;
+        userEdited: boolean;
+        minConfidence: number;
+        typeConfidence: number;
+        typeEvidence: string;
+      }[];
+    };
 
 export interface AnomalyRow {
   groupKey: string;

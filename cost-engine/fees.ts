@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { D, sum } from "./money";
+import { D, round2, sum } from "./money";
 import type { BoqItemDTO } from "@shared/types";
 
 // 费用汇总（取费）：分部分项 → 措施 → 其他项目 → 规费 → 税前 → 税金 → 含税造价。
@@ -20,7 +20,7 @@ export interface FeeParams {
   provisionalRate: Decimal;
   /** 暂列金额固定值（>0 时优先于暂列金额率） */
   provisionalAmount: Decimal;
-  /** 增值税率，默认 0.09 */
+  /** 增值税率；未确认税率时为 0，汇总明确提示 */
   taxRate: Decimal;
   /** 定额人工费合计（定额测算写入台账）；null = 未测算，规费退回简化口径 */
   laborBase: Decimal | null;
@@ -52,7 +52,7 @@ export interface FeeSummary {
   unpricedCount: number;
 }
 
-const pct = (rate: Decimal): string => `${rate.mul(100).toFixed(rate.mul(100).decimalPlaces() > 2 ? 2 : 0)}%`;
+const pct = (rate: Decimal): string => `${rate.mul(100).toDecimalPlaces(2).toString()}%`;
 
 export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
   const leaf = items.filter((i) => !i.isHeader && i.name.trim());
@@ -69,22 +69,24 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
   // 措施费构成：导入的措施清单真值 + 官方系数计取（脚手架/超高/高层，cost.measureFees 写台账）；
   // 两者皆无才退费率估算并注明
   const coeffFee = params.coeffMeasureFee;
-  const measure = importedMeasure.plus(coeffFee).gt(0)
+  const hasMeasure = measureItems.length > 0 || coeffFee.gt(0);
+  const hasOther = otherItems.length > 0;
+  const measure = round2(hasMeasure
     ? importedMeasure.plus(coeffFee)
-    : boqTotal.mul(params.measureRate);
+    : boqTotal.mul(params.measureRate));
   // 其他项目费：导入了其他项目表用真值；否则暂列金额估算
-  const other = importedOther.gt(0)
+  const other = round2(hasOther
     ? importedOther
     : params.provisionalAmount.gt(0)
       ? params.provisionalAmount
-      : boqTotal.mul(params.provisionalRate);
+      : boqTotal.mul(params.provisionalRate));
   // 规费：定额人工费为真实基数（测算后可用）；否则退回简化口径并标注
   const laborBase = params.laborBase;
-  const regulation = laborBase !== null && laborBase.gt(0)
+  const regulation = round2(laborBase !== null && laborBase.gt(0)
     ? laborBase.mul(params.regulationRate)
-    : boqTotal.mul(params.regulationRate);
+    : boqTotal.mul(params.regulationRate));
   const preTax = boqTotal.plus(measure).plus(other).plus(regulation);
-  const tax = preTax.mul(params.taxRate);
+  const tax = round2(preTax.mul(params.taxRate));
   const grandTotal = preTax.plus(tax);
 
   const unset = (flag: boolean, hint: string) => (flag ? undefined : `未设置，按 0 计（可用「${hint}」写入台账）`);
@@ -97,26 +99,26 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
     {
       seq: "二", name: "措施项目费",
       basis: [
-        importedMeasure.gt(0) ? `Σ 措施清单合价（${measureItems.length} 项）` : "",
+        measureItems.length ? `Σ 措施清单合价（${measureItems.length} 项）` : "",
         coeffFee.gt(0) ? `系数措施费 ${coeffFee.toFixed(2)}（脚手架/超高/高层等，川标费率）` : "",
       ].filter(Boolean).join(" + ") || "分部分项工程费 × 费率（估算）",
-      rate: importedMeasure.plus(coeffFee).gt(0) ? null : pct(params.measureRate),
+      rate: hasMeasure ? null : pct(params.measureRate),
       amount: measure.toFixed(2), level: "leaf",
-      note: importedMeasure.plus(coeffFee).gt(0)
+      note: hasMeasure
         ? [
-            importedMeasure.gt(0) ? "按导入的措施项目清单计价表" : "",
+            measureItems.length ? "按导入的措施项目清单计价表" : "",
             coeffFee.gt(0) ? "含「措施费计取」结果" : "",
           ].filter(Boolean).join("；") || undefined
         : unset(params.set.measure, "措施费率设为x% 或先做「措施费计取」") ?? "费率估算口径",
     },
     {
       seq: "三", name: "其他项目费",
-      basis: importedOther.gt(0)
+      basis: hasOther
         ? `Σ 其他项目清单合价（${otherItems.length} 项）`
         : params.provisionalAmount.gt(0) ? "暂列金额（固定值）" : "分部分项工程费 × 暂列金额率（估算）",
-      rate: importedOther.gt(0) ? null : params.provisionalAmount.gt(0) ? null : pct(params.provisionalRate),
+      rate: hasOther ? null : params.provisionalAmount.gt(0) ? null : pct(params.provisionalRate),
       amount: other.toFixed(2), level: "leaf",
-      note: importedOther.gt(0)
+      note: hasOther
         ? "按导入的其他项目清单计价表（暂列金额/暂估价/计日工/总承包服务费）"
         : unset(params.set.provisional, "暂列金额率设为x% 或 暂列金额设为x元"),
     },
@@ -139,7 +141,7 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
     {
       seq: "六", name: "增值税", basis: "税前工程造价 × 税率",
       rate: pct(params.taxRate), amount: tax.toFixed(2), level: "leaf",
-      note: params.set.tax ? undefined : "未设置，按默认 9% 计",
+      note: params.set.tax ? undefined : "税率未确认，暂按 0 计；请在计价设置中填写适用税率",
     },
     {
       seq: "七", name: "含税工程造价", basis: "五 + 六",

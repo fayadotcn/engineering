@@ -1,5 +1,6 @@
 import type { RunContext } from "./context";
 import type { ToolResult } from "./tools/registry";
+import { REGION_RE } from "@dataset/priceParse";
 
 // Planner produces steps. A step is either a static {tool,args} or a
 // dynamic function that can inspect previous observations — this is the
@@ -55,11 +56,27 @@ export class RulePlanner implements Planner {
   ): Promise<Plan> {
     const m = message.trim();
 
+    // 内联价格偏好：「用上上品牌测算」「按海南价补价」「按2024年6月信息价组价」→ 先写台账再执行
+    const prefSteps: PlanStep[] = [];
+    const brandM = m.match(/(?:用|按|以|要)([一-龥A-Za-z0-9]{2,8}?)(?:品牌|牌(?=的))(?=的|价|测|算|组|补|，|,|$)/);
+    if (brandM && !/^(铜|铝|钢|铁|金|银|锡|铅|木|瓷|塑|砖|石)$/.test(brandM[1])) {
+      const cat = MATERIAL_CATEGORIES.find((c) => m.includes(c.replace(/柜|设备/, "")));
+      prefSteps.push({ tool: "project.setFact", args: { key: cat ? `${cat}品牌` : "品牌", value: brandM[1] }, activity: `记录品牌偏好:${brandM[1]}` });
+    }
+    const regionM = m.match(
+      new RegExp(`(${REGION_RE.source}|${"[一-龥]{2,7}地区"})(?:的)?(?=价|信息价|测|算|组|补|报)`)
+    );
+    if (regionM) prefSteps.push({ tool: "project.setFact", args: { key: "地区", value: regionM[1] }, activity: `记录地区偏好:${regionM[1]}` });
+    const periodM = m.match(/(20\d{2})\s*年?\s*(\d{1,2})\s*月?(?:的)?(?=价|信息价|测|算|组|补)/);
+    if (periodM && !(periodM.index! + periodM[0].length < m.length && /\d/.test(m[periodM.index! + periodM[0].length])))
+      prefSteps.push({ tool: "project.setFact", args: { key: "价格期", value: `${periodM[1]}-${periodM[2].padStart(2, "0")}` }, activity: `记录价格期偏好` });
+
     // file ingest (triggered by upload)
     if (extra?.ingestFileId) {
       return {
         steps: [
-          { tool: "file.ingest", args: { fileId: extra.ingestFileId }, activity: "正在解析文件" },
+          { tool: "file.inspect", args: { fileId: extra.ingestFileId }, activity: "正在识别表格结构" },
+          { tool: "file.ingest", args: { fileId: extra.ingestFileId }, activity: "正在导入数据" },
           { tool: "project.summary", args: {} },
         ],
       };
@@ -136,6 +153,7 @@ export class RulePlanner implements Planner {
     if (/定额|组价|测算/.test(m)) {
       return {
         steps: [
+          ...prefSteps,
           { tool: "quota.match", args: {}, activity: "正在匹配定额子目" },
           { tool: "quota.calculate", args: {}, activity: "正在按定额测算综合单价" },
         ],
@@ -177,6 +195,7 @@ export class RulePlanner implements Planner {
     if (/补价|补齐|缺价|未定价|没价|套价/.test(m)) {
       const apply = /补|填|写|套/.test(m) && !/预览|看看|查/.test(m);
       const steps: StepOrFn[] = [
+        ...prefSteps,
         { tool: "material.matchLibrary", args: {}, activity: "正在用材料库匹配未定价项主材价" },
       ];
       if (apply)

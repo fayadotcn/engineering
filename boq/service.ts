@@ -4,6 +4,7 @@ import { toBoqDTO } from "@database/serialize";
 import { toJson } from "@shared/json";
 import { D, lineTotal, round2, round3 } from "@cost-engine/money";
 import { inferDiscipline, parseSemanticFeature } from "@cost-engine/semantic";
+import { rowToBoqInput } from "./mapRow";
 import type { ParsedSheet, SheetFeeType } from "@file/excel";
 import type { BoqItemDTO } from "@shared/types";
 
@@ -14,14 +15,17 @@ export async function importBoqFromSheets(
   projectId: string,
   fileId: string,
   sheets: ParsedSheet[]
-): Promise<{ count: number; headers: number }> {
-  /** 数值单元格容错：取首行、去千分位/空格；非数值落 "0"（decimal.js 遇 "暂估" 会抛 Invalid argument 打断导入） */
-  const numCell = (v?: string): string => {
-    const first = (v ?? "").split("\n")[0].replace(/[,\s]/g, "");
-    return first !== "" && Number.isFinite(Number(first)) ? first : "0";
-  };
+): Promise<{
+  count: number;
+  headers: number;
+  nonNumericQty: number;
+  derivedUnitPrice: number;
+  laborPriceCol: boolean;
+}> {
   let count = 0;
   let headers = 0;
+  let nonNumericQty = 0;
+  let derivedUnitPrice = 0;
   let sortOrder = 0;
   const data: Prisma.BoqItemCreateManyInput[] = [];
 
@@ -32,6 +36,12 @@ export async function importBoqFromSheets(
     : /其他项目|暂列|计日工|总承包服务/.test(s) ? "其他项目"
     : /分部分项/.test(s) ? "分部分项"
     : null;
+
+  const laborPriceCol = sheets.some(
+    (s) =>
+      s.type === "BOQ" &&
+      (s.columns.laborPrice !== undefined || s.columns.machinePrice !== undefined)
+  );
 
   for (const sheet of sheets) {
     if (sheet.type !== "BOQ") continue;
@@ -45,48 +55,32 @@ export async function importBoqFromSheets(
         curFeeType = sectionFeeType(name) ?? curFeeType;
         headers++;
       }
-      // 数值单元格容错：取首行（合并残留的换行文本）、去千分位；
-      // 非数值内容（"暂估"/"详见附图"）落 0 不打断导入，原文仍在 rawFeature/单元格里可溯
-      const qty = D(numCell(row.cells.quantity));
-      const price = D(numCell(row.cells.unitPrice));
-      // 清单表里的「材料单价/主材价」列 → mainMaterialPrice（组价输入，非综合单价）
-      const mainMat = D(numCell(row.cells.price));
-      const total = (row.cells.totalPrice ?? "").trim()
-        ? D(numCell(row.cells.totalPrice))
-        : lineTotal(qty, price);
-      const rawFeature = row.cells.feature ?? "";
-      const features = parseSemanticFeature(name, rawFeature);
-      data.push({
+      const { __flags, ...input } = rowToBoqInput(row, sheet, {
         projectId,
         fileId,
-        sheetName: sheet.sheetName,
-        rowIndex: row.rowIndex,
-        code: row.cells.code ?? "",
-        name,
-        rawFeature,
-        unit: row.cells.unit ?? "",
-        quantity: round3(qty),
-        unitPrice: round2(price),
-        mainMaterialPrice: round2(mainMat),
-        totalPrice: total.toDecimalPlaces(2),
-        feeType: curFeeType,
-        sectionPath: section,
-        isHeader: row.isHeader && !row.isItem,
         sortOrder: sortOrder++,
-        discipline: inferDiscipline(name, rawFeature, section),
-        features: toJson(features),
+        section,
+        feeType: curFeeType,
       });
+      data.push(input);
+      if (__flags.nonNumericQty) nonNumericQty++;
+      if (__flags.derivedUnitPrice) derivedUnitPrice++;
       if (row.isItem) count++;
     }
   }
   if (data.length) await prisma.boqItem.createMany({ data });
-  return { count, headers };
+  return { count, headers, nonNumericQty, derivedUnitPrice, laborPriceCol };
 }
 
-export async function listBoq(projectId: string): Promise<BoqItemDTO[]> {
+export async function listBoq(
+  projectId: string,
+  opts?: { rawCells?: boolean }
+): Promise<BoqItemDTO[]> {
   const items = await prisma.boqItem.findMany({
     where: { projectId },
     orderBy: { sortOrder: "asc" },
+    // 列表页不需要整行原文 JSON（大表翻倍 DB 读取量）；服务端工具默认仍带
+    ...(opts?.rawCells === false ? { omit: { rawCells: true } } : {}),
   });
   return items.map(toBoqDTO);
 }
@@ -100,6 +94,8 @@ export interface BoqPatch {
   quantity?: string;
   name?: string;
   rawFeature?: string;
+  /** Receipt restoration and lump-sum amounts; never a material quotation price. */
+  totalPrice?: string;
 }
 
 export async function updateBoqItems(
@@ -111,13 +107,18 @@ export async function updateBoqItems(
     where: { projectId, id: { in: ids } },
   });
   const before = existing.map(toBoqDTO);
-
+  if (new Set(ids).size !== ids.length || existing.length !== ids.length)
+    throw new Error("清单项重复、不存在或不属于当前项目");
+  const updates: Prisma.PrismaPromise<unknown>[] = [];
   for (const { id, patch } of patches) {
-    const cur = existing.find((e) => e.id === id);
-    if (!cur) continue;
+    const cur = existing.find((e) => e.id === id)!;
     const qty = patch.quantity !== undefined ? round3(D(patch.quantity)) : cur.quantity;
     const price =
       patch.unitPrice !== undefined ? round2(D(patch.unitPrice)) : cur.unitPrice;
+    if (!qty.isFinite() || !price.isFinite() || price.lt(0)) throw new Error("工程量和综合单价必须为有效数字，单价不能为负数");
+    if (patch.mainMaterialPrice !== undefined && (!D(patch.mainMaterialPrice).isFinite() || D(patch.mainMaterialPrice).lt(0))) throw new Error("主材暂估价必须为非负有效数字");
+    if (patch.name !== undefined && !patch.name.trim()) throw new Error("项目名称不能为空");
+    if (patch.totalPrice !== undefined && !D(patch.totalPrice).isFinite()) throw new Error("合价必须为有效数字");
     const features =
       patch.name !== undefined || patch.rawFeature !== undefined
         ? toJson(
@@ -127,7 +128,7 @@ export async function updateBoqItems(
             )
           )
         : cur.features;
-    await prisma.boqItem.update({
+    updates.push(prisma.boqItem.update({
       where: { id },
       data: {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
@@ -140,7 +141,8 @@ export async function updateBoqItems(
           : {}),
         quantity: qty,
         unitPrice: price,
-        totalPrice: lineTotal(qty, price),
+        // Imported lump-sum/other-fee totals survive material and text edits.
+        totalPrice: patch.totalPrice !== undefined ? round2(D(patch.totalPrice)) : patch.quantity !== undefined || patch.unitPrice !== undefined ? lineTotal(qty, price) : cur.totalPrice,
         features,
         ...(patch.name !== undefined || patch.rawFeature !== undefined
           ? {
@@ -152,9 +154,10 @@ export async function updateBoqItems(
             }
           : {}),
       },
-    });
+    }));
   }
-  const after = (await prisma.boqItem.findMany({ where: { id: { in: ids } } })).map(
+  await prisma.$transaction(updates);
+  const after = (await prisma.boqItem.findMany({ where: { projectId, id: { in: ids } } })).map(
     toBoqDTO
   );
   return { before, after };

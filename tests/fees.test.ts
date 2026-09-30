@@ -18,25 +18,26 @@ const item = (totalPrice: string, unitPrice = "1", feeType: BoqItemDTO["feeType"
 
 const params = (o: Partial<Parameters<typeof feeSummary>[1]> = {}) => ({
   measureRate: D(0), regulationRate: D(0), provisionalRate: D(0),
-  provisionalAmount: D(0), taxRate: D(0.09), laborBase: null, coeffMeasureFee: D(0),
+  provisionalAmount: D(0), taxRate: D(0), laborBase: null, coeffMeasureFee: D(0),
   set: { measure: false, regulation: false, provisional: false, tax: false },
   ...o,
 });
 
 describe("feeSummary 取费汇总", () => {
-  it("默认口径：仅分部分项 + 9% 增值税", () => {
+  it("未确认税率暂不计税，显式提示缺项", () => {
     const r = feeSummary([item("10000"), item("20000")], params());
     expect(r.rows.find((x) => x.seq === "一")?.amount).toBe("30000.00");
     expect(r.rows.find((x) => x.seq === "五")?.amount).toBe("30000.00");
-    expect(r.rows.find((x) => x.seq === "六")?.amount).toBe("2700.00");
-    expect(r.grandTotal).toBe("32700.00");
+    expect(r.rows.find((x) => x.seq === "六")?.amount).toBe("0.00");
+    expect(r.rows.find((x) => x.seq === "六")?.note).toContain("税率未确认");
+    expect(r.grandTotal).toBe("30000.00");
   });
 
   it("全费率口径：措施3% + 暂列5% + 规费2% + 税9%", () => {
     const r = feeSummary(
       [item("100000")],
       params({
-        measureRate: D(0.03), regulationRate: D(0.02), provisionalRate: D(0.05),
+        measureRate: D(0.03), regulationRate: D(0.02), provisionalRate: D(0.05), taxRate: D(0.09),
         set: { measure: true, regulation: true, provisional: true, tax: true },
       })
     );
@@ -106,6 +107,19 @@ describe("feeSummary 取费汇总", () => {
     );
     expect(r.unpricedCount).toBe(0);
   });
+
+  it("导入的零措施费、零其他项目费不被费率估算覆盖", () => {
+    const r = feeSummary([item("10000"), item("0", "0", "总价措施"), item("0", "0", "其他项目")], params({ measureRate: D(.03), provisionalRate: D(.05) }));
+    expect(r.rows.find(x => x.seq === "二")?.amount).toBe("0.00");
+    expect(r.rows.find(x => x.seq === "三")?.amount).toBe("0.00");
+  });
+
+  it("各费用先取分，展示的小计与总计能逐行相加复核", () => {
+    const r = feeSummary([item("0.10")], params({ measureRate: D(.025), provisionalRate: D(.05), regulationRate: D(.025), taxRate: D(.09) }));
+    expect(r.rows.find(x => x.seq === "二")?.rate).toBe("2.5%");
+    expect(r.preTax).toBe(D(r.rows[0].amount).plus(r.rows[1].amount).plus(r.rows[2].amount).plus(r.rows[3].amount).toFixed(2));
+    expect(r.grandTotal).toBe(D(r.preTax).plus(r.rows[5].amount).toFixed(2));
+  });
 });
 
 describe("事实值归一化", () => {
@@ -115,6 +129,9 @@ describe("事实值归一化", () => {
     expect(parseRateValue("0.09")).toBe(0.09);
     expect(parseRateValue("abc")).toBeNull();
     expect(parseRateValue(null)).toBeNull();
+    expect(parseRateValue("0.5%")).toBe(0.005);
+    expect(parseRateValue("1％")).toBe(0.01);
+    expect(parseRateValue("   ")).toBeNull();
   });
   it("parseAmountValue 兼容 万/元/千分位", () => {
     expect(parseAmountValue("50万")).toBe(500000);

@@ -37,7 +37,7 @@ export interface ToolDef<A = unknown> {
   schema: z.ZodType<A>;
   implemented: boolean;
   /** 执行前需用户确认；返回值是展示给用户的中文描述，返回 null 表示本次不需要确认 */
-  confirm?: (args: A) => string | null;
+  confirm?: (args: A) => string | null | Promise<string | null>;
   handler?: (ctx: ToolContext, args: A) => Promise<ToolResult>;
 }
 

@@ -7,10 +7,10 @@ export const dynamic = "force-dynamic";
 export default async function AdminPage() {
   const datasets = await listDatasets();
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-6 pb-16 pt-16">
+    <main className="cost-library mx-auto flex min-h-screen w-full max-w-4xl flex-col px-6 pb-16 pt-16">
       <a
         href="/"
-        className="mb-6 flex w-fit items-center gap-1.5 text-[12.5px] text-neutral-500 transition-colors hover:text-neutral-800"
+        className="cost-back mb-6 flex w-fit items-center gap-1.5 text-[12.5px] text-neutral-500 transition-colors hover:text-neutral-800"
       >
         <ArrowLeft size={13} /> 返回项目
       </a>
@@ -23,9 +23,9 @@ export default async function AdminPage() {
           <Database size={17} />
         </span>
         <div>
-          <h1 className="text-[20px] font-medium tracking-tight">数据管理</h1>
+          <h1 className="text-[20px] font-medium tracking-tight">材料与定额库</h1>
           <p className="mt-0.5 text-[12.5px] text-neutral-500">
-            上传全局共享数据 —— 所有项目的 Agent 都能使用这些库做测算与匹配
+            管理各工程共用的材料价格、消耗量定额和参考资料。
           </p>
         </div>
       </div>

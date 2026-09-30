@@ -3,6 +3,7 @@ import { getProject } from "@project/service";
 import { toFactDTO } from "@database/serialize";
 import { FILE_KIND_LABEL, type FileKind } from "@shared/types";
 import { prisma } from "@database/client";
+import { z } from "zod";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -16,6 +17,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   return NextResponse.json({
     id: p.id,
     name: p.name,
+    harnessSessionId: p.harnessSessionId,
     files: p.files.map((f) => ({
       id: f.id,
       filename: f.filename,
@@ -41,4 +43,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       createdAt: r.createdAt.toISOString(),
     })),
   });
+}
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const parsed = z.object({ harnessSessionId: z.string().regex(/^session-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i) }).strict().safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "会话 ID 无效" }, { status: 400 });
+  if (!await prisma.project.findUnique({ where: { id } })) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
+  await prisma.project.update({ where: { id }, data: parsed.data });
+  return NextResponse.json({ ok: true });
 }

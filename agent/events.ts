@@ -7,7 +7,8 @@ import type { AgentEventDTO, AgentEventType } from "@shared/types";
 
 type Listener = (e: AgentEventDTO) => void;
 
-const subscribers = new Map<string, Set<Listener>>();
+const shared = globalThis as typeof globalThis & { costRunSubscribers?: Map<string, Set<Listener>> };
+const subscribers = (shared.costRunSubscribers ??= new Map<string, Set<Listener>>());
 
 export function subscribeRun(runId: string, fn: Listener): () => void {
   const set = subscribers.get(runId) ?? new Set();

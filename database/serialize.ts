@@ -9,7 +9,7 @@ import type {
   QuotationItemDTO,
 } from "@shared/types";
 
-export function toBoqDTO(it: BoqItem): BoqItemDTO {
+export function toBoqDTO(it: Omit<BoqItem, "rawCells"> & { rawCells?: string }): BoqItemDTO {
   return {
     id: it.id,
     projectId: it.projectId,
@@ -25,6 +25,7 @@ export function toBoqDTO(it: BoqItem): BoqItemDTO {
     mainMaterialPrice: it.mainMaterialPrice.toString(),
     pricingPlan: fromJson<PricingPlanLine[]>(it.pricingPlan, []),
     totalPrice: it.totalPrice.toString(),
+    rawCells: fromJson<Record<string, unknown>>(it.rawCells ?? "{}", {}),
     feeType: it.feeType as BoqItemDTO["feeType"],
     sectionPath: it.sectionPath,
     isHeader: it.isHeader,

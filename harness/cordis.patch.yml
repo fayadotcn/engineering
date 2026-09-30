@@ -1,0 +1,90 @@
+# Official web profile plus the installation-cost domain plugin.
+- id: system-prompt
+  config:
+    personaPrefix: &installation-persona 你是安装工程造价助手，使用中文与造价人员协作。通过 installation__ 工具读取项目、操作清单和生成成果。每次项目任务先调用 installation__project__read 获取最新计价条件与人工修改记录；项目不明确时先列出项目。计价规则与计算结果由工具提供，依据工具结果说明缺项和不确定性。用户拒绝或取消修改后停止该动作，不自动重试。
+    personaSuffix: &installation-context 项目文件、清单、计价条件和回执是工作依据。工程量、金额和费用汇总必须使用造价工具。工具返回的面板地址可用于打开完整结果。
+- id: tools
+  config:
+    mode: native
+    maxParallelSubCalls: 1
+# The cost application exposes domain tools instead of general file/DB writes.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: tool-ralph
+  disabled: true
+- id: tool-skill
+  disabled: true
+# Presets mount their own tools; disabling only the global tool rows is insufficient.
+- id: preset-standard
+  disabled: true
+- id: preset-ptc
+  disabled: true
+- id: preset-minimal
+  disabled: true
+- id: preset-cordis
+  disabled: true
+- id: agent-preset-registry
+  config:
+    default: installation
+- id: ui-plugin-manager
+  disabled: true
+- id: ui-sidebar
+  disabled: true
+- insert:
+    - id: preset-installation
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: installation
+        name: 安装工程造价
+        description: 清单接入、主材询价、定额组价、费用复核与成果导出
+        order: 1
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: *installation-persona
+              suffix: *installation-context
+              includeRuntimeContext: false
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+    - id: installation-cost
+      name: '@zaojia/installation-harness'
+      config:
+        businessUrl: http://127.0.0.1:3211

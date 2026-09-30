@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
-/* ── Design Tokens（参考 ZCodeProject 的暖白纸感 + 松绿 accent）── */
+/* Installation cost workspace */
 :root {
-  --bg: #f4f5f2;
-  --surface: #fafbf8;
-  --sidebar: #eef1ed;
-  --hover: #eaede9;
-  --active: #e0e6e1;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --sidebar: #f5f5f5;
+  --hover: #f2f3f5;
+  --active: #e7ecf6;
 
-  --ink-1: #202622;
-  --ink-2: #4f5953;
-  --ink-3: #66716a;
-  --ink-4: #909892;
+  --ink-1: #262626;
+  --ink-2: #525252;
+  --ink-3: #737373;
+  --ink-4: #a0a0a0;
 
-  --hairline: #dfe3de;
-  --hairline-strong: #c9d0ca;
+  --hairline: #e9e9eb;
+  --hairline-strong: #d5d5da;
 
-  --brand-accent: #465d50;
-  --brand-accent-hover: #374b40;
-  --brand-soft: #dde6df;
-  --brand-on-accent: #fafbf8;
+  --brand-accent: #4d6bfe;
+  --brand-accent-hover: #3e58db;
+  --brand-soft: #eef1ff;
+  --brand-on-accent: #ffffff;
   --solid-ink: #202622;
   --on-solid: #fafbf8;
 
@@ -57,18 +57,18 @@
   --green: var(--success-soft-fg);
 }
 
-/* 把 Tailwind neutral 色阶整体重映射为绿灰系——组件不改类名即换肤 */
+/* Professional surfaces share the neutral palette of the Harness shell. */
 @theme {
-  --color-neutral-50: #f6f7f4;
-  --color-neutral-100: #eef1ed;
-  --color-neutral-200: #dfe3de;
-  --color-neutral-300: #c9d0ca;
-  --color-neutral-400: #909892;
-  --color-neutral-500: #66716a;
-  --color-neutral-600: #4f5953;
-  --color-neutral-700: #3a453e;
-  --color-neutral-800: #2c3530;
-  --color-neutral-900: #202622;
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-600: #525252;
+  --color-neutral-700: #404040;
+  --color-neutral-800: #262626;
+  --color-neutral-900: #171717;
   /* 语义色阶 → soft 低饱和变体（与参考站同一配方） */
   --color-red-50: var(--danger-soft-bg);
   --color-red-200: #e4c7c3;
@@ -90,6 +90,42 @@
   --font-sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
 }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #202020;
+  --surface: #202020;
+  --sidebar: #292929;
+  --hover: #333333;
+  --ink-1: #f2f2f2;
+  --ink-2: #cccccc;
+  --ink-3: #a5a5a5;
+  --ink-4: #818181;
+  --hairline: #373737;
+  --hairline-strong: #505050;
+  --brand-soft: #2b3354;
+  --color-neutral-50: #262626;
+  --color-neutral-100: #292929;
+  --color-neutral-200: #373737;
+  --color-neutral-300: #505050;
+  --color-neutral-400: #818181;
+  --color-neutral-500: #a5a5a5;
+  --color-neutral-600: #bfbfbf;
+  --color-neutral-700: #cccccc;
+  --color-neutral-800: #e5e5e5;
+  --color-neutral-900: #f2f2f2;
+  --warning-soft-bg: #3b3326;
+  --danger-soft-bg: #3c2929;
+}
+:root[data-theme="dark"] .bg-white { background-color: var(--surface); }
+.harness-embedded .cost-home .fadein > div:first-child { display: none; }
+.harness-embedded .cost-home h1 { margin-top: 0; }
+.harness-embedded .cost-home { padding-top: 32px; }
+.harness-embedded .cost-library { max-width: none; padding: 32px; }
+.cost-new-engineering { width: min(100%, 640px); margin: 0 auto; padding: 120px 32px 40px; }
+.cost-new-engineering h1 { font-size: 26px; font-weight: 600; margin-bottom: 16px; }
+.cost-new-engineering > p { color: var(--ink-3); font-size: 13px; line-height: 1.8; margin-bottom: 32px; }
+.cost-new-engineering > small { display: block; color: var(--ink-4); font-size: 12px; line-height: 1.8; margin-top: 20px; }
 
 html {
   -webkit-font-smoothing: antialiased;
@@ -375,4 +411,146 @@ input:focus-visible,
 textarea:focus-visible,
 .composer-input:focus-visible {
   outline: none;
+}
+
+.eyebrow { color: var(--ink-3); font-size: 10px; font-weight: 600; letter-spacing: .13em; }
+.cost-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 12px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--surface); color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .15s; }
+.cost-btn:hover { background: var(--hover); }
+.cost-btn.primary { color: white; background: var(--brand-accent); border-color: var(--brand-accent); }
+.cost-btn.primary:hover { background: var(--brand-accent-hover); }
+.cost-btn:disabled { opacity: .45; cursor: default; }
+.cost-home { max-width: 1100px; margin: auto; padding: 36px 40px 28px; min-height: 100dvh; }
+.cost-home-stats { display: flex; gap: 40px; align-items: center; padding: 24px 0; margin-top: 24px; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); }
+.cost-home-stats div { display: flex; align-items: baseline; gap: 10px; }
+.cost-home-stats strong { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cost-home-stats span, .cost-home-stats p { color: var(--ink-3); font-size: 12px; }
+.cost-home-stats p { margin-left: auto; max-width: 255px; line-height: 1.9; }
+.cost-create-project { display: flex; align-items: center; gap: 10px; max-width: 560px; }
+.cost-directory { margin-top: 32px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+.section-heading h2, .section-heading h3 { font-weight: 600; font-size: 15px; }
+.section-heading small { color: var(--ink-3); font-size: 11px; font-weight: 400; margin-left: 8px; }
+.section-heading button { color: var(--ink-3); font-size: 11px; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.cost-search { display: flex; align-items: center; gap: 7px; color: var(--ink-3); border: 1px solid var(--hairline); background: var(--surface); padding: 7px 10px; border-radius: 6px; }
+.cost-search input { font-size: 12px; width: 160px; background: transparent; }
+.cost-directory-table { border-top: 1px solid var(--hairline); }
+.cost-directory-head, .cost-directory-row { display: grid; grid-template-columns: minmax(220px, 1fr) 95px 95px 110px 18px; align-items: center; gap: 18px; }
+.cost-directory-head { color: var(--ink-3); font-size: 11px; padding: 11px 14px; background: var(--sidebar); }
+.cost-directory-row { padding: 18px 14px; background: var(--surface); border-bottom: 1px solid var(--hairline); color: var(--ink-3); font-size: 12px; }
+.cost-directory-row:hover { background: var(--hover); }
+.cost-directory-name { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cost-directory-name i { color: var(--brand-accent); padding: 10px; background: var(--brand-soft); border-radius: 7px; }
+.cost-directory-name strong { display: block; color: var(--ink-1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.cost-directory-name small { display: block; font-size: 10px; margin-top: 5px; color: var(--ink-4); }
+.cost-home-footer { padding-top: 30px; text-align: center; font-size: 11px; color: var(--ink-4); }
+.cost-workbench { position: relative; min-height: 100dvh; background: var(--bg); }
+.cost-project-header { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--hairline); background: var(--surface); }
+.cost-project-header h1 { font-size: 16px; font-weight: 600; margin-top: 3px; }
+.cost-header-tag { color: var(--ink-3); font-size: 10px; padding: 3px 7px; border: 1px solid var(--hairline); border-radius: 4px; }
+.cost-project-subtitle { font-size: 11px; color: var(--ink-3); margin-top: 5px; }
+.harness-embedded .cost-back { display: none; }
+.cost-workspace-body { display: block; min-height: calc(100dvh - 77px); }
+.cost-project-nav { width: 100%; padding: 0 16px; border-bottom: 1px solid var(--hairline); display: flex; gap: 16px; overflow-x: auto; scrollbar-width: thin; }
+.cost-nav-label { color: var(--ink-4); font-size: 10px; padding: 0 12px 8px; letter-spacing: .06em; }
+.cost-project-nav > button, .cost-project-nav > a { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 14px 2px; color: var(--ink-3); font-size: 12px; text-align: left; border-bottom: 2px solid transparent; cursor: pointer; }
+.cost-project-nav > button:hover, .cost-project-nav > a:hover { background: var(--hover); }
+.cost-project-nav > button.active { color: var(--ink-1); font-weight: 600; border-bottom-color: var(--ink-1); }
+.cost-project-nav small { margin-left: auto; font-size: 10px; font-weight: 400; }
+.cost-nav-foot { margin-top: auto; padding: 28px 10px 0; color: var(--ink-4); font-size: 9px; display: flex; align-items: center; gap: 6px; }
+.status-dot { width: 5px; height: 5px; display: inline-block; border-radius: 50%; background: #448b84; flex-shrink: 0; }
+.cost-content { padding: 24px 22px; min-width: 0; }
+.cost-content-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.cost-content-heading h2 { font-size: 16px; font-weight: 600; }
+.cost-content-heading p { font-size: 11px; color: var(--ink-3); margin-top: 6px; }
+.cost-result-body { min-height: 360px; background: var(--surface); overflow: hidden; }
+.cost-result-body > .cost-overview, .cost-result-body > .cost-settings { padding: 0; }
+.cost-result-tabs { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 14px; }
+.cost-result-tabs > button { display: flex; align-items: center; gap: 10px; font-size: 11px; padding: 7px 10px; border: 1px solid var(--hairline); border-radius: 4px; white-space: nowrap; color: var(--ink-3); cursor: pointer; }
+.cost-result-tabs > button.active { background: var(--surface); color: var(--brand-accent); border-color: #b3c4ee; }
+.cost-result-tabs span { padding: 3px; border-radius: 3px; }
+.cost-result-tabs span:hover { background: var(--hover); }
+.cost-empty, .cost-section-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 52px 20px; color: var(--ink-4); font-size: 12px; }
+.cost-empty { min-height: 360px; }
+.cost-empty h3 { font-size: 16px; font-weight: 500; color: var(--ink-2); }
+.cost-empty p { text-align: center; line-height: 1.8; max-width: 420px; }
+.cost-status, .cost-error, .import-confirm, .cost-info, .cost-attention { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 6px; margin-bottom: 18px; font-size: 12px; line-height: 1.8; }
+.cost-status, .cost-info { background: var(--brand-soft); color: var(--ink-2); }
+.cost-error { color: var(--danger); background: var(--danger-soft-bg); justify-content: space-between; }
+.import-confirm, .cost-attention { background: var(--warning-soft-bg); color: #a07a45; border: 1px solid color-mix(in srgb, #a07a45 20%, var(--surface)); }
+.import-confirm > div:first-child, .cost-attention > div { flex: 1; }
+.import-confirm p, .cost-attention p { font-size: 11px; margin-top: 3px; }
+.cost-overview-intro { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.cost-overview-caption { font-size: 12px; color: var(--ink-3); }
+.cost-overview-intro h2 { font-size: 21px; font-weight: 600; margin-top: 8px; }
+.cost-overview-intro div > p:last-child { font-size: 12px; color: var(--ink-3); margin-top: 8px; }
+.cost-stage { color: var(--brand-accent); background: var(--brand-soft); font-size: 11px; padding: 6px 9px; border-radius: 4px; white-space: nowrap; }
+.cost-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 16px; border-bottom: 1px solid var(--hairline); margin-top: 10px; padding: 24px 0; }
+.cost-metrics > div, .cost-metrics > button { text-align: left; min-width: 0; }
+.cost-metrics > button { cursor: pointer; }
+.cost-metrics > button:disabled { cursor: default; }
+.cost-metrics span { color: var(--ink-3); font-size: 11px; }
+.cost-metrics strong { display: block; font-size: clamp(20px, 3.2vw, 25px); font-weight: 600; margin: 10px 0; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.cost-metrics strong small { font-size: 10px; margin-left: 5px; color: var(--ink-4); font-weight: 400; }
+.cost-metrics p { font-size: 11px; color: var(--ink-3); }
+.cost-metrics .warn strong, .cost-metrics .warn p { color: #b17c2b; }
+.cost-workflow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
+.cost-workflow > button { display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; min-width: 0; }
+.cost-workflow > button > span { display: flex; align-items: center; justify-content: center; width: 25px; height: 25px; background: var(--sidebar); color: var(--ink-4); border-radius: 50%; font-size: 10px; flex-shrink: 0; }
+.cost-workflow > button > span.done { background: #e8f1ee; color: #448b84; }
+.cost-workflow strong { font-size: 12px; font-weight: 500; }
+.cost-workflow p { font-size: 11px; color: var(--ink-3); margin-top: 4px; line-height: 1.7; }
+.cost-workflow > button > svg { color: var(--ink-4); margin-left: auto; flex-shrink: 0; }
+.cost-overview-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 28px; margin-top: 28px; }
+.cost-overview-section { min-width: 0; }
+.discipline-row { display: flex; align-items: center; gap: 9px; font-size: 11px; padding: 14px 0; border-bottom: 1px solid var(--hairline); }
+.discipline-dot { width: 6px; height: 6px; border-radius: 2px; }
+.discipline-bar { flex: 1; height: 4px; background: var(--sidebar); border-radius: 3px; margin: 0 6px; min-width: 18px; }
+.discipline-bar i { display: block; height: 100%; border-radius: 3px; background: #92a9df; }
+.discipline-row strong { font-weight: 500; font-variant-numeric: tabular-nums; }
+.discipline-row small { color: var(--ink-4); min-width: 35px; text-align: right; }
+.cost-recent-row { display: flex; align-items: baseline; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+.cost-recent-row p { font-size: 11px; color: var(--ink-2); line-height: 1.7; }
+.cost-recent-row small { font-size: 11px; color: var(--ink-3); }
+.cost-settings section + section { border-top: 1px solid var(--hairline); margin-top: 25px; padding-top: 25px; }
+.cost-settings h3 { font-size: 14px; font-weight: 600; margin-bottom: 18px; }
+.cost-settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+.cost-settings label { display: flex; flex-direction: column; gap: 8px; }
+.cost-settings label > span { font-size: 12px; font-weight: 500; }
+.cost-settings input, .cost-settings select { border: 1px solid var(--hairline); border-radius: 5px; padding: 9px 10px; font-size: 12px; width: 100%; background: var(--surface); }
+.cost-settings input:focus, .cost-settings select:focus { border-color: #92a9df; outline: 1px solid #92a9df; }
+.cost-settings small { font-size: 10px; color: var(--ink-4); }
+.cost-settings footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-top: 1px solid var(--hairline); margin-top: 28px; padding-top: 20px; }
+.cost-settings footer p { font-size: 11px; color: var(--ink-3); }
+@media (max-width: 1100px) {
+  .cost-content { padding: 22px 20px; }
+  .cost-result-body > .cost-overview, .cost-result-body > .cost-settings { padding: 0; }
+  .cost-workflow { grid-template-columns: repeat(2, 1fr); gap: 22px; }
+  .cost-overview-grid { grid-template-columns: 1fr; }
+  .cost-home-stats { gap: 25px; }
+}
+@media (max-width: 760px) {
+  .cost-home { padding: 24px 18px; }
+  .cost-home h1 { font-size: 26px; }
+  .cost-home-stats { flex-wrap: wrap; gap: 22px; }
+  .cost-home-stats p { display: none; }
+  .cost-directory-head, .cost-directory-row { grid-template-columns: minmax(130px, 1fr) 60px 16px; gap: 10px; }
+  .cost-directory-head > :nth-child(3), .cost-directory-head > :nth-child(4), .cost-directory-row > :nth-child(3), .cost-directory-row > :nth-child(4) { display: none; }
+  .cost-workspace-body { display: block; }
+  .cost-project-header { padding: 12px; gap: 8px; }
+  .cost-project-header .eyebrow, .cost-header-tag { display: none; }
+  .cost-project-header h1 { font-size: 14px; }
+  .cost-project-nav { width: 100%; padding: 0 12px; gap: 16px; }
+  .cost-project-nav > button, .cost-project-nav > a { flex-shrink: 0; padding: 12px 0; gap: 6px; }
+  .cost-project-nav > a, .cost-nav-label, .cost-nav-foot { display: none; }
+  .cost-content { padding: 20px 12px; }
+  .cost-content-heading { align-items: flex-start; }
+  .cost-content-heading p { max-width: 190px; line-height: 1.8; }
+  .cost-content-heading .cost-btn { font-size: 11px; padding: 7px 8px; }
+  .cost-metrics { grid-template-columns: repeat(2, 1fr); gap: 25px 16px; }
+  .cost-overview-intro { flex-wrap: wrap; }
+  .cost-stage { display: inline-block; }
+  .cost-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 15px; }
+  .cost-settings footer { flex-wrap: wrap; }
+  .cost-attention, .import-confirm { flex-wrap: wrap; }
+  .cost-search input { width: 110px; }
 }

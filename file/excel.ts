@@ -1,6 +1,8 @@
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
+import { createHash } from "crypto";
 import { D, lineTotal, round2 } from "@cost-engine/money";
+import { reconcilePriceRole } from "@shared/mapping";
 
 // Excel reading: SheetJS (xls + xlsx). Write-back: exceljs (preserves styles).
 // Handles real-world 广联达-style exports: two-row headers, merged cells,
@@ -10,6 +12,8 @@ import { D, lineTotal, round2 } from "@cost-engine/money";
 export interface ParsedRow {
   rowIndex: number; // 1-based excel row
   cells: Record<string, string>;
+  /** 续行合并后的整行原文（按列序） */
+  raw: string[];
   isHeader: boolean;
   isItem: boolean;
 }
@@ -27,6 +31,11 @@ export interface ColumnMap {
   spec?: number;
   brand?: number;
   price?: number;
+  laborPrice?: number;
+  machinePrice?: number;
+  region?: number;
+  period?: number;
+  priceType?: number;
   [k: string]: number | undefined;
 }
 
@@ -39,25 +48,36 @@ export interface SheetParse {
 }
 
 const COLUMN_SYNONYMS: Record<keyof ColumnMap, RegExp> = {
-  seq: /^序号$|^序$|^编号$/,
-  code: /项目编码|清单编码|编码|项目编号/,
-  name: /项目名称.*特征|项目名称|分部分项名称|工程名称|^名称$|项目$/,
+  seq: /^序号$|^序$|^编号$|^no\.?$|^s\/n$|^item\s*no\.?$/i,
+  code: /项目编码|清单编码|编码|项目编号|^code$|item\s*code/i,
+  name: /项目名称.*特征|项目名称|分部分项名称|工程名称|^名称$|项目$|^item$|^description$|^desc\.?$|item\s*description/i,
   feature: /项目特征|特征描述|特征/,
-  unit: /计量单位|^单位$/,
-  quantity: /工程数量|工程量|数量|计算式/,
-  unitPrice: /综合单价|除税单价|含税单价/,
-  totalPrice: /综合合价|合价|金额|总价/,
-  materialName: /材料名称|设备名称|主材|物料名称|品名/,
-  spec: /规格型号|型号规格|规格|型号|规格参数/,
-  brand: /品牌|厂家|厂商|制造商/,
-  price: /询价|报价|材料单价|主材价|价格|单价/,
+  unit: /计量单位|^单位$|^unit$|^uom$/i,
+  quantity: /工程数量|工程量|数量|计算式|^qty\.?$|^quantity$/i,
+  unitPrice: /综合单价|除税单价|含税单价|^rate$|unit\s*price|unit\s*rate/i,
+  totalPrice: /综合合价|合价|金额|总价|^合计$|^amount$|^total$|total\s*(amount|price)/i,
+  materialName: /材料名称|设备名称|主材|物料名称|品名|工种|工序名称|人工名称|^material$|material\s*name/i,
+  spec: /规格型号|型号规格|规格|型号|规格参数|^spec\.?$|specification|^model$/i,
+  brand: /品牌|厂家|厂商|制造商|^brand$|manufacturer|^maker$/i,
+  region: /地区|区域|所在城市|价格地区|工程地点|供应地区|^region$|^city$/i,
+  period: /价格期|期次|价格日期|报价日期|信息价期|数据期|^日期$|^时间$|月份|^period$|price\s*date/i,
+  priceType: /价格类型|价格类别|价格性质|价格来源|^price\s*type$|^source$/i,
+  price: /询价|报价|材料单价|主材价|价格|单价|^price$|unit\s*cost/i,
+  laborPrice: /人工单价|人工费单价|人工.*单价|单价.*人工|^人工费$|^人工$|labou?r\s*(rate|price|cost)/i,
+  machinePrice: /机械单价|机械费单价|机械.*单价|^机械费$|^机械$|machine\s*(rate|price)/i,
 };
 
+// 角色尝试顺序即优先级：laborPrice/machinePrice 必须排在 price 前，
+// 否则「人工单价」会被 price 的裸「单价」同义词抢走。
 const BOQ_COLS: (keyof ColumnMap)[] = [
-  "seq", "code", "feature", "unit", "quantity", "unitPrice", "totalPrice", "name",
+  "seq", "code", "feature", "unit", "quantity", "unitPrice", "totalPrice",
+  "laborPrice", "machinePrice", "name",
 ];
+// priceType/period 必须排在 price 前：「价格类型」「报价日期」都含「价格/报价」，
+// 会被 price 同义词抢走；laborPrice/machinePrice 同理先于 price。
 const QUOTE_COLS: (keyof ColumnMap)[] = [
-  "seq", "spec", "brand", "unit", "price", "materialName",
+  "seq", "spec", "brand", "unit", "region", "period", "priceType",
+  "laborPrice", "machinePrice", "price", "materialName",
 ];
 
 const cellText = (v: unknown): string => {
@@ -81,8 +101,29 @@ export function extractEmbedded(text: string): Record<string, string> {
 
 const hasEmbedded = (s: string) => /[、.]\s*(名称|型号规格|材质|安装部位|连接形式|规格)[:：]/.test(s);
 
-function detectColumns(headerCells: string[], kinds: (keyof ColumnMap)[]): ColumnMap {
+export const colLetter = (i: number): string => {
+  let s = "";
+  for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26))
+    s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
+};
+
+/** 数值解析：去千分位/空格；不可解析返回 null。 */
+const numVal = (v: string | undefined): number | null => {
+  const t = (v ?? "").replace(/[,\s]/g, "");
+  return t !== "" && Number.isFinite(Number(t)) ? Number(t) : null;
+};
+
+interface ColDetect {
+  map: ColumnMap;
+  conf: Record<string, number>;
+  ev: Record<string, string>;
+}
+
+function detectColumns(headerCells: string[], kinds: (keyof ColumnMap)[]): ColDetect {
   const map: ColumnMap = {};
+  const conf: Record<string, number> = {};
+  const ev: Record<string, string> = {};
   headerCells.forEach((h, idx) => {
     const text = h.replace(/\s+/g, "");
     if (!text) return;
@@ -91,18 +132,21 @@ function detectColumns(headerCells: string[], kinds: (keyof ColumnMap)[]): Colum
       const re = COLUMN_SYNONYMS[col];
       if (re.test(text)) {
         if (col === "name" && /材料名称|设备名称|物料|品名/.test(text)) continue;
-        if (col === "unitPrice" && /材料|主材/.test(text)) continue;
-        if (col === "price" && /综合单价/.test(text)) continue;
+        if (col === "unitPrice" && /材料|主材|人工|机械/.test(text)) continue;
+        if (col === "price" && /综合单价|人工|机械/.test(text)) continue;
         map[col] = idx;
+        // 「人工费/人工」单独成列时只是费用列，未必是单价——降置信
+        conf[col] = col === "laborPrice" && /^人工费$|^人工$/.test(text) ? 0.7 : 0.9;
+        ev[col] = `表头「${h.trim()}」`;
         break;
       }
     }
   });
-  return map;
+  return { map, conf, ev };
 }
 
 function headerScore(cells: string[], kinds: (keyof ColumnMap)[]): number {
-  const map = detectColumns(cells, kinds);
+  const { map } = detectColumns(cells, kinds);
   return kinds.filter((k) => map[k] !== undefined).length;
 }
 
@@ -113,8 +157,32 @@ const mergeRows = (a: string[], b: string[]) => {
 };
 
 /** Headerless sheets: infer columns from data-content profiles. */
+function profileColumnsDetect(rows: string[][]): ColDetect {
+  const map = profileColumns(rows);
+  const conf: Record<string, number> = {};
+  const ev: Record<string, string> = {};
+  for (const k of Object.keys(map)) {
+    conf[k] = 0.6;
+    ev[k] = "无表头，按数据画像推断";
+  }
+  return { map, conf, ev };
+}
+
+/** 列宽与尾部裁剪：Excel 维度虚高（整列引用报到 1048576 行），
+ *  Math.max(...rows.map) 的展开写法在超大行数上会栈溢出，一律走循环。 */
+const colWidth = (rows: string[][]) => {
+  let w = 0;
+  for (const r of rows) if (r.length > w) w = r.length;
+  return w;
+};
+const trimTail = (rows: string[][]) => {
+  let n = rows.length;
+  while (n > 0 && !rows[n - 1].some((c) => c.trim())) n--;
+  return rows.slice(0, n);
+};
+
 function profileColumns(rows: string[][]): ColumnMap {
-  const width = Math.max(...rows.map((r) => r.length), 0);
+  const width = colWidth(rows);
   const stat = (col: number) => {
     let codes = 0, units = 0, nums = 0, embedded = 0, text = 0;
     for (const r of rows.slice(0, 60)) {
@@ -185,17 +253,345 @@ export function feeTypeOfSheet(sheetName: string): SheetFeeType | null {
   return null;
 }
 
+export interface SheetMapping {
+  type: SheetType;
+  /** -1 = 无表头 */
+  headerRow: number;
+  merged: boolean;
+  /** role → 0-based 列 */
+  columns: Record<string, number>;
+}
+
+export interface SheetInspection extends SheetMapping {
+  sheetName: string;
+  /** 双行已合并的表头文本；无表头时为列字母 A,B,C… */
+  headerCells: string[];
+  /** 数据区前 6 行（已过滤噪声行），宽度 = colCount */
+  sample: string[][];
+  colCount: number;
+  rowCount: number;
+  confidence: Record<string, number>;
+  evidence: Record<string, string>;
+  /** 有表头: sha1(headerCells 去空白小写 join \u0001)；无表头 null */
+  fingerprint: string | null;
+  /** excel.ts 内固定 false，由工具层套模板后置 true */
+  templateHit: boolean;
+  /** 已映射角色置信度最小值，无映射为 0（含 typeConfidence） */
+  minConfidence: number;
+  /** 类型判定置信度：<0.9 表示清单/询价存在真实歧义，应走确认门 */
+  typeConfidence: number;
+  /** 类型判定依据（中文，可直接展示） */
+  typeEvidence: string;
+}
+
 export interface ParsedSheet {
   type: SheetType;
   sheetName: string;
   headerRow: number;
   columns: ColumnMap;
   rows: ParsedRow[];
+  /** 双行已合并的表头文本；无表头时为列字母 */
+  headerLabels: string[];
   /** 措施/其他项目表的费用口径（分部分项表为 undefined） */
   feeType?: SheetFeeType;
 }
 
-export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
+/**
+ * 数值一致性锁定：量×价=合价 的算术关系是列角色最强的证据，
+ * 比表头同义词更可靠（裸「单价」到底是综合单价还是材料价由它裁决）。
+ * 表头/无表头都跑；只取数据区前 80 行。
+ */
+function lockByArithmetic(
+  dataRows: string[][],
+  headerCells: string[],
+  det: ColDetect,
+  colCount: number
+): { locked: boolean; stolenPrice?: number } {
+  const data = dataRows.slice(0, 80);
+  const numCols: number[] = [];
+  for (let c = 0; c < colCount; c++) {
+    let ne = 0, nn = 0;
+    for (const r of data) {
+      const v = (r[c] ?? "").trim();
+      if (!v) continue;
+      ne++;
+      if (numVal(v) !== null) nn++;
+    }
+    if (ne >= 3 && nn >= ne * 0.6) numCols.push(c);
+  }
+  let bestL: { a: number; b: number; c: number; hits: number; all: number } | null = null;
+  for (let i = 0; i < numCols.length; i++)
+    for (let j = i + 1; j < numCols.length; j++) {
+      const a = numCols[i], b = numCols[j];
+      for (const c of numCols) {
+        if (c === a || c === b) continue;
+        let hits = 0, all = 0;
+        for (const r of data) {
+          const va = numVal(r[a]), vb = numVal(r[b]), vc = numVal(r[c]);
+          if (va === null || vb === null || vc === null) continue;
+          all++;
+          if (
+            va !== 0 && vb !== 0 && vc !== 0 &&
+            Math.abs(va * vb - vc) <= Math.max(0.011, 0.005 * Math.abs(vc))
+          )
+            hits++;
+        }
+        if (
+          hits >= 3 && hits >= 0.5 * all &&
+          (!bestL || hits > bestL.hits || (hits === bestL.hits && c > bestL.c))
+        )
+          bestL = { a, b, c, hits, all };
+      }
+    }
+  if (!bestL) return { locked: false };
+
+  const hd = (i: number) => (headerCells[i] ?? "").replace(/\s+/g, "");
+  const aQty = COLUMN_SYNONYMS.quantity.test(hd(bestL.a));
+  const bQty = COLUMN_SYNONYMS.quantity.test(hd(bestL.b));
+  // a/b 中表头命中 quantity 同义词者 → quantity，另一个 → unitPrice；
+  // 都不命中则左 → quantity、右 → unitPrice
+  const qtyCol = aQty && !bQty ? bestL.a : bQty && !aQty ? bestL.b : Math.min(bestL.a, bestL.b);
+  const priceCol = qtyCol === bestL.a ? bestL.b : bestL.a;
+  const evBase = `数量×单价≈合价（${bestL.hits}/${bestL.all} 行）`;
+  const setRole = (role: string, col: number) => {
+    for (const k of Object.keys(det.map)) if (det.map[k] === col) delete det.map[k];
+    det.map[role] = col;
+    det.conf[role] = 0.97;
+    det.ev[role] = evBase + (hd(col) ? `（表头「${headerCells[col]?.trim()}」）` : "");
+  };
+  setRole("quantity", qtyCol);
+  setRole("totalPrice", bestL.c);
+  // 分项成本价（材料/人工/机械/询价/费率列）不是综合单价：只锁量与合价
+  if (/材料|主材|人工|机械|询价|报价|费率/.test(hd(priceCol))) return { locked: true };
+  const stolenPrice = COLUMN_SYNONYMS.price.test(hd(priceCol)) ? priceCol : undefined;
+  setRole("unitPrice", priceCol);
+  return { locked: true, stolenPrice };
+}
+
+/** 单表结构识别：表头定位 → 同义词映射 → 算术锁定 → 类型判定。 */
+function detectSheet(rows: string[][], sheetName: string): SheetInspection {
+  const colCount = colWidth(rows);
+
+  // best header: single row OR merged pair, first 15 rows
+  let best = { row: -1, score: 0, merged: false };
+  for (let i = 0; i < Math.min(15, rows.length); i++) {
+    for (const merged of [false, true]) {
+      if (merged && i + 1 >= rows.length) continue;
+      const cells = merged ? mergeRows(rows[i], rows[i + 1]) : rows[i];
+      const bq = headerScore(cells, BOQ_COLS);
+      const qt = headerScore(cells, QUOTE_COLS);
+      const joined = cells.join();
+      const boqish = bq >= 3 && /编码|名称|特征|工程量|单位|单价|合价|code|item|qty|quantity|rate|amount/i.test(joined);
+      const quoteish = qt >= 3 && /材料|规格|单价|品牌|名称|material|brand|price|spec/i.test(joined);
+      const score = Math.max(boqish ? bq : 0, quoteish ? qt : 0);
+      if (score > best.score) best = { row: i, score, merged };
+    }
+  }
+
+  let headerRow = -1;
+  let dataStart = 0;
+  let headerCells: string[];
+  let det: ColDetect;
+  if (best.score >= 3) {
+    headerRow = best.row;
+    headerCells = best.merged ? mergeRows(rows[headerRow], rows[headerRow + 1]) : rows[headerRow];
+    // unified detection: QUOTATION keys first, then BOQ keys fill the gaps
+    const q = detectColumns(headerCells, QUOTE_COLS);
+    const b = detectColumns(headerCells, BOQ_COLS);
+    det = {
+      map: { ...q.map, ...b.map },
+      conf: { ...q.conf, ...b.conf },
+      ev: { ...q.ev, ...b.ev },
+    };
+    dataStart = headerRow + (best.merged ? 2 : 1);
+  } else {
+    headerCells = Array.from({ length: colCount }, (_, i) => colLetter(i));
+    det = profileColumnsDetect(rows.filter((r) => r.some((c) => c.trim())));
+  }
+  const columns = det.map;
+  const hd = (i: number) => (headerCells[i] ?? "").replace(/\s+/g, "");
+
+  const { locked, stolenPrice } = lockByArithmetic(
+    rows.slice(dataStart), headerCells, det, colCount
+  );
+
+  // 类型判定：内容信号 > 表头信号 > 可用性兜底。
+  // 措施/其他项目表（表-11/表-12）只有 名称+编码+金额，没有量/价/单位——
+  // 但它们是真实造价组成（安全文明施工费、暂列金额等），必须导入，不能丢。
+  const sheetFeeType = feeTypeOfSheet(sheetName);
+  const headerText = headerCells.join(" ");
+  const boqSignal =
+    /项目编码|项目特征|综合单价|工程量|清单|item\s*code|^qty|quantity/i.test(headerText) ||
+    (headerRow < 0 && columns.code !== undefined);
+  // 强信号=材料名/品牌/询价字样；弱信号=只有「规格型号」——它同时出现在
+  // 简式清单（名称+规格型号+数量+单价+合价）与询价单里，属真实歧义
+  const strongQuote = /材料名称|设备名称|品牌|厂家|询价|报价|brand|manufacturer/i.test(headerText);
+  const weakQuote = /规格型号|型号规格/.test(headerText);
+  const quoteSignal = strongQuote || weakQuote;
+  const hasQty =
+    columns.quantity !== undefined &&
+    rows.slice(dataStart, dataStart + 80).filter((r) => numVal(r[columns.quantity!]) !== null).length >= 3;
+  const boqUsable =
+    (columns.name !== undefined || columns.code !== undefined) &&
+    (columns.quantity !== undefined || columns.unitPrice !== undefined || columns.unit !== undefined ||
+      (sheetFeeType !== null && columns.totalPrice !== undefined));
+  // 算术锁定把 price 列提升为 unitPrice 时，询价判定仍认它
+  const priceCol = columns.price ?? stolenPrice;
+  const quoteUsable =
+    (columns.materialName !== undefined || columns.spec !== undefined || columns.name !== undefined) &&
+    priceCol !== undefined;
+
+  let type: SheetType;
+  let typeConfidence: number;
+  let typeEvidence: string;
+  if (sheetFeeType !== null && boqUsable) {
+    type = "BOQ";
+    typeConfidence = 0.95;
+    typeEvidence = "表名含措施/其他项目";
+  } else if (boqSignal && boqUsable) {
+    type = "BOQ";
+    typeConfidence = 0.95;
+    typeEvidence = "表头含项目编码/工程量/综合单价等清单信号";
+  } else if (quoteSignal && !boqSignal && quoteUsable) {
+    type = "QUOTATION"; // 询价表带数量/合价也保持询价
+    if (strongQuote) {
+      typeConfidence = 0.9;
+      typeEvidence = "表头含材料名称/品牌/询价";
+    } else {
+      typeConfidence = 0.6;
+      typeEvidence = "仅有型号规格+数量×单价=合价，可能是询价单也可能是简式清单";
+    }
+  } else if (locked || (hasQty && (columns.unitPrice !== undefined || priceCol !== undefined || columns.totalPrice !== undefined))) {
+    type = "BOQ";
+    typeConfidence = locked ? 0.85 : 0.75;
+    typeEvidence = "有工程量与单价，按清单处理";
+    // 有工程量的清单里，裸「单价」按综合单价处理（分项成本价列除外）
+    if (
+      columns.unitPrice === undefined && columns.price !== undefined &&
+      !/材料|主材|人工|机械|询价|报价/.test(hd(columns.price))
+    ) {
+      columns.unitPrice = columns.price;
+      delete columns.price;
+      det.conf.unitPrice = 0.8;
+      det.ev.unitPrice = "有工程量列，裸「单价」按综合单价处理";
+    }
+  } else if (quoteUsable) {
+    type = "QUOTATION";
+    typeConfidence = 0.7;
+    typeEvidence = "有名称/规格与单价列，按询价表处理";
+  } else {
+    type = boqUsable ? "BOQ" : "GENERIC";
+    typeConfidence = boqUsable ? 0.6 : 0.5;
+    typeEvidence = boqUsable ? "可映射清单列" : "未识别到清单/询价结构";
+  }
+  if (type === "QUOTATION" && columns.price === undefined && priceCol !== undefined) {
+    // 询价表的单价列就是 price：被算术锁定提升为 unitPrice 的还原回去
+    if (columns.unitPrice === priceCol) delete columns.unitPrice;
+    columns.price = priceCol;
+    det.conf.price = Math.max(det.conf.price ?? 0, 0.9);
+    det.ev.price = det.ev.price ?? `表头「${headerCells[priceCol]?.trim()}」`;
+  }
+
+  const fingerprint =
+    headerRow >= 0
+      ? createHash("sha1")
+          .update(headerCells.map((c) => c.replace(/\s+/g, "").toLowerCase()).join(""))
+          .digest("hex")
+      : null;
+  const confs = [...Object.keys(columns).map((k) => det.conf[k] ?? 0.9), typeConfidence];
+  return {
+    sheetName,
+    type,
+    headerRow,
+    merged: best.score >= 3 ? best.merged : false,
+    columns: columns as Record<string, number>,
+    headerCells,
+    sample: rows.slice(dataStart, dataStart + 6).map((r) =>
+      Array.from({ length: colCount }, (_, i) => r[i] ?? "")
+    ),
+    colCount,
+    rowCount: Math.max(0, rows.length - dataStart),
+    confidence: det.conf,
+    evidence: det.ev,
+    fingerprint,
+    templateHit: false,
+    minConfidence: confs.length ? Math.min(...confs) : 0,
+    typeConfidence,
+    typeEvidence,
+  };
+}
+
+/**
+ * 文件名辅助信号：仅在类型判定拿不准（typeConfidence<0.9）时纠偏。
+ * 「规格型号+数量+单价+合价」结构在简式清单与询价单间真实歧义，
+ * 文件名是唯一可得的区分证据；两类词都命中/都不命中则不干预。
+ */
+export function applyTypeHint(
+  insp: SheetInspection,
+  filename: string
+): SheetInspection {
+  if (insp.typeConfidence >= 0.9) return insp;
+  if (insp.type !== "BOQ" && insp.type !== "QUOTATION") return insp;
+  const isQuoteName = /询价|报价|价格表|材料价|信息价/.test(filename);
+  const isBoqName = /清单|招标|投标|中标|结算|预算|控制价|送审|财评/.test(filename);
+  if (isQuoteName === isBoqName) return insp;
+
+  const type: SheetType = isQuoteName ? "QUOTATION" : "BOQ";
+  let typeEvidence = insp.typeEvidence;
+  const confidence = { ...insp.confidence };
+  const evidence = { ...insp.evidence };
+  const { columns, moved } = reconcilePriceRole(type, insp.columns, insp.headerCells);
+  if (moved === "unitPrice→price") {
+    // 询价表的单价列就是 price，置信沿用
+    confidence.price = confidence.unitPrice ?? 0.9;
+    delete confidence.unitPrice;
+    evidence.price = evidence.unitPrice ?? "";
+    delete evidence.unitPrice;
+  } else if (moved === "price→unitPrice") {
+    confidence.unitPrice = 0.85;
+    delete confidence.price;
+    evidence.unitPrice = "文件名含清单词，裸「单价」按综合单价处理";
+  }
+  typeEvidence += isQuoteName ? "；文件名含「询价/报价」" : "；文件名含「清单/招标」";
+  const confs = [...Object.keys(columns).map((k) => confidence[k] ?? 0.9), 0.9];
+  return {
+    ...insp,
+    type,
+    columns,
+    confidence,
+    evidence,
+    typeConfidence: 0.9,
+    typeEvidence,
+    minConfidence: confs.length ? Math.min(...confs) : 0,
+  };
+}
+
+export function inspectWorkbook(buffer: Buffer): SheetInspection[] {
+  const wb = XLSX.read(buffer, { type: "buffer", cellDates: false });
+  const out: SheetInspection[] = [];
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      raw: true,
+      defval: "",
+    });
+    if (!raw.length) continue;
+    const rows = trimTail(
+      raw
+        .map((r) => r.map(cellText))
+        .filter((r) => !NOISE_ROW.test(r.join(" ")))
+    );
+    if (!rows.length) continue;
+    out.push(detectSheet(rows, sheetName));
+  }
+  return out;
+}
+
+export function parseWorkbook(
+  buffer: Buffer,
+  opts?: { mapping?: Record<string, SheetMapping> }
+): ParsedSheet[] {
   const wb = XLSX.read(buffer, { type: "buffer", cellDates: false });
   const sheets: ParsedSheet[] = [];
 
@@ -207,65 +603,45 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
       defval: "",
     });
     if (!raw.length) continue;
-    const rows = raw
-      .map((r) => r.map(cellText))
-      .filter((r) => !NOISE_ROW.test(r.join(" ")));
+    const rows = trimTail(
+      raw
+        .map((r) => r.map(cellText))
+        .filter((r) => !NOISE_ROW.test(r.join(" ")))
+    );
 
-    // best header: single row OR merged pair, first 15 rows
-    let best: { row: number; score: number; merged: boolean; boqish: boolean } = {
-      row: -1, score: 0, merged: false, boqish: true,
-    };
-    for (let i = 0; i < Math.min(15, rows.length); i++) {
-      for (const merged of [false, true]) {
-        if (merged && i + 1 >= rows.length) continue;
-        const cells = merged ? mergeRows(rows[i], rows[i + 1]) : rows[i];
-        const bq = headerScore(cells, BOQ_COLS);
-        const qt = headerScore(cells, QUOTE_COLS);
-        const joined = cells.join();
-        const boqish = bq >= 3 && /编码|名称|特征|工程量|单位|单价|合价/.test(joined);
-        const quoteish = qt >= 3 && /材料|规格|单价|品牌|名称/.test(joined);
-        const score = Math.max(boqish ? bq : 0, quoteish ? qt : 0);
-        if (score > best.score) {
-          best = { row: i, score, merged, boqish: boqish && bq >= qt };
-        }
-      }
-    }
-
-    let headerRow = best.row;
-    let columns: ColumnMap = {};
-    let type: SheetType = "GENERIC";
-    let dataStart = 0;
-    if (best.score >= 3 && headerRow >= 0) {
-      const cells = best.merged ? mergeRows(rows[headerRow], rows[headerRow + 1]) : rows[headerRow];
-      // unified detection: BOQ keys first, then QUOTATION keys fill the gaps
-      columns = {
-        ...detectColumns(cells, QUOTE_COLS),
-        ...detectColumns(cells, BOQ_COLS),
+    const override = opts?.mapping?.[sheetName];
+    let insp: SheetInspection;
+    if (override) {
+      const colCount = colWidth(rows);
+      const headerCells =
+        override.headerRow >= 0
+          ? override.merged
+            ? mergeRows(rows[override.headerRow] ?? [], rows[override.headerRow + 1] ?? [])
+            : rows[override.headerRow] ?? []
+          : Array.from({ length: colCount }, (_, i) => colLetter(i));
+      insp = {
+        ...override,
+        sheetName,
+        headerCells,
+        sample: [],
+        colCount,
+        rowCount: 0,
+        confidence: {},
+        evidence: {},
+        fingerprint: null,
+        templateHit: false,
+        minConfidence: 0,
+        typeConfidence: 1,
+        typeEvidence: "用户/模板指定映射",
       };
-      dataStart = headerRow + (best.merged ? 2 : 1);
-    }
-    if (best.score < 3) {
-      const dataRows = rows.filter((r) => r.some((c) => c.trim()));
-      columns = profileColumns(dataRows);
-      headerRow = -1;
-      dataStart = 0;
-    }
-    // usability decides type, not just header hits.
-    // A real BOQ has 综合单价 or 工程量; a price list has 单价 but no 综合单价.
-    // 措施/其他项目表（表-11/表-12）只有 名称+编码+金额，没有量/价/单位——
-    // 但它们是真实造价组成（安全文明施工费、暂列金额等），必须导入，不能丢。
-    const sheetFeeType = feeTypeOfSheet(sheetName);
-    const boqUsable = (columns.name !== undefined || columns.code !== undefined) &&
-      (columns.quantity !== undefined || columns.unitPrice !== undefined || columns.unit !== undefined ||
-        (sheetFeeType !== null && columns.totalPrice !== undefined));
-    const quoteUsable =
-      (columns.materialName !== undefined || columns.spec !== undefined || columns.name !== undefined) &&
-      columns.price !== undefined;
-    if (columns.unitPrice !== undefined || !quoteUsable) {
-      type = boqUsable ? "BOQ" : "GENERIC";
     } else {
-      type = "QUOTATION";
+      insp = detectSheet(rows, sheetName);
     }
+    const { type, headerRow } = insp;
+    const columns = insp.columns as ColumnMap;
+    const headerCells = insp.headerCells;
+    const dataStart = headerRow < 0 ? 0 : headerRow + (insp.merged ? 2 : 1);
+    const sheetFeeType = feeTypeOfSheet(sheetName);
 
     // merge continuation rows (multi-line feature/spec text split vertically)
     // 但名称列有文字的独立行是「分部标题/小计」等结构行，绝不能并进上一条子目——
@@ -332,6 +708,7 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
       if (!anyText) continue;
       parsedRows.push({
         rowIndex: origIndex + 1,
+        raw: [...cells],
         cells: {
           ...Object.fromEntries(
             Object.keys(COLUMN_SYNONYMS).map((k) => [
@@ -348,7 +725,7 @@ export function parseWorkbook(buffer: Buffer): ParsedSheet[] {
         isItem,
       });
     }
-    sheets.push({ type, sheetName, headerRow, columns, rows: parsedRows, feeType: sheetFeeType ?? undefined });
+    sheets.push({ type, sheetName, headerRow, columns, rows: parsedRows, headerLabels: headerCells, feeType: sheetFeeType ?? undefined });
   }
   return sheets;
 }

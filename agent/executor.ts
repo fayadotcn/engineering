@@ -80,8 +80,8 @@ export async function executeTool(
     if (!def) return finish({ observation: { error: `未知工具 ${toolName}` } }, "ERROR");
     if (!def.implemented || !def.handler)
       return finish(
-        { observation: { planned: true, note: `${toolName} 已注册，Phase 1 未实现` } },
-        "OK"
+        { observation: { error: `${toolName} 尚未实现` }, message: `${toolName} 尚未实现` },
+        "ERROR"
       );
     const parsed = def.schema.safeParse(args ?? {});
     if (!parsed.success)
@@ -90,6 +90,9 @@ export async function executeTool(
         "ERROR"
       );
     const result = await def.handler(ctx, parsed.data);
+    const observation = result.observation as { error?: string; ok?: boolean; reason?: string } | null;
+    if (observation?.error || observation?.ok === false)
+      return finish({ ...result, message: result.message ?? observation.error ?? observation.reason ?? "工具执行失败" }, "ERROR");
     return finish(result, "OK");
   } catch (e) {
     return finish(
