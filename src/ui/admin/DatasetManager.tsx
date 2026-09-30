@@ -75,6 +75,8 @@ function DatasetCard({
   };
 
   const toggleActive = async () => {
+    setBusy(true);
+    try {
     const res = await fetch(`/api/admin/datasets/${d.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -83,20 +85,24 @@ function DatasetCard({
     if (res.ok) {
       toast.success(d.active ? `已停用「${d.name}」— 匹配/测算不再引用` : `已启用「${d.name}」`);
       onRefresh();
-    } else toast.error("操作失败");
+    } else throw new Error("操作失败");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "操作失败"); }
+    finally { setBusy(false); }
   };
 
   const remove = async () => {
-    setConfirmDel(false);
     setBusy(true);
+    try {
     const res = await fetch(`/api/admin/datasets/${d.id}`, { method: "DELETE" });
-    setBusy(false);
     if (res.ok) {
+      setConfirmDel(false);
       toast.success(`已删除数据集「${d.name}」`);
       onRefresh();
     } else {
-      toast.error("删除失败，请重试");
+      throw new Error("删除失败，请重试");
     }
+    } catch (error) { toast.error(error instanceof Error ? error.message : "删除失败，请重试"); }
+    finally { setBusy(false); }
   };
 
   const chevron = (p: CardPanel) => (
@@ -108,7 +114,7 @@ function DatasetCard({
 
   return (
     <div className={cn("overflow-hidden rounded-md border border-neutral-200 bg-[var(--surface)]", !d.active && "opacity-55")}>
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="cost-dataset-row flex flex-wrap items-center gap-3 px-4 py-3">
         <FileSpreadsheet size={15} className="shrink-0 text-neutral-400" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium">{d.name}</div>
@@ -165,6 +171,10 @@ function DatasetCard({
         )}
         <button
           onClick={toggleActive}
+          disabled={busy}
+          role="switch"
+          aria-checked={d.active}
+          aria-label={`${d.name}参与匹配与测算`}
           className="flex h-5 w-9 items-center rounded-full px-0.5 transition-colors"
           style={{ background: d.active ? "var(--brand-accent)" : "var(--hairline-strong)" }}
           title={d.active ? "已启用 — 点击停用" : "已停用 — 点击启用"}
@@ -249,6 +259,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
   const [defPeriod, setDefPeriod] = useState("");
   const [defBrand, setDefBrand] = useState("");
   const [autoMappingId, setAutoMappingId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
@@ -257,7 +268,9 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
   };
 
   const upload = async (f: File) => {
+    if (busy) return;
     setBusy(true);
+    try {
     const fd = new FormData();
     fd.append("file", f);
     fd.append("filename", f.name);
@@ -269,10 +282,8 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
       if (defBrand.trim()) fd.append("brand", defBrand.trim());
     }
     const res = await fetch("/api/admin/datasets", { method: "POST", body: fd });
-    setBusy(false);
     if (!res.ok) {
-      toast.error(`「${f.name}」上传失败`);
-      return;
+      throw new Error((await res.json()).error ?? `「${f.name}」上传失败`);
     }
     const ds = (await res.json()) as {
       id: string;
@@ -287,33 +298,22 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
       setAutoMappingId(ds.id);
     } else toast.success(`已导入 ${ds.rowCount} 行`);
     await refresh();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "上传失败，请重试"); }
+    finally { setBusy(false); }
   };
 
-  const grouped = KINDS.map((k) => ({
+  const grouped = KINDS.filter(k => k.k === kind).map((k) => ({
     ...k,
-    items: datasets.filter((d) => d.kind === k.k),
+    items: datasets.filter((d) => d.kind === k.k && `${d.name} ${d.filename}`.toLowerCase().includes(query.trim().toLowerCase())),
   }));
 
   return (
-    <div className="mt-8 space-y-8">
+    <div className="cost-datasets mt-8 space-y-8">
+      <nav className="cost-library-tabs" aria-label="共享数据类型">{KINDS.map(k => <button key={k.k} aria-current={kind === k.k ? "page" : undefined} className={kind === k.k ? "active" : ""} disabled={busy} onClick={() => { setKind(k.k); setQuery(""); }}><strong>{k.label}</strong><span>{datasets.filter(d => d.kind === k.k).length}</span></button>)}</nav>
       {/* 上传区 */}
       <div className="rounded-md border border-neutral-200 bg-[var(--surface)] p-4">
         <div className="flex flex-wrap items-center gap-2">
-          {KINDS.map((k) => (
-            <button
-              key={k.k}
-              onClick={() => setKind(k.k)}
-              className={cn(
-                "rounded-md border px-3.5 py-1.5 text-[12.5px] transition-colors",
-                kind === k.k
-                  ? "border-transparent text-white"
-                  : "border-neutral-200 text-neutral-600 hover:bg-[var(--hover)]"
-              )}
-              style={kind === k.k ? { background: "var(--brand-accent)" } : undefined}
-            >
-              {k.label}
-            </button>
-          ))}
+          <div><strong className="text-sm">导入{KINDS.find(k => k.k === kind)?.label}</strong><p className="text-xs text-neutral-500">各工程共用，启用后参与匹配与测算</p></div>
           <input
             ref={fileRef}
             type="file"
@@ -376,6 +376,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
       </div>
 
       {/* 分组列表 */}
+      <label className="cost-search"><input aria-label="搜索数据集" placeholder="搜索数据集名称或文件名" value={query} onChange={e => setQuery(e.target.value)} /></label>
       {grouped.map((g) => (
         <section key={g.k}>
           <div className="mb-2 flex items-baseline gap-2">
@@ -393,7 +394,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
             ))}
             {!g.items.length && (
               <div className="rounded-xl border border-dashed border-neutral-300 px-4 py-6 text-center text-[12px] text-neutral-400">
-                暂无数据
+                {query.trim() ? "没有匹配的数据集" : "还没有数据集，上传 Excel 开始整理"}
               </div>
             )}
           </div>

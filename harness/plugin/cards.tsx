@@ -49,11 +49,12 @@ export function ActivityCards({ activity, importing, importingFile, progress, ha
     const approve = async () => { setBusy(true); try { await handlers.onConfirm(true); } finally { setBusy(false); } };
     return <section className="installation-card warn" role="status">
       <header><WarnIcon />导入需要你确认</header>
-      <p className="installation-card-lead">{imported?.filename ? `「${imported.filename}」` : ""}有 {low.length || 1} 张表的列映射不够确定</p>
-      <p className="installation-card-note clamp">{confirm.description}</p>
+      <p className="installation-card-lead">{low.length ? `${low.length} 张表需要核对列角色或资料类型` : "请核对资料类型与列映射，再确认导入"}</p>
+      <details><summary>查看导入说明</summary><p className="installation-card-note">{confirm.description}</p></details>
       <div className="installation-card-actions">
-        <button className="primary" disabled={busy} onClick={() => void approve()}>直接采用</button>
-        <button disabled={busy} onClick={handlers.onReviewMapping}>检查映射</button>
+        <button className="primary" disabled={busy} onClick={handlers.onReviewMapping}>核对映射</button>
+        <button disabled={busy} onClick={() => void approve()}>确认导入</button>
+        <button disabled={busy} onClick={() => { setBusy(true); void handlers.onConfirm(false).finally(() => setBusy(false)); }}>取消</button>
       </div>
     </section>;
   }
@@ -66,13 +67,13 @@ export function ActivityCards({ activity, importing, importingFile, progress, ha
     return <section className="installation-card">
       <header><OkIcon />本次结果</header>
       {gist && <p className="installation-card-lead">{gist}</p>}
-      <div className="installation-card-views">
+      <details><summary>查看 {result.views.length} 份结果</summary><div className="installation-card-views">
         {result.views.map((view) => <button key={view.id} onClick={() => handlers.onFocusView(view.id)}>
           <span>{view.title}</span>
           {view.rows !== undefined && <em>{view.rows} 项</em>}
           <NextIcon />
         </button>)}
-      </div>
+      </div></details>
     </section>;
   }
 
@@ -86,7 +87,7 @@ export function ActivityCards({ activity, importing, importingFile, progress, ha
       {unpriced > 0 && <p className="installation-card-note">有 {unpriced} 项还没有综合单价</p>}
       <div className="installation-card-actions">
         <button onClick={() => handlers.onFocusView("view:boq")}>查看清单</button>
-        {unpriced > 0 && <button className="primary" onClick={() => handlers.onSend("补齐缺价项")}>补齐缺价</button>}
+        {unpriced > 0 && <button onClick={() => handlers.onSend("预览材料库对缺主材价项的匹配结果，不写回")}>预览主材匹配</button>}
       </div>
     </section>;
   }

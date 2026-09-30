@@ -6,7 +6,7 @@ import { AnomalyTable, BoqTable, Breakdown, DiffView, DocumentView, ExportResult
 import { ColumnMappingView } from "./views/ColumnMappingView";
 import { PricingSettings } from "./PricingSettings";
 import { CostOverview } from "./CostOverview";
-import { toast } from "./primitives";
+import { ConfirmDialog, toast } from "./primitives";
 import type { WorkspaceView } from "@shared/types";
 
 /**
@@ -74,8 +74,8 @@ function Result({ view }: { view: WorkspaceView }) {
 
 function ImportConfirmation({ block }: { block: Extract<ConvBlock, { type: "confirm" }> }) {
   const s = useStore();
-  const mapping = s.views.find(v => v.kind === "columnMapping" && block.description.includes(v.filename));
-  return <div className="import-confirm" role="status"><div><strong>待核对 · 导入映射</strong><p>{block.description}</p></div><div className="cost-actions"><button className="cost-btn" disabled={s.running} onClick={() => void s.confirmImport(block.runId, false)}>取消导入</button>{mapping && <button className="cost-btn" onClick={() => s.setActiveView(mapping.id)}>核对映射</button>}<button className="cost-btn primary" disabled={s.running} onClick={() => void s.confirmImport(block.runId, true)}>确认导入</button></div></div>;
+  const mapping = s.views.find(v => v.kind === "columnMapping" && (v.fileId === block.fileId || block.description.includes(v.filename)));
+  return <div className="import-confirm" role="status"><div><strong>待核对 · 导入映射</strong><p>{s.mappingDirty ? "映射有未保存的修改，请先保存后再确认。" : block.description}</p></div><div className="cost-actions"><button className="cost-btn" disabled={s.running} onClick={() => void s.confirmImport(block.runId, false)}>取消导入</button>{mapping && <button className="cost-btn" onClick={() => s.setActiveView(mapping.id)}>核对映射</button>}<button className="cost-btn primary" disabled={s.running || s.mappingDirty} onClick={() => void s.confirmImport(block.runId, true)}>确认导入</button></div></div>;
 }
 
 export function Workbench({ projectId }: { projectId: string }) {
@@ -110,11 +110,14 @@ export function Workbench({ projectId }: { projectId: string }) {
       }
       if (event.data.type === "installation:focus") {
         const store = useStore.getState();
-        if (typeof event.data.viewId === "string") store.setActiveView(event.data.viewId);
+        if (typeof event.data.viewId === "string") {
+          store.setActiveView(event.data.viewId);
+          if (!store.views.some(v => v.id === event.data.viewId)) void store.init(projectId, true);
+        }
         if (typeof event.data.boqQuery === "string" && event.data.boqQuery) store.gotoBoqItem(event.data.boqQuery);
         return;
       }
-      if (event.data.type === "installation:refresh") void useStore.getState().init(projectId, true);
+      if (event.data.type === "installation:refresh" && !useStore.getState().running) void useStore.getState().init(projectId, true);
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
@@ -127,7 +130,20 @@ export function Workbench({ projectId }: { projectId: string }) {
     if (parentOrigin && window.parent !== window) window.parent.postMessage({ type: "installation:ready", projectId }, parentOrigin);
   }, [s.ready, s.loadingError, s.projectId, projectId]);
 
-  /** 面板只承载当前工程的数据，不再有自己的工程 header 与返回入口。 */
+  const activityStamp = `${s.lastViewEvent}:${s.receipts[0]?.id}:${s.files.map(f => `${f.id}:${f.status}`).join(",")}:${s.blocks.filter(b => b.type === "confirm").map(b => b.type === "confirm" ? `${b.confirmId}:${b.decided}` : "").join(",")}`;
+  useEffect(() => {
+    if (!s.ready || s.projectId !== projectId) return;
+    const origin = sessionStorage.getItem("installation:harnessOrigin");
+    if (origin && window.parent !== window) window.parent.postMessage({ type: "installation:activityChanged", projectId }, origin);
+  }, [activityStamp, s.ready, s.projectId, projectId]);
+
+  // 页内切换保留编辑决策，刷新或关闭页面时使用浏览器原生未保存提示。
+  useEffect(() => {
+    if (!s.mappingDirty && !s.settingsDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [s.mappingDirty, s.settingsDirty]);
   const active = s.views.find(v => v.id === s.activeViewId);
   const object: ObjectId = active ? OWNER[active.kind] : (NAV.find(n => `empty:${n.id}` === s.activeViewId)?.id ?? "overview");
   const owned = s.views.filter(v => OWNER[v.kind] === object);
@@ -165,6 +181,7 @@ export function Workbench({ projectId }: { projectId: string }) {
   };
 
   return <main className={`cost-workbench ${dragging ? "drop-armed" : ""}`} onDragOver={e => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); void upload([...e.dataTransfer.files]); }}>
+    <ConfirmDialog open={!!s.pendingViewId} title="放弃未保存的修改？" description="当前页面有未保存的调整。返回后保存，或放弃修改并切换页面。" confirmText="放弃并切换" onCancel={() => useStore.setState({ pendingViewId: null })} onConfirm={() => { const id = useStore.getState().pendingViewId; useStore.setState({ mappingDirty: false, settingsDirty: false, pendingViewId: null }); if (id) useStore.getState().setActiveView(id); }} />
     <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv,.pdf" multiple className="hidden" onChange={e => { void upload([...(e.target.files ?? [])]); e.target.value = ""; }} />
     <div className="cost-workspace-top"><span title={s.projectName}>{s.projectName || "造价工作区"}</span><button className="cost-btn" disabled={busy} onClick={() => fileRef.current?.click()}><Upload size={13} />导入资料</button></div>
     <nav className="cost-project-nav" aria-label="工程工作区">{NAV.map(n => { const Icon = n.icon; return <button key={n.id} onClick={() => open(n.id)} aria-current={object === n.id ? "page" : undefined} className={object === n.id ? "active" : ""}><Icon size={14} /><span>{n.label}</span>{n.id === "files" && pending.length > 0 && <small>{pending.length} 待确认</small>}</button>; })}</nav>

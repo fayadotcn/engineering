@@ -82,7 +82,7 @@ export async function streamRun(
 ): Promise<void> {
   try {
     const res = await fetch(`${businessUrl}/api/runs/${encodeURIComponent(runId)}/stream`);
-    if (!res.ok || !res.body) return;
+    if (!res.ok || !res.body) throw new Error("导入进度读取失败，请打开工作区检查资料状态");
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -95,19 +95,18 @@ export async function streamRun(
       for (const part of parts) {
         const line = part.trim();
         if (!line.startsWith("data:")) continue;
-        try {
-          onEvent(JSON.parse(line.slice(5)) as RunEvent);
-        } catch {
-          // 半条事件不值得打断导入
-        }
-        if (shouldStop?.()) {
+        let event: RunEvent;
+        try { event = JSON.parse(line.slice(5)) as RunEvent; } catch { continue; }
+        onEvent(event);
+        if (shouldStop?.() || event.type === "run_finished") {
           await reader.cancel().catch(() => {});
           return;
         }
       }
     }
-  } catch {
-    // 断流由活动刷新兜底
+    throw new Error("导入进度连接中断，请打开工作区检查资料状态");
+  } catch (error) {
+    throw error instanceof Error ? error : new Error("导入进度连接中断");
   }
 }
 

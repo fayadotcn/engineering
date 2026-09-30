@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { AlertTriangle, CircleCheck, CircleX, Info, X } from "lucide-react";
 
@@ -50,12 +50,14 @@ export function Toaster() {
       {toasts.map((t) => (
         <div
           key={t.id}
+          role={t.kind === "error" ? "alert" : "status"}
           className="fadein pointer-events-auto flex items-start gap-2.5 rounded-xl border border-neutral-200 bg-[var(--surface)] px-3.5 py-3 shadow-[var(--shadow-lg)]"
         >
           <span className="mt-px shrink-0">{TOAST_STYLE[t.kind].icon}</span>
           <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-neutral-700">{t.text}</span>
           <button
             onClick={() => dismiss(t.id)}
+            aria-label="关闭提示"
             className="shrink-0 rounded p-0.5 text-neutral-300 hover:text-neutral-600"
           >
             <X size={12} />
@@ -74,29 +76,23 @@ export function Modal({
   onClose,
   children,
   width = 380,
+  label,
 }: {
   open: boolean;
   onClose: () => void;
   children: React.ReactNode;
   width?: number;
+  label?: string;
 }) {
+  const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    const dialog = ref.current;
+    if (open && dialog && !dialog.open) dialog.showModal();
+    return () => { if (dialog?.open) dialog.close(); };
+  }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-neutral-900/20 backdrop-blur-[1.5px]" onClick={onClose} />
-      <div
-        className="fadein relative rounded-2xl border border-neutral-200 bg-[var(--surface)] p-5 shadow-[var(--shadow-lg)]"
-        style={{ width }}
-      >
-        {children}
-      </div>
-    </div>
+    <dialog ref={ref} aria-label={label} className="cost-modal" style={{ width }} onCancel={e => { e.preventDefault(); onClose(); }} onClick={e => { if (e.target === e.currentTarget) { const rect = e.currentTarget.getBoundingClientRect(); if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) onClose(); } }}>{children}</dialog>
   );
 }
 
@@ -120,7 +116,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <Modal open={open} onClose={busy ? () => {} : onCancel}>
+    <Modal open={open} label={title} onClose={busy ? () => {} : onCancel}>
       <div className="flex items-start gap-3">
         <span
           className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
@@ -152,7 +148,7 @@ export function ConfirmDialog({
           disabled={busy}
           className={cn(
             "h-8 rounded-lg px-3.5 text-[12.5px] font-medium text-white transition-colors disabled:opacity-50",
-            danger ? "bg-[var(--danger)] hover:opacity-90" : "bg-neutral-900 hover:bg-neutral-700"
+            danger ? "bg-[var(--danger)] hover:opacity-90" : "bg-[var(--brand-accent)] hover:opacity-90"
           )}
         >
           {busy ? "处理中…" : confirmText}

@@ -29,26 +29,28 @@ export function NewProject() {
   };
 
   return (
-    <div className="cost-create-project">
-      <div className="flex w-full min-w-0 items-center gap-2 rounded-md border border-neutral-200 bg-white">
-        <Plus size={17} className="ml-3 shrink-0 text-neutral-400" />
+    <form className="cost-new-project-form" onSubmit={e => { e.preventDefault(); void create(); }}>
+        <label htmlFor="project-name">工程名称</label>
         <input
+          id="project-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && create()}
           placeholder="工程名称，如：三亚航院一期安装工程"
           aria-label="工程名称"
           maxLength={120}
-          className="composer-input h-10 min-w-0 flex-1 px-2 text-[13.5px]"
+          required
+          disabled={busy}
+          autoFocus
         />
+        <footer><a className="cost-btn" href="/">返回工程列表</a>
         <button
-          onClick={create}
+          type="submit"
           disabled={!name.trim() || busy}
           className="cost-btn primary !h-10 !px-5"
         >
-          {busy ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}创建工程
+          {busy ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}{busy ? "正在创建…" : "创建工程"}
         </button>
-      </div>
-    </div>
+        </footer>
+    </form>
   );
 }

@@ -16,7 +16,7 @@ export type ConvBlock =
   | { type: "thought"; text: string; runId: string; streamId?: string; live?: boolean }
   | { type: "tool"; tool: string; status: string; ms?: number; runId: string; args?: string; resultMsg?: string }
   | { type: "receipt"; receiptId: string; summary: string; actionType: string; runId: string }
-  | { type: "confirm"; confirmId: string; runId: string; tool: string; description: string; decided?: "approved" | "rejected" }
+  | { type: "confirm"; confirmId: string; runId: string; tool: string; description: string; fileId?: string; decided?: "approved" | "rejected" }
   | { type: "upload"; filename: string; uploading?: boolean }
   | { type: "error"; text: string; runId?: string };
 
@@ -48,6 +48,9 @@ interface State {
   lastViewEvent: string | null;
   running: boolean;
   agentRunning: boolean;
+  mappingDirty: boolean;
+  settingsDirty: boolean;
+  pendingViewId: string | null;
   closedViewIds: string[];
   ready: boolean;
   boqVersion: number;
@@ -88,6 +91,9 @@ export const useStore = create<State>((set, get) => ({
   lastViewEvent: null,
   running: false,
   agentRunning: false,
+  mappingDirty: false,
+  settingsDirty: false,
+  pendingViewId: null,
   closedViewIds: [],
   ready: false,
   boqVersion: 0,
@@ -95,7 +101,7 @@ export const useStore = create<State>((set, get) => ({
 
   async init(projectId, refresh = false) {
     const version = ++loadVersion;
-    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, closedViewIds: [], loadingError: null, boqQuery: "" });
+    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, mappingDirty: false, settingsDirty: false, pendingViewId: null, closedViewIds: [], loadingError: null, boqQuery: "" });
     try {
     const [p, items, runs, summary] = await Promise.all([
       fetch(`/api/projects/${projectId}`).then(async r => { if (!r.ok) throw new Error("项目不存在或暂时无法读取"); return r.json(); }),
@@ -141,6 +147,7 @@ export const useStore = create<State>((set, get) => ({
           blocks.push({
             type: "confirm", confirmId: pl.confirmId, runId: run.id,
             tool: pl.tool, description: pl.description,
+            fileId: (pl.args as { fileId?: string } | undefined)?.fileId,
           });
         else if (e.type === "confirm_resolved") {
           const b = [...blocks].reverse().find(
@@ -242,7 +249,6 @@ export const useStore = create<State>((set, get) => ({
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
-        let finished = false;
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -252,27 +258,25 @@ export const useStore = create<State>((set, get) => ({
           for (const part of parts) {
             const line = part.trim();
             if (!line.startsWith("data:")) continue;
-            try {
-              const e = JSON.parse(line.slice(5)) as AgentEventDTO;
-              if (get().projectId !== projectId) { await reader.cancel(); return; }
-              if (e.seq !== undefined && seen.has(e.seq)) continue;
-              if (e.seq !== undefined) seen.add(e.seq);
-              if (e.type === "run_finished") finished = true;
-              get().handleEvent(e, runId);
-              if (e.type === "confirm_request" || e.type === "run_finished") {
-                await reader.cancel();
-                set({ running: false });
-                return;
-              }
-            } catch {}
+            let e: AgentEventDTO;
+            try { e = JSON.parse(line.slice(5)) as AgentEventDTO; } catch { continue; }
+            if (get().projectId !== projectId) { await reader.cancel(); return; }
+            if (e.seq !== undefined && seen.has(e.seq)) continue;
+            if (e.seq !== undefined) seen.add(e.seq);
+            get().handleEvent(e, runId);
+            const awaiting = e.type === "confirm_request" && get().blocks.some(b => b.type === "confirm" && b.confirmId === e.payload.confirmId && !b.decided);
+            if (awaiting || e.type === "run_finished") {
+              await reader.cancel();
+              set({ running: false });
+              return;
+            }
           }
         }
-        if (finished) break;
         throw new Error("事件流提前结束");
       } catch {
         if (++attempts > 1) {
-          set((s) => ({
-            blocks: [...s.blocks, { type: "error", text: "事件流中断，结果可能不完整 — 请重试" }],
+          if (get().projectId === projectId) set((s) => ({
+            blocks: [...s.blocks, { type: "error", text: "导入进度连接中断，请检查项目资料状态", runId }],
           }));
           break;
         }
@@ -283,7 +287,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async confirmImport(runId, approve) {
-    if (get().running) return;
+    if (get().running || (approve && get().mappingDirty)) return;
     set({ running: true });
     try {
       const res = await fetch(`/api/runs/${runId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approve }) });
@@ -292,7 +296,7 @@ export const useStore = create<State>((set, get) => ({
       set(s => ({ blocks: s.blocks.map(b => b.type === "confirm" && b.runId === runId ? { ...b, decided: approve ? "approved" : "rejected" } : b) }));
       if (approve) await get().streamRun(runId);
       await Promise.all([get().refreshMeta(), get().reloadBoq()]);
-      toast.success(approve ? "导入任务已处理，请查看资料状态" : "已取消本次导入");
+      if (!get().blocks.some(b => b.type === "error" && b.runId === runId)) toast.success(approve ? "导入完成，请查看工程清单与项目资料" : "已取消本次导入");
     } catch (error) { toast.error(error instanceof Error ? error.message : "确认失败"); }
     finally { set({ running: false }); }
   },
@@ -374,7 +378,7 @@ export const useStore = create<State>((set, get) => ({
   async refreshMeta() {
     const { projectId } = get();
     if (!projectId) return;
-    const p = await fetch(`/api/projects/${projectId}`).then((r) => r.json());
+    const p = await fetch(`/api/projects/${projectId}`).then(async r => { if (!r.ok) throw new Error("项目资料读取失败"); return r.json(); });
     if (get().projectId !== projectId) return;
     set({
       projectName: p.name,
@@ -394,11 +398,13 @@ export const useStore = create<State>((set, get) => ({
       const views = s.views.some((v) => v.id === "view:boq")
         ? s.views
         : [...s.views, { kind: "boqTable", id: "view:boq", title: "工程量清单" } as WorkspaceView];
-      return { views, activeViewId: "view:boq", boqQuery: key };
+      return { views, boqQuery: key };
     });
+    get().setActiveView("view:boq");
   },
 
   setActiveView(id) {
+    if (id !== get().activeViewId && (get().mappingDirty || get().settingsDirty)) { set({ pendingViewId: id }); return; }
     set(s => ({ activeViewId: id, closedViewIds: s.closedViewIds.filter(v => v !== id) }));
   },
 
@@ -410,6 +416,7 @@ export const useStore = create<State>((set, get) => ({
 
   closeView(id) {
     if (FIXED_VIEWS.has(id)) return;
+    if (get().activeViewId === id && (get().mappingDirty || get().settingsDirty)) return;
     set((s) => {
       const idx = s.views.findIndex((v) => v.id === id);
       if (idx < 0) return {};
@@ -523,6 +530,7 @@ export const useStore = create<State>((set, get) => ({
             ].slice(0, 50),
           };
         case "confirm_request": {
+          if (s.blocks.some(b => b.type === "confirm" && b.confirmId === p.confirmId)) return {};
           const blocks = s.blocks.map((b) =>
             b.type === "activity" && b.live ? { ...b, live: false } : b
           );
@@ -535,6 +543,7 @@ export const useStore = create<State>((set, get) => ({
                 runId,
                 tool: p.tool,
                 description: p.description,
+                fileId: (p.args as { fileId?: string } | undefined)?.fileId,
               } as ConvBlock,
             ],
           };

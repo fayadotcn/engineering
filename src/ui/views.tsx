@@ -13,6 +13,7 @@ import type {
 import { DISCIPLINE_LABEL, isPricableItem } from "@shared/types";
 import { ArrowDown, ArrowUp, ChevronDown, Download, FileSpreadsheet, AlertTriangle, Funnel, X } from "lucide-react";
 import { ConfirmDialog, EmptyState, toast } from "./primitives";
+import { projectTotals } from "@cost-engine/aggregate";
 
 const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -196,121 +197,6 @@ function ExcelHead({
   );
 }
 
-/* ---------------- 项目总览 ----------------
-   造价总监第一眼视角：总额 / 体量 / 未定价 / TOP 大项（帕累托）/ 最近变更 */
-
-export function OverviewView() {
-  const { items, files, receipts, facts, gotoBoqItem, send } = useStore();
-  const leaf = items.filter((i) => !i.isHeader);
-  const total = leaf.reduce((n, i) => n + Number(i.totalPrice), 0);
-  const unpriced = leaf.filter((i) => isPricableItem(i) && Number(i.unitPrice) === 0);
-  const top = [...leaf].sort((a, b) => Number(b.totalPrice) - Number(a.totalPrice)).slice(0, 8);
-  const topSum = top.reduce((n, i) => n + Number(i.totalPrice), 0);
-  const stat = (label: string, value: React.ReactNode, warn?: boolean, onClick?: () => void, hint?: string) => (
-    <div
-      onClick={onClick}
-      className={cn("rounded-xl border px-4 py-3", onClick && "cursor-pointer transition-colors hover:border-[var(--hairline-strong)]")}
-      style={{
-        borderColor: warn ? "color-mix(in srgb, var(--warning-soft-fg) 35%, transparent)" : "var(--hairline)",
-        background: warn ? "var(--warning-soft-bg)" : "var(--surface)",
-      }}
-      title={hint}
-    >
-      <div className="text-[11px] text-neutral-400">{label}</div>
-      <div className="mono mt-1 text-[18px] font-medium tracking-tight" style={warn ? { color: "var(--warning-soft-fg)" } : undefined}>
-        {value}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="h-full space-y-5 overflow-auto p-5">
-      {!leaf.length ? (
-        <EmptyState icon={<FileSpreadsheet size={24} />} title="还没有清单数据" hint="在左侧上传 Excel 清单文件后，这里会显示项目体检结果" />
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-            {stat("合价合计", <>{fmtMoney(total)}<span className="ml-1 text-[11px] font-normal text-neutral-400">元</span></>)}
-            {stat("清单项", leaf.length)}
-            {stat(
-              "未定价", unpriced.length, unpriced.length > 0,
-              unpriced.length > 0 ? () => void send("用材料库补齐未定价项") : undefined,
-              "点击让 Agent 用材料库补价"
-            )}
-            {stat("TOP8 大项占比", `${total ? ((topSum / total) * 100).toFixed(1) : 0}%`)}
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
-            {/* TOP 大项：帕累托视角 */}
-            <section className="xl-sheet overflow-hidden rounded-xl">
-              <div className="border-b border-neutral-100 px-3.5 py-2 text-[12px] font-medium text-neutral-600">
-                金额 TOP 大项
-                <span className="ml-1.5 text-[11px] font-normal text-neutral-400">点击定位到清单</span>
-              </div>
-              <div>
-                {top.map((it) => {
-                  const share = total ? Number(it.totalPrice) / total : 0;
-                  return (
-                    <button
-                      key={it.id}
-                      onClick={() => gotoBoqItem(it.code || it.name)}
-                      className="flex w-full items-center gap-3 border-b border-neutral-100 px-3.5 py-2 text-left transition-colors last:border-0 hover:bg-[var(--hover)]"
-                    >
-                      <span className="mono w-24 shrink-0 truncate text-[11px] text-neutral-400">{it.code}</span>
-                      <span className="min-w-0 flex-1 truncate text-[12.5px]">{it.name}</span>
-                      <span className="h-1 w-24 shrink-0 rounded bg-neutral-100">
-                        <span
-                          className="block h-1 rounded"
-                          style={{ width: `${Math.min(100, share * 400)}%`, background: "var(--brand-accent)" }}
-                        />
-                      </span>
-                      <span className="mono w-20 shrink-0 text-right text-[12px]">{fmtMoney(it.totalPrice)}</span>
-                      <span className="mono w-12 shrink-0 text-right text-[11px] text-neutral-400">
-                        {(share * 100).toFixed(1)}%
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* 项目信息 + 最近变更 */}
-            <div className="space-y-4">
-              <section className="rounded-xl border border-neutral-200 bg-[var(--surface)] px-3.5 py-3">
-                <div className="text-[12px] font-medium text-neutral-600">项目台账</div>
-                <div className="mt-2 space-y-1.5">
-                  {facts.slice(0, 6).map((f) => (
-                    <div key={f.id} className="flex justify-between text-[12px]">
-                      <span className="text-neutral-500">{f.key}</span>
-                      <span className="mono text-neutral-700">{f.value}</span>
-                    </div>
-                  ))}
-                  {!facts.length && <div className="text-[11.5px] text-neutral-400">暂无 — 可对 Agent 说「税率设为9%」</div>}
-                </div>
-                <div className="mt-2.5 border-t border-neutral-100 pt-2 text-[11px] text-neutral-400">
-                  {files.length} 个文件 · {receipts.length} 条变更记录
-                </div>
-              </section>
-              <section className="rounded-xl border border-neutral-200 bg-[var(--surface)] px-3.5 py-3">
-                <div className="text-[12px] font-medium text-neutral-600">最近变更</div>
-                <div className="mt-2 space-y-1.5">
-                  {receipts.slice(0, 4).map((r) => (
-                    <div key={r.id} className="truncate text-[11.5px] text-neutral-500" title={r.summary}>
-                      <span className="text-neutral-300">{r.createdAt.slice(5, 16).replace("T", " ")}</span>{" "}
-                      {r.summary}
-                    </div>
-                  ))}
-                  {!receipts.length && <div className="text-[11.5px] text-neutral-400">暂无变更</div>}
-                </div>
-              </section>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 /* ---------------- 变更记录 ----------------
    回执聚合面板：每一次数据修改可追溯、可撤销 */
 
@@ -393,7 +279,7 @@ export function ReceiptsView() {
 type BoqSortKey = "code" | "name" | "quantity" | "unitPrice" | "totalPrice";
 
 export function BoqTable() {
-  const { items, patchItem, boqQuery, setBoqQuery } = useStore();
+  const { items, patchItem, boqQuery, setBoqQuery, running, agentRunning } = useStore();
   const query = boqQuery;
   const [editing, setEditing] = useState<{ id: string; field: "unitPrice" | "quantity" } | null>(null);
   const [draft, setDraft] = useState("");
@@ -402,9 +288,10 @@ export function BoqTable() {
   const [colText, setColText] = useState({ code: "", name: "", feature: "" });
   const [unitSel, setUnitSel] = useState<Set<string> | null>(null); // null = 全选
   const [sort, setSort] = useState<{ key: BoqSortKey; dir: SortDir } | null>(null);
+  const committing = useRef(false);
 
   const commit = async (moveTab?: boolean) => {
-    if (!editing) return;
+    if (!editing || committing.current) return;
     const v = draft.trim();
     if (v !== "" && isNaN(Number(v))) {
       toast.error("请输入数字");
@@ -412,8 +299,10 @@ export function BoqTable() {
       return;
     }
     const cur = editing;
+    committing.current = true;
     setEditing(null);
     const ok = await patchItem(cur.id, { [cur.field]: v });
+    committing.current = false;
     if (!ok) toast.error("保存失败，请重试");
     if (moveTab) {
       // 同行下一个字段，或下一行第一个字段
@@ -474,7 +363,7 @@ export function BoqTable() {
   const dataTotal = items.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   const dataShown = sorted.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   // 造价师视角：合价合计随筛选联动，未定价项计数常显
-  const sumShown = sorted.reduce((n, i) => (i.isHeader ? n : n + Number(i.totalPrice)), 0);
+  const sumShown = projectTotals(sorted).totalAmount;
   const unpriced = items.reduce((n, i) => n + (isPricableItem(i) && Number(i.unitPrice) === 0 ? 1 : 0), 0);
 
   const toggleUnit = (v: string) => {
@@ -499,12 +388,13 @@ export function BoqTable() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
+      <div className="cost-table-toolbar flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
         <Funnel size={12} className="shrink-0 text-neutral-400" />
         <input
           value={query}
           onChange={(e) => { setBoqQuery(e.target.value); setLimit(300); }}
           placeholder="搜索名称 / 编码 / 特征…"
+          aria-label="搜索工程清单"
           className="h-7 w-56 rounded-md border border-neutral-200 bg-[var(--surface)] px-2.5 text-[12px] outline-none focus:border-[var(--brand-accent)]"
         />
         {filtering && (
@@ -522,6 +412,7 @@ export function BoqTable() {
           {sort && " · 已排序"}
         </span>
       </div>
+      <p className="px-3 py-2 text-[11px] text-neutral-500">双击工程量或综合单价可编辑，Enter 保存、Esc 取消。主材暂估价是组价输入。</p>
       <div className="flex-1 overflow-auto">
       <table className="xl-table">
         <thead>
@@ -606,6 +497,7 @@ export function BoqTable() {
                         : "双击编辑"
                     }
                     onDoubleClick={() => {
+                      if (running || agentRunning || committing.current) return;
                       setEditing({ id: it.id, field: f });
                       setDraft(it[f]);
                     }}
@@ -669,7 +561,7 @@ export function BoqTable() {
         <EmptyState
           icon={<FileSpreadsheet size={22} />}
           title="清单为空"
-          hint="在左侧上传 Excel 清单文件"
+          hint="使用工作区顶部的「导入资料」上传清单"
         />
       )}
       </div>
@@ -1449,25 +1341,25 @@ const FILE_STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 export function FileList() {
-  const { files, refreshMeta, reloadBoq } = useStore();
+  const { files, views, setActiveView, init, projectId, running, agentRunning } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
   const [pendingDel, setPendingDel] = useState<{ id: string; name: string } | null>(null);
   const remove = async () => {
     if (!pendingDel) return;
     setBusy(pendingDel.id);
-    const res = await fetch(`/api/files/${pendingDel.id}`, { method: "DELETE" });
-    setPendingDel(null);
-    setBusy(null);
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/files/${pendingDel.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("删除失败，请重试");
       toast.success(`已删除「${pendingDel.name}」及其导入数据`);
-      await Promise.all([refreshMeta(), reloadBoq()]);
-    } else {
-      toast.error("删除失败，请重试");
-    }
+      setPendingDel(null);
+      if (projectId) await init(projectId, true);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "删除失败，请重试"); }
+    finally { setBusy(null); }
   };
   return (
     <div className="h-full overflow-auto p-4">
-      <div className="xl-sheet overflow-hidden rounded-lg">
+      <p className="cost-file-hint">文件保留在当前工程内。核对列映射或查看文档后，再继续组价。</p>
+      <div className="xl-sheet overflow-auto rounded-lg">
         <table className="xl-table">
           <thead>
             <tr>
@@ -1475,11 +1367,11 @@ export function FileList() {
               <th>文件名</th>
               <th className="w-28">类型</th>
               <th className="w-24">状态</th>
-              <th className="w-16"></th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {files.map((f, fi) => (
+            {files.map((f, fi) => { const view = views.find(v => v.kind === "columnMapping" && v.fileId === f.id || v.kind === "document" && v.id === `view:doc:${f.id}`); return (
               <tr key={f.id} className="group">
                 <td className="xl-rn">{fi + 1}</td>
                 <td>
@@ -1502,16 +1394,17 @@ export function FileList() {
                   </span>
                 </td>
                 <td className="text-center">
+                  {view && <button className="cost-file-action" onClick={() => setActiveView(view.id)}>{view.kind === "columnMapping" ? "核对映射" : "查看文档"}</button>}
                   <button
                     onClick={() => setPendingDel({ id: f.id, name: f.filename })}
-                    disabled={busy === f.id}
-                    className="invisible rounded px-1.5 py-0.5 text-[11px] text-red-500 hover:bg-red-50 group-hover:visible disabled:opacity-40"
+                    disabled={!!busy || running || agentRunning}
+                    className="cost-file-action danger"
                   >
                     删除
                   </button>
                 </td>
               </tr>
-            ))}
+            ); })}
           </tbody>
         </table>
       </div>

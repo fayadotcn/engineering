@@ -1,5 +1,4 @@
 import { listProjects } from "@project/service";
-import { NewProject } from "@/ui/NewProject";
 import { Database, ArrowUpRight, Layers3 } from "lucide-react";
 import { ProjectDirectory } from "@/ui/ProjectDirectory";
 
@@ -33,9 +32,7 @@ export default async function Home() {
       </div>
 
       <div className="cost-home-stats"><div><strong>{projects.length}</strong><span>工程项目</span></div><div><strong>{projects.reduce((n, p) => n + p._count.files, 0)}</strong><span>项目资料</span></div><div><strong>{projects.reduce((n, p) => n + p._count.boqItems, 0)}</strong><span>清单数据行</span></div><p>清单 → 主材询价 → 定额组价 → 费用汇总 → 审核输出</p></div>
-      <div className="mt-7">
-        <NewProject />
-      </div>
+      <div className="mt-7"><a href="/new" className="cost-btn primary">＋ 新建工程</a></div>
       <ProjectDirectory projects={projects.map(p => ({ id: p.id, name: p.name, files: p._count.files, rows: p._count.boqItems, updatedAt: p.updatedAt.toISOString() }))} />
       <footer className="cost-home-footer">项目资料与每次计价修改均保留在工程内</footer>
     </main>

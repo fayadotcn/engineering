@@ -50,17 +50,18 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
   const [busy, setBusy] = useState(false);
   const [confirmReingest, setConfirmReingest] = useState(false);
 
-  // Workbench 以 view.id 为 key 不会重挂载：新推送/保存后替换的视图要重置草稿
+  const [baseline, setBaseline] = useState(view);
+  const dirty = baseline.sheets.some(s => drafts[s.sheetName] && !draftEquals(drafts[s.sheetName], s));
   useEffect(() => {
-    setDrafts(
-      Object.fromEntries(view.sheets.map((s) => [s.sheetName, toDraft(s)]))
-    );
-  }, [view]);
+    useStore.setState({ mappingDirty: dirty });
+    return () => { useStore.setState({ mappingDirty: false }); };
+  }, [dirty]);
+  // 刷新不能覆盖人工草稿；干净状态才接收新映射。
+  if (view !== baseline && !dirty) {
+    setBaseline(view);
+    setDrafts(Object.fromEntries(view.sheets.map(s => [s.sheetName, toDraft(s)])));
+  }
 
-  const dirty = view.sheets.some((s) => {
-    const d = drafts[s.sheetName];
-    return d && !draftEquals(d, s);
-  });
 
   const setRole = (sheetName: string, col: number, role: string) =>
     setDrafts((prev) => {
@@ -111,6 +112,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         lastView = (await res.json()).view as MappingView;
       }
       if (lastView) {
+        setBaseline(lastView);
         store.replaceView(lastView);
         setDrafts(
           Object.fromEntries(lastView.sheets.map((s) => [s.sheetName, toDraft(s)]))
@@ -133,7 +135,11 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
       useStore.setState((s) => ({
         blocks: [...s.blocks, { type: "upload", filename: view.filename }],
       }));
-      if (runId) void store.streamRun(runId);
+      if (runId) {
+        useStore.setState({ running: true });
+        await store.streamRun(runId);
+        await Promise.all([store.refreshMeta(), store.reloadBoq()]);
+      }
     } catch {
       toast.error("重新导入失败，请重试");
     }
@@ -146,7 +152,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         <FileSpreadsheet size={15} className="text-neutral-400" />
         <span className="text-[13px] font-medium">{view.filename}</span>
         <span className="text-[11px] text-neutral-400">
-          调整列角色后保存，再按新映射重新导入
+          {store.blocks.some(b => b.type === "confirm" && !b.decided) ? "核对类型与列角色，修改后先保存，再确认导入。" : "修改后保存映射，再重新导入更新已有数据。"}
         </span>
       </div>
 
@@ -269,7 +275,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
       <div className="flex gap-2">
         <button
           onClick={save}
-          disabled={!dirty || busy}
+          disabled={!dirty || busy || store.running || store.agentRunning}
           className="flex h-8 items-center gap-1.5 rounded-md bg-neutral-900 px-3.5 text-[12.5px] text-white hover:bg-neutral-700 disabled:opacity-40"
         >
           <Save size={13} /> 保存映射
@@ -279,7 +285,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
             if (view.fileStatus === "PARSED") setConfirmReingest(true);
             else void reingest();
           }}
-          disabled={busy || dirty || store.running}
+          disabled={busy || dirty || store.running || store.agentRunning || store.blocks.some(b => b.type === "confirm" && !b.decided)}
           title={dirty ? "请先保存映射" : undefined}
           className="flex h-8 items-center gap-1.5 rounded-md border border-neutral-200 px-3.5 text-[12.5px] text-neutral-600 hover:bg-[var(--hover)] disabled:opacity-40"
         >

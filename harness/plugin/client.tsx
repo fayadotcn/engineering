@@ -37,6 +37,7 @@ export function apply(ctx: Context) {
   const frames = new Map<Window, "home" | "data" | "workspace">();
   const projectFrames = new Map<string, Window>();
   const readyFrames = new Set<Window>();
+  const runningProjects = new Map<string, boolean>();
 
   /** 卡片状态：Agent 一轮结束、导入结束、确认后都刷新一次；不轮询。 */
   const refreshActivity = async (projectId: string) => {
@@ -68,6 +69,10 @@ export function apply(ctx: Context) {
   const refreshFrames = (projectId: string) => {
     const source = projectFrames.get(projectId);
     if (source && readyFrames.has(source)) source.postMessage({ type: "installation:refresh", projectId }, origin);
+  };
+  const taskState = (projectId: string, running: boolean) => {
+    runningProjects.set(projectId, running);
+    projectFrames.get(projectId)?.postMessage({ type: "installation:taskState", projectId, running }, origin);
   };
   const theme = (frame: Window) => frame.postMessage({ type: "installation:theme", dark: ctx.theme.getTheme().active.colorScheme === "dark" }, origin);
   const requestLink = (source: Window, projectId: string, sessionId: SessionId) => new Promise<void>((resolve, reject) => {
@@ -122,20 +127,26 @@ export function apply(ctx: Context) {
     const receive = async (event: MessageEvent) => {
       if (event.origin !== origin || !frames.has(event.source as Window)) return;
       const source = event.source as Window;
+      if (event.data?.type === "installation:activityChanged" && projectFrames.get(event.data.projectId) === source) {
+        await refreshActivity(event.data.projectId);
+        return;
+      }
       if (event.data?.type === "installation:catalog" && Array.isArray(event.data.projects)) {
         theme(source);
         state.update(s => { s.projects = event.data.projects; });
         const target = frames.get(source) === "home" ? event.data.projectId : undefined;
         const restore = restoring ? localStorage.getItem("installation:activeProject") : null;
+        const shouldRestore = restoring;
         restoring = false;
         const project = state.getSnapshot().projects.find(p => p.id === (target ?? restore));
-        if (project) await openProject(project, source);
+        if (project && (shouldRestore || (target && state.getSnapshot().activeId !== project.id))) await openProject(project, source);
         return;
       }
       // 工作区就绪后才投递"点卡片要定位到哪"的目标，否则目标视图尚未重放出来。
       if (event.data?.type === "installation:ready") {
         if (projectFrames.get(event.data.projectId) !== source) return;
         readyFrames.add(source);
+        taskState(event.data.projectId, runningProjects.get(event.data.projectId) ?? false);
         deliverFocus();
         return;
       }
@@ -171,7 +182,8 @@ export function apply(ctx: Context) {
     const s = useProjects();
     const [query, setQuery] = useState("");
     if (!wide) return <button className="installation-rail" title="工程项目" onClick={expandSidebar}><Icon /></button>;
-    return <div className="installation-projects"><div className="installation-project-label">我的工程 <span>{s.projects.length}</span></div><input aria-label="搜索工程" placeholder="搜索工程…" value={query} onChange={e => setQuery(e.target.value)} />{s.projects.filter(p => p.name.includes(query.trim())).map(p => <button key={p.id} className={s.activeId === p.id ? "active" : ""} disabled={s.opening === p.id} onClick={() => void openProject(p)}><Icon size={16} /><span>{p.name}<small>{s.opening === p.id ? "正在打开…" : `${p.files} 份资料 · ${p.rows} 行清单`}</small></span></button>)}{s.error && <p role="alert" className="installation-error">{s.error}</p>}</div>;
+    const filtered = s.projects.filter(p => p.name.toLowerCase().includes(query.trim().toLowerCase()));
+    return <div className="installation-projects"><div className="installation-project-label">我的工程 <span>{s.projects.length}</span></div><input aria-label="搜索工程" placeholder="搜索工程…" value={query} onChange={e => setQuery(e.target.value)} />{filtered.map(p => <button key={p.id} aria-current={s.activeId === p.id ? "page" : undefined} className={s.activeId === p.id ? "active" : ""} disabled={!!s.opening} onClick={() => void openProject(p)}><Icon size={16} /><span>{p.name}<small>{s.opening === p.id ? "正在打开…" : `${p.files} 份资料 · ${p.rows} 行清单`}</small></span></button>)}{!filtered.length && <p className="installation-list-empty">{query.trim() ? "没有匹配的工程" : "新建工程，开始导入资料"}</p>}{s.error && <p role="alert" className="installation-error">{s.error}</p>}</div>;
   }
   ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({ name: "sidebar.workspaces", priority: -100 }, Projects));
   const createPanel = () => ctx.layout.selectPanel("installation-create" as Parameters<typeof ctx.layout.selectPanel>[0]);
@@ -231,8 +243,11 @@ export function apply(ctx: Context) {
     const running = session?.running ?? false;
     // 一轮结束刷新卡片：工具产出的视图此时已经落库，不需要轮询
     useEffect(() => {
-      if (!projectId || running) return;
+      if (!projectId) return;
+      taskState(projectId, running);
+      if (running) return;
       void refreshActivity(projectId);
+      refreshFrames(projectId);
     }, [projectId, running]);
     if (!project) return <div className="installation-project-empty"><Icon size={28} /><h2>先新建或选择工程</h2><p>每个工程都有独立的 Agent 对话、资料和计价记录。</p><button className="installation-create" onClick={createPanel}>＋ 新建工程</button></div>;
     const attention = s.attention === project.id;
@@ -240,7 +255,7 @@ export function apply(ctx: Context) {
     const activity = s.activity;
     const hasCard = !!activity && (!!activity.confirm || !!activity.import || !!activity.result?.views.length);
     return <div className="installation-conversation">
-      <header className="installation-conversation-header"><strong title={project.name}>{project.name}</strong><button className={`installation-workspace-toggle${attention ? " attention" : ""}`} onClick={openWorkspace} title="打开造价工作区">{attention ? "有导入待确认" : "清单与成果"}</button></header>
+      <header className="installation-conversation-header"><div><strong title={project.name}>{project.name}</strong><small>{running ? "助手正在处理" : "工程对话"}</small></div><button className={`installation-workspace-toggle${attention ? " attention" : ""}`} onClick={openWorkspace} title="打开造价工作区">{attention ? "核对导入" : "打开工作区"}</button></header>
       {session?.blank && !hasCard && <div className="installation-welcome"><Icon size={28} /><h2>开始这份工程的造价工作</h2><p>把清单或询价表拖进来，或直接说要核对什么。<br />结果会显示在右侧的造价工作区里。</p></div>}
       {renderFactorySlot("conversation.content", { variant: "embedded", phase: session?.openState === "loading" ? "settling" : "active", hero: false })}
     </div>;
@@ -295,6 +310,9 @@ export function apply(ctx: Context) {
           await refreshActivity(projectId);
           refreshFrames(projectId);
         }
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "导入失败，请重试");
+        await refreshActivity(projectId);
       } finally {
         setImporting(false); setImportingFile(""); setProgress("");
       }
@@ -322,12 +340,15 @@ export function apply(ctx: Context) {
           });
           await refreshActivity(projectId);
           refreshFrames(projectId);
+        } catch (error) {
+          setError(error instanceof Error ? error.message : "导入失败，请重试");
+          await refreshActivity(projectId);
         } finally {
           setImporting(false); setProgress(""); setImportingFile("");
         }
       },
       onFocusView: (viewId: string) => { if (projectId) focusProject(projectId, { viewId }); },
-      onSend: (text: string) => { void ctx.sessions.scope(sessionId)!.conversation.send(text).catch(() => {}); },
+      onSend: (text: string) => { void ctx.sessions.scope(sessionId)!.conversation.send(text).catch(error => setError(error instanceof Error ? error.message : "任务发送失败")); },
     };
 
     return <div className="installation-context">
@@ -363,7 +384,8 @@ export function apply(ctx: Context) {
       .installation-projects>button:hover,.installation-projects>button.active{background:var(--dsw-alias-interactive-bg-hover)}
       .installation-projects>button svg{margin-top:2px;flex-shrink:0;opacity:.6}.installation-projects small{display:block;font-size:10px;color:var(--dsw-alias-label-tertiary);margin-top:6px}.installation-projects span{min-width:0;overflow-wrap:anywhere}
       .installation-error{font-size:12px;color:#aa4f49;margin:12px 8px}.installation-rail{border:0;background:transparent;color:inherit;margin:16px;cursor:pointer}
-      .installation-context{padding:12px 4px;color:var(--dsw-alias-label-secondary);font-size:12px}.installation-context>div:first-child{display:flex;align-items:center;gap:8px}.installation-context strong{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.installation-context span{font-size:10px;color:var(--dsw-alias-label-tertiary);margin-left:auto;white-space:nowrap}
+      .installation-context{padding:8px 4px;color:var(--dsw-alias-label-secondary);font-size:12px}
+      .installation-card details{margin-top:8px}.installation-card summary{cursor:pointer;font-size:11px;color:var(--dsw-alias-label-secondary)}.installation-card-actions{flex-wrap:wrap}.installation-conversation-header>div{display:flex;align-items:center;gap:12px;min-width:0}.installation-conversation-header small{font-size:11px;white-space:nowrap;color:var(--dsw-alias-label-tertiary)}.installation-list-empty{padding:12px 8px;font-size:12px;color:var(--dsw-alias-label-tertiary)}.installation-projects>button.active{box-shadow:inset 2px 0 var(--dsw-alias-button-info-fill)}
       .installation-quick-tasks{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.installation-quick-tasks button{border:1px solid var(--dsw-alias-border-l2);border-radius:6px;padding:6px 9px;background:transparent;color:inherit;font:inherit;font-size:11px;cursor:pointer}.installation-quick-tasks button:hover{background:var(--dsw-alias-interactive-bg-hover)}.installation-quick-tasks button:disabled{opacity:.5;cursor:default}.installation-quick-tasks button.attention{border-color:color-mix(in srgb,#b17c2b 45%,transparent);color:#b17c2b}
       .installation-hero-hint{font-size:12px;color:var(--dsw-alias-label-tertiary)}.installation-context.muted{color:var(--dsw-alias-label-tertiary)}
     `;

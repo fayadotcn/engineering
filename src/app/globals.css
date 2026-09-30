@@ -465,10 +465,11 @@ textarea:focus-visible,
 .cost-result-body { min-height: 360px; background: var(--surface); overflow: hidden; }
 .cost-result-body > .cost-overview, .cost-result-body > .cost-settings { padding: 0; }
 .cost-result-tabs { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 14px; }
-.cost-result-tabs > button { display: flex; align-items: center; gap: 10px; font-size: 11px; padding: 7px 10px; border: 1px solid var(--hairline); border-radius: 4px; white-space: nowrap; color: var(--ink-3); cursor: pointer; }
-.cost-result-tabs > button.active { background: var(--surface); color: var(--brand-accent); border-color: #b3c4ee; }
-.cost-result-tabs span { padding: 3px; border-radius: 3px; }
-.cost-result-tabs span:hover { background: var(--hover); }
+.cost-result-tabs > div { display: flex; align-items: center; flex-shrink: 0; border: 1px solid var(--hairline); border-radius: 5px; color: var(--ink-3); }
+.cost-result-tabs > div.active { background: var(--brand-soft); color: var(--brand-accent); border-color: color-mix(in srgb, var(--brand-accent) 25%, var(--hairline)); }
+.cost-result-tabs button { padding: 8px 10px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.cost-result-tabs button + button { padding: 8px 6px; }
+.cost-result-tabs button:hover { background: var(--hover); }
 .cost-empty, .cost-section-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 52px 20px; color: var(--ink-4); font-size: 12px; }
 .cost-empty { min-height: 360px; }
 .cost-empty h3 { font-size: 16px; font-weight: 500; color: var(--ink-2); }
@@ -521,6 +522,42 @@ textarea:focus-visible,
 .cost-settings small { font-size: 10px; color: var(--ink-4); }
 .cost-settings footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-top: 1px solid var(--hairline); margin-top: 28px; padding-top: 20px; }
 .cost-settings footer p { font-size: 11px; color: var(--ink-3); }
+.cost-fact-details { margin-top: 28px; border-top: 1px solid var(--hairline); padding-top: 18px; }
+.cost-fact-details summary { cursor: pointer; font-size: 12px; color: var(--ink-3); }
+.cost-fact-details .xl-sheet { overflow-x: auto; }
+.cost-workspace-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; background: var(--surface); }
+.cost-workspace-top > span { font-size: 13px; font-weight: 600; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-project-nav { position: sticky; top: 0; z-index: 20; background: var(--surface); gap: 22px; }
+.cost-project-nav > button.active { color: var(--brand-accent); border-bottom-color: var(--brand-accent); }
+.cost-project-nav small { color: var(--warning-soft-fg); font-size: 10px; }
+.cost-actions, .cost-taskbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cost-taskbar { margin: -4px 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--hairline); }
+.cost-taskbar > span { font-size: 11px; color: var(--ink-3); }
+.cost-next-step { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px; margin-top: 18px; background: var(--brand-soft); border-radius: 6px; }
+.cost-next-step small { font-size: 11px; color: var(--brand-accent); }
+.cost-next-step h3 { font-size: 15px; font-weight: 600; margin: 6px 0; }
+.cost-next-step p { font-size: 12px; line-height: 1.8; color: var(--ink-2); }
+.cost-file-hint { color: var(--ink-3); font-size: 12px; line-height: 1.8; margin-bottom: 16px; }
+.cost-file-action { padding: 6px; font-size: 12px; color: var(--brand-accent); cursor: pointer; }
+.cost-file-action:hover { background: var(--hover); }
+.cost-file-action.danger { color: var(--ink-3); }
+.cost-file-action.danger:hover { color: var(--danger); }
+.cost-file-action:disabled { opacity: .4; cursor: default; }
+.cost-table-toolbar input { flex: 1; min-width: 140px; max-width: 280px; }
+.cost-library-tabs { display: flex; border-bottom: 1px solid var(--hairline); gap: 24px; }
+.cost-library-tabs button { display: flex; align-items: center; gap: 8px; padding: 14px 0; border-bottom: 2px solid transparent; color: var(--ink-3); cursor: pointer; font-size: 13px; }
+.cost-library-tabs strong { font-weight: 500; }
+.cost-library-tabs span { font-size: 11px; background: var(--sidebar); padding: 2px 6px; border-radius: 4px; }
+.cost-library-tabs .active { color: var(--brand-accent); border-bottom-color: var(--brand-accent); }
+.cost-dataset-row > div { flex-basis: 200px; }
+.cost-datasets > .cost-search input { width: 100%; }
+.cost-modal { margin: auto; max-width: calc(100vw - 32px); border-radius: 12px; border: 1px solid var(--hairline); background: var(--surface); color: var(--ink-1); padding: 24px; box-shadow: var(--shadow-lg); }
+.cost-modal::backdrop { background: rgb(0 0 0 / .25); }
+.cost-new-project-form { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.cost-new-project-form label { color: var(--ink-2); font-size: 13px; }
+.cost-new-project-form input { border: 1px solid var(--hairline-strong); padding: 12px; border-radius: 6px; background: var(--surface); width: 100%; }
+.cost-new-project-form input:focus { border-color: var(--brand-accent); outline: 2px solid var(--brand-soft); }
+.cost-new-project-form footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 @media (max-width: 1100px) {
   .cost-content { padding: 22px 20px; }
   .cost-result-body > .cost-overview, .cost-result-body > .cost-settings { padding: 0; }
@@ -554,3 +591,16 @@ textarea:focus-visible,
   .cost-attention, .import-confirm { flex-wrap: wrap; }
   .cost-search input { width: 110px; }
 }
+@media (max-width: 520px) {
+  .cost-project-nav { gap: 18px; }
+  .cost-project-nav button > svg { display: none; }
+  .cost-project-nav button { font-size: 12px; }
+  .cost-next-step { flex-direction: column; align-items: flex-start; padding: 16px; }
+  .cost-settings-grid { grid-template-columns: 1fr; }
+  .section-heading { flex-wrap: wrap; }
+  .cost-library-tabs { gap: 18px; }
+  .harness-embedded .cost-library { padding: 22px 14px; }
+  .cost-new-engineering { padding: 48px 20px; }
+}
+input:focus-visible, textarea:focus-visible { outline: 2px solid color-mix(in srgb, var(--brand-accent) 30%, transparent); outline-offset: 1px; }
+.composer-input:focus-visible { outline: none; }
