@@ -128,11 +128,11 @@ export async function createDataset(
         (s) => s.type === "QUOTATION"
       );
       if (targets.length) {
-        // 确认门（同 file.ingest）：模板命中/人工改过/置信≥0.9 才自动放行
-        const autoPass = targets.every(
-          (s) => s.templateHit || s.userEdited || s.minConfidence >= 0.9
-        );
-        if (autoPass) {
+        // 确认门（同 file.ingest）：模板命中/人工改过/置信≥0.9 才自动放行；
+        // needsConfirm 是识别阶段的"必须让人看一眼"，不能因为模板命中就被跳过
+        const certain = (s: { templateHit: boolean; userEdited: boolean; minConfidence: number; needsConfirm?: boolean }) =>
+          !s.needsConfirm && (s.templateHit || s.userEdited || s.minConfidence >= 0.9);
+        if (targets.every(certain)) {
           await prisma.dataset.update({
             where: { id: ds.id },
             data: { meta: toJson(meta) },
@@ -141,7 +141,7 @@ export async function createDataset(
           return r ?? { id: ds.id, rowCount: 0, status: "FAILED" };
         }
         for (const s of targets)
-          if (!(s.templateHit || s.userEdited || s.minConfidence >= 0.9))
+          if (!certain(s))
             s.needsConfirm = true;
       } else {
         meta.note =

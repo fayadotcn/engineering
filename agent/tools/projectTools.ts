@@ -227,21 +227,22 @@ registerTool({
       (s) => s.type === "BOQ" || s.type === "QUOTATION"
     );
     if (!targets.length) return null;
-    const autoPass = targets.every(
-      (s) => s.templateHit || s.userEdited || s.minConfidence >= 0.9
-    );
-    if (autoPass) return null;
+    // needsConfirm 是识别阶段给出的"必须让人看一眼"（例如模板类型与本文件证据冲突）。
+    // 它必须是确认门的输入，否则 templateHit 会把这条表直接放行。
+    const certain = (s: { templateHit: boolean; userEdited: boolean; minConfidence: number; needsConfirm?: boolean }) =>
+      !s.needsConfirm && (s.templateHit || s.userEdited || s.minConfidence >= 0.9);
+    if (targets.every(certain)) return null;
     // 低置信 sheet 标记待确认，用户可在「列映射」视图里修正后再批准
     const meta = fromJson<{ mapping?: Record<string, { needsConfirm?: boolean }> }>(file.meta, {});
     for (const s of targets)
-      if (!(s.templateHit || s.userEdited || s.minConfidence >= 0.9) && meta.mapping?.[s.sheetName])
+      if (!certain(s) && meta.mapping?.[s.sheetName])
         meta.mapping[s.sheetName].needsConfirm = true;
     await prisma.projectFile.update({
       where: { id: file.id },
       data: { meta: JSON.stringify(meta) },
     });
     const parts = targets
-      .filter((s) => !(s.templateHit || s.userEdited || s.minConfidence >= 0.9))
+      .filter((s) => !certain(s))
       .map((s) => {
         const low: string[] = [];
         let high = 0;

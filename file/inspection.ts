@@ -43,6 +43,67 @@ export async function ensureInspection(
   return { file, mapping, isPdf: false };
 }
 
+/** 类型判定达到这个置信度，才算"本文件自己说得清楚"，可以顶掉模板记录的类型。 */
+const TYPE_CERTAIN = 0.9;
+export const SHEET_TYPE_LABEL = { BOQ: "清单", QUOTATION: "询价表", GENERIC: "忽略" } as const;
+
+export interface TemplateRecord {
+  sheetType: string;
+  columns: string;
+  useCount: number;
+}
+
+/**
+ * 把一条已确认模板套到本文件的识别结果上。
+ *
+ * 模板管的是"人确认过的列角色"；类型是每份文件自己的判断。模板类型与本文件证据
+ * 冲突且本文件足够确定时，以本文件为准并要求人工过一眼——否则一条被固化错的模板
+ * 会连带 templateHit 绕过确认门，把招标清单静默导成询价表（清单永远进不来）。
+ */
+export function applyTemplateToSheet(
+  fresh: SheetInspection,
+  tpl: TemplateRecord
+): { sheet: SheetInspection; needsConfirm: boolean } {
+  const tplType = tpl.sheetType as SheetInspection["type"];
+  const conflict = tplType !== fresh.type && fresh.typeConfidence >= TYPE_CERTAIN;
+  const type = conflict ? fresh.type : tplType;
+  // 类型变了，裸「单价」的角色要跟着走（清单=综合单价，询价表=材料价）
+  const priceRole =
+    type === tplType
+      ? { columns: fromJson<Record<string, number>>(tpl.columns, {}), moved: null as null | string }
+      : reconcilePriceRole(type, fromJson<Record<string, number>>(tpl.columns, {}), fresh.headerCells);
+  const columns = priceRole.columns;
+  const conf: Record<string, number> = {};
+  const ev: Record<string, string> = {};
+  for (const k of Object.keys(columns)) {
+    conf[k] = conflict ? 0.5 : 1;
+    ev[k] = conflict
+      ? `命中模板，但模板类型「${SHEET_TYPE_LABEL[tplType]}」与本文件判断冲突，请核对`
+      : `命中已确认模板（已用 ${tpl.useCount} 次）`;
+  }
+  if (priceRole.moved) {
+    const role = priceRole.moved === "price→unitPrice" ? "unitPrice" : "price";
+    conf[role] = conflict ? 0.5 : 1;
+    ev[role] = `随类型对齐（${priceRole.moved}）`;
+  }
+  return {
+    needsConfirm: conflict,
+    sheet: {
+      ...fresh,
+      type,
+      columns,
+      confidence: conf,
+      evidence: ev,
+      templateHit: true,
+      minConfidence: conflict ? 0.5 : Object.keys(columns).length ? 1 : 0,
+      typeConfidence: conflict ? fresh.typeConfidence : 1,
+      typeEvidence: conflict
+        ? `模板记的是「${SHEET_TYPE_LABEL[tplType]}」（已用 ${tpl.useCount} 次），但本文件${fresh.typeEvidence}，更像「${SHEET_TYPE_LABEL[fresh.type]}」；已按本文件处理`
+        : `命中已确认模板（已用 ${tpl.useCount} 次）`,
+    },
+  };
+}
+
 /**
  * 识别工作簿全部 sheet：applyTypeHint 文件名纠偏 + ImportTemplate 指纹查找。
  * 项目文件（ensureInspection）与全局数据集（dataset/service）共用同一套识别。
@@ -54,34 +115,17 @@ export async function inspectWithTemplates(
   const inspections = inspectWorkbook(buffer);
   const mapping: Record<string, SheetMeta> = {};
   for (const raw of inspections) {
-    // 文件名辅助信号先纠偏；模板命中仍以模板为准
-    let cur = applyTypeHint(raw, filename);
-    if (cur.fingerprint) {
+    // 文件名辅助信号先纠偏；模板命中仍以模板的列角色为准
+    const fresh = applyTypeHint(raw, filename);
+    let cur: SheetInspection = fresh;
+    let needsConfirm = false;
+    if (fresh.fingerprint) {
       const tpl = await prisma.importTemplate.findUnique({
-        where: { fingerprint: cur.fingerprint },
+        where: { fingerprint: fresh.fingerprint },
       });
-      if (tpl) {
-        const tplCols = fromJson<Record<string, number>>(tpl.columns, {});
-        const conf: Record<string, number> = {};
-        const ev: Record<string, string> = {};
-        for (const k of Object.keys(tplCols)) {
-          conf[k] = 1;
-          ev[k] = `命中已确认模板（已用 ${tpl.useCount} 次）`;
-        }
-        cur = {
-          ...cur,
-          type: (tpl.sheetType as SheetInspection["type"]) ?? cur.type,
-          columns: tplCols,
-          confidence: conf,
-          evidence: ev,
-          templateHit: true,
-          minConfidence: Object.keys(tplCols).length ? 1 : 0,
-          typeConfidence: 1,
-          typeEvidence: `命中已确认模板（已用 ${tpl.useCount} 次）`,
-        };
-      }
+      if (tpl) ({ sheet: cur, needsConfirm } = applyTemplateToSheet(fresh, tpl));
     }
-    mapping[cur.sheetName] = { ...cur, userEdited: false, needsConfirm: false };
+    mapping[cur.sheetName] = { ...cur, userEdited: false, needsConfirm };
   }
   return mapping;
 }
@@ -145,6 +189,8 @@ export function applySheetPatch(
   }
 
   sheet.userEdited = true;
+  // 人已经看过这张表了，"需要核对"这个标记就该消失，否则改完还会一直拦着重导
+  sheet.needsConfirm = false;
   const confs = Object.keys(sheet.columns).map((k) => sheet.confidence[k] ?? 0.9);
   sheet.minConfidence = confs.length ? Math.min(...confs) : 0;
 }
