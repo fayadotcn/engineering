@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { D, lineTotal, round2, round3, sum } from "./money";
-import type { BoqItemDTO } from "@shared/types";
+import { isPricableItem, type BoqItemDTO } from "@shared/types";
 
 /**
  * 总价反算: hit an exact target total by scaling one field.
@@ -36,29 +36,31 @@ export function adjustToTarget(
   const tax = D(opts.taxRate ?? 0);
   const targetExcl = round2(D(opts.targetTotal).div(D(1).plus(tax)));
   const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+  const beforeTotal = sum(leaf.map(i => D(i.totalPrice)));
   const allowed = new Set(
-    (opts.allowedItemIds?.length
-      ? leaf.filter((i) => opts.allowedItemIds!.includes(i.id))
-      : leaf.filter((i) => !D(i.unitPrice).isZero() && !D(i.quantity).isZero())
-    ).map((i) => i.id)
+    leaf.filter(i => isPricableItem(i) && !D(i.unitPrice).isZero() && !D(i.quantity).isZero() &&
+      (opts.allowedItemIds === undefined || opts.allowedItemIds.includes(i.id))).map(i => i.id)
   );
   if (!allowed.size)
     return {
       ok: false, field, adjustments: [],
-      beforeTotal: new Decimal(0), afterTotal: new Decimal(0),
-      residual: new Decimal(0), reason: "没有可调整的清单项",
+      beforeTotal, afterTotal: beforeTotal,
+      residual: targetExcl.minus(beforeTotal), reason: "没有可调整的清单项",
     };
 
   const lineOf = (i: BoqItemDTO, val?: Decimal) =>
-    field === "quantity"
-      ? lineTotal(val ?? D(i.quantity), D(i.unitPrice))
-      : lineTotal(D(i.quantity), val ?? D(i.unitPrice));
+    val === undefined ? D(i.totalPrice) : field === "quantity"
+      ? lineTotal(val, D(i.unitPrice))
+      : lineTotal(D(i.quantity), val);
 
-  const beforeTotal = sum(leaf.map((i) => lineOf(i)));
   const fixedTotal = sum(leaf.filter((i) => !allowed.has(i.id)).map((i) => lineOf(i)));
   const varItems = leaf.filter((i) => allowed.has(i.id));
   const varTotal = sum(varItems.map((i) => lineOf(i)));
   const needed = targetExcl.minus(fixedTotal);
+  if (needed.isNegative()) return {
+    ok: false, field, adjustments: [], beforeTotal, afterTotal: beforeTotal,
+    residual: targetExcl.minus(beforeTotal), reason: "目标总价低于不可调整项合计，请核对总价措施、其他项目和调整范围",
+  };
   if (varTotal.isZero())
     return {
       ok: false, field, adjustments: [],

@@ -749,11 +749,10 @@ export async function writeBackPrices(
   columnsBySheet: Record<string, ColumnMap>
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  let loaded = true;
   try {
     await wb.xlsx.load(original as unknown as ArrayBuffer);
   } catch {
-    loaded = false;
+    throw new Error("源文件不是有效的 .xlsx 工作簿，无法保留原格式写回；请使用清单 Excel 导出");
   }
 
   const bySheet = new Map<string, CellPatch[]>();
@@ -763,37 +762,27 @@ export async function writeBackPrices(
     bySheet.set(p.sheetName, arr);
   });
 
-  if (loaded) {
-    for (const [sheetName, ps] of bySheet) {
-      const ws = wb.getWorksheet(sheetName);
-      if (!ws) continue;
-      const cols = columnsBySheet[sheetName] ?? {};
-      for (const p of ps) {
-        const row = ws.getRow(p.rowIndex);
-        if (p.unitPrice !== undefined && (p.priceCol ?? cols.unitPrice) !== undefined) {
-          row.getCell((p.priceCol ?? cols.unitPrice)! + 1).value = Number(p.unitPrice);
-        }
-        if (p.quantity !== undefined && (p.qtyCol ?? cols.quantity) !== undefined) {
-          row.getCell((p.qtyCol ?? cols.quantity)! + 1).value = Number(p.quantity);
-        }
-        if (p.totalPrice !== undefined && (p.totalCol ?? cols.totalPrice) !== undefined) {
-          row.getCell((p.totalCol ?? cols.totalPrice)! + 1).value = Number(p.totalPrice);
-        }
-        row.commit();
-      }
-    }
-    return Buffer.from(await wb.xlsx.writeBuffer());
-  }
-
-  const out = new ExcelJS.Workbook();
   for (const [sheetName, ps] of bySheet) {
-    const ws = out.addWorksheet(sheetName);
-    ws.addRow(["行号", "综合单价", "工程量", "合价"]);
-    ps.forEach((p) =>
-      ws.addRow([p.rowIndex, p.unitPrice ?? "", p.quantity ?? "", p.totalPrice ?? ""])
-    );
+    const ws = wb.getWorksheet(sheetName);
+    if (!ws) throw new Error(`源文件中找不到工作表「${sheetName}」，无法写回`);
+    const cols = columnsBySheet[sheetName] ?? {};
+    if (!["unitPrice", "quantity", "totalPrice"].some(role => cols[role] !== undefined) && !ps.some(p => p.priceCol !== undefined || p.qtyCol !== undefined || p.totalCol !== undefined))
+      throw new Error(`工作表「${sheetName}」没有已确认的工程量或金额列，请先核对映射并重新导入`);
+    for (const p of ps) {
+      const row = ws.getRow(p.rowIndex);
+      if (p.unitPrice !== undefined && (p.priceCol ?? cols.unitPrice) !== undefined) {
+        row.getCell((p.priceCol ?? cols.unitPrice)! + 1).value = Number(p.unitPrice);
+      }
+      if (p.quantity !== undefined && (p.qtyCol ?? cols.quantity) !== undefined) {
+        row.getCell((p.qtyCol ?? cols.quantity)! + 1).value = Number(p.quantity);
+      }
+      if (p.totalPrice !== undefined && (p.totalCol ?? cols.totalPrice) !== undefined) {
+        row.getCell((p.totalCol ?? cols.totalPrice)! + 1).value = Number(p.totalPrice);
+      }
+      row.commit();
+    }
   }
-  return Buffer.from(await out.xlsx.writeBuffer());
+  return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
 /** Build a fresh export workbook from current DB items grouped by sheet. */
@@ -810,8 +799,16 @@ export async function buildExportWorkbook(
   }[]
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
+  const names = new Set<string>();
   for (const s of sheets) {
-    const ws = wb.addWorksheet(s.sheetName);
+    const base = s.sheetName.replace(/[\\/*?:\[\]]/g, " ").replace(/^'+|'+$/g, "").trim().slice(0, 31) || "清单";
+    let name = base;
+    for (let n = 2; names.has(name.toLowerCase()); n++) {
+      const suffix = ` (${n})`;
+      name = base.slice(0, 31 - suffix.length) + suffix;
+    }
+    names.add(name.toLowerCase());
+    const ws = wb.addWorksheet(name);
     const labels = s.headerLabels;
     ws.addRow(labels).font = { bold: true };
     for (const r of s.rows) {

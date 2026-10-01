@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { fromJson } from "@shared/json";
+import { mappingToView, type SheetMeta } from "@file/inspection";
 
 // Conversation history: reconstruct blocks from persisted runs + events.
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -33,7 +34,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     events: r.events.map((e) => ({
       seq: e.seq,
       type: e.type,
-      payload: fromJson(e.payload, {}) as { view?: { id?: string } },
+      payload: fromJson(e.payload, {}) as { view?: { id?: string; kind?: string; fileId?: string } },
     })),
   }));
   const lastPatch = new Map<string, { seq: number; payload: { view?: { id?: string } } }>();
@@ -41,6 +42,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     for (const e of events)
       if (e.type === "workspace_patch" && e.payload.view?.id)
         lastPatch.set(e.payload.view.id, e);
+  // 列映射是可编辑的文件状态，历史识别快照不能覆盖用户已保存的映射。
+  const files = await prisma.projectFile.findMany({ where: { projectId: id } });
+  for (const file of files) {
+    const patch = lastPatch.get(`view:mapping:${file.id}`);
+    const mapping = fromJson<{ mapping?: Record<string, SheetMeta> }>(file.meta, {}).mapping;
+    if (patch && mapping) patch.payload.view = mappingToView(file, mapping);
+  }
   // 被覆盖的 patch 只回传 view.id 占位（重放时随即被后续同 id 的完整 patch 替换），省流量
   return NextResponse.json(
     parsed.map(({ run: r, events }) => ({

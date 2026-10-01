@@ -48,14 +48,19 @@ interface State {
   lastViewEvent: string | null;
   running: boolean;
   agentRunning: boolean;
+  importRunning: boolean;
   mappingDirty: boolean;
   settingsDirty: boolean;
+  boqDirty: boolean;
+  saving: boolean;
   pendingViewId: string | null;
   closedViewIds: string[];
   ready: boolean;
   boqVersion: number;
   /** 清单表全局搜索框（异常定位等跨组件联动用） */
   boqQuery: string;
+  boqOnlyUnpriced: boolean;
+  boqFocusVersion: number;
 
   init(projectId: string, refresh?: boolean): Promise<void>;
   send(text: string): Promise<void>;
@@ -91,17 +96,22 @@ export const useStore = create<State>((set, get) => ({
   lastViewEvent: null,
   running: false,
   agentRunning: false,
+  importRunning: false,
   mappingDirty: false,
   settingsDirty: false,
+  boqDirty: false,
+  saving: false,
   pendingViewId: null,
   closedViewIds: [],
   ready: false,
   boqVersion: 0,
   boqQuery: "",
+  boqOnlyUnpriced: false,
+  boqFocusVersion: 0,
 
   async init(projectId, refresh = false) {
     const version = ++loadVersion;
-    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, mappingDirty: false, settingsDirty: false, pendingViewId: null, closedViewIds: [], loadingError: null, boqQuery: "" });
+    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, importRunning: false, mappingDirty: false, settingsDirty: false, boqDirty: false, saving: false, pendingViewId: null, closedViewIds: [], loadingError: null, boqQuery: "", boqOnlyUnpriced: false, boqFocusVersion: 0 });
     try {
     const [p, items, runs, summary] = await Promise.all([
       fetch(`/api/projects/${projectId}`).then(async r => { if (!r.ok) throw new Error("项目不存在或暂时无法读取"); return r.json(); }),
@@ -185,7 +195,7 @@ export const useStore = create<State>((set, get) => ({
       ...views,
     ].filter(v => !get().closedViewIds.includes(v.id) || FIXED_VIEWS.has(v.id));
     // 看什么是用户的选择：Agent 推来的视图只入列，不切换当前打开的结果
-    const opening = get().activeViewId ?? "view:overview";
+    const opening = get().activeViewId ?? "view:boq";
     set({
       projectName: p.name,
       harnessSessionId: p.harnessSessionId ?? "",
@@ -196,7 +206,7 @@ export const useStore = create<State>((set, get) => ({
       summary,
       blocks,
       views: projectViews,
-      activeViewId: opening.startsWith("empty:") || projectViews.some(v => v.id === opening) ? opening : "view:overview",
+      activeViewId: opening.startsWith("empty:") || projectViews.some(v => v.id === opening) ? opening : "view:boq",
       lastViewEvent,
       ready: true,
       loadingError: null,
@@ -207,8 +217,9 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async send(text) {
-    const { projectId, running, agentRunning } = get();
-    if (!projectId || running || agentRunning || !text.trim()) return;
+    const { projectId, running, agentRunning, importRunning, saving, mappingDirty, settingsDirty, boqDirty } = get();
+    if (!projectId || running || agentRunning || importRunning || saving || !get().ready || !text.trim()) return;
+    if (mappingDirty || settingsDirty || boqDirty) { toast.info("请先保存或取消当前编辑，再发起任务"); return; }
     if (window.parent === window) { toast.info("请在 Harness 的造价工作台中发起任务（主入口端口 3210）"); return; }
     const harnessOrigin = sessionStorage.getItem("installation:harnessOrigin");
     if (!harnessOrigin) { toast.error("Harness 会话连接未建立，请从主入口打开工作台"); return; }
@@ -230,11 +241,12 @@ export const useStore = create<State>((set, get) => ({
         window.parent.postMessage({ type: "installation:task", projectId, text }, harnessOrigin);
       });
     } catch (error) {
+      if (get().projectId !== projectId) return;
       set((s) => ({
         blocks: [...s.blocks, { type: "error", text: error instanceof Error ? error.message : "请求失败" }],
       }));
       toast.error(error instanceof Error ? error.message : "请求失败");
-    } finally { set({ running: false }); }
+    } finally { if (get().projectId === projectId) set({ running: false }); }
   },
 
   async streamRun(runId: string) {
@@ -267,13 +279,14 @@ export const useStore = create<State>((set, get) => ({
             const awaiting = e.type === "confirm_request" && get().blocks.some(b => b.type === "confirm" && b.confirmId === e.payload.confirmId && !b.decided);
             if (awaiting || e.type === "run_finished") {
               await reader.cancel();
-              set({ running: false });
+              if (get().projectId === projectId) set({ running: false });
               return;
             }
           }
         }
         throw new Error("事件流提前结束");
       } catch {
+        if (get().projectId !== projectId) return;
         if (++attempts > 1) {
           if (get().projectId === projectId) set((s) => ({
             blocks: [...s.blocks, { type: "error", text: "导入进度连接中断，请检查项目资料状态", runId }],
@@ -287,23 +300,28 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async confirmImport(runId, approve) {
-    if (get().running || (approve && get().mappingDirty)) return;
+    const projectId = get().projectId;
+    if (!projectId || get().running || get().agentRunning || get().importRunning || get().saving || get().boqDirty || get().settingsDirty || get().mappingDirty) return;
     set({ running: true });
     try {
       const res = await fetch(`/api/runs/${runId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approve }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "确认失败");
+      if (get().projectId !== projectId) return;
       set(s => ({ blocks: s.blocks.map(b => b.type === "confirm" && b.runId === runId ? { ...b, decided: approve ? "approved" : "rejected" } : b) }));
       if (approve) await get().streamRun(runId);
+      if (get().projectId !== projectId) return;
       await Promise.all([get().refreshMeta(), get().reloadBoq()]);
+      if (get().projectId !== projectId) return;
       if (!get().blocks.some(b => b.type === "error" && b.runId === runId)) toast.success(approve ? "导入完成，请查看工程清单与项目资料" : "已取消本次导入");
-    } catch (error) { toast.error(error instanceof Error ? error.message : "确认失败"); }
-    finally { set({ running: false }); }
+    } catch (error) { if (get().projectId === projectId) toast.error(error instanceof Error ? error.message : "确认失败"); }
+    finally { if (get().projectId === projectId) set({ running: false }); }
   },
 
   async upload(file) {
     const { projectId } = get();
-    if (!projectId) return;
+    if (!projectId || get().running || get().agentRunning || get().importRunning || get().saving || !get().ready) return;
+    if (get().mappingDirty || get().settingsDirty || get().boqDirty) { toast.info("请先保存或取消当前编辑，再导入资料"); return; }
     set((s) => ({
       running: true,
       blocks: [...s.blocks, { type: "upload", filename: file.name, uploading: true }],
@@ -311,12 +329,14 @@ export const useStore = create<State>((set, get) => ({
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("filename", file.name);
       const res = await fetch(`/api/projects/${projectId}/files`, {
         method: "POST",
         body: fd,
       });
       if (!res.ok) throw new Error((await res.json()).error ?? `上传失败（${res.status}）`);
       const { runId, duplicate, file: existed } = await res.json();
+      if (get().projectId !== projectId) return;
       if (duplicate) {
         // 内容相同的文件已导入过：去掉上传占位块，不占用 run
         set((s) => ({
@@ -337,8 +357,10 @@ export const useStore = create<State>((set, get) => ({
       await get().refreshMeta();
       if (runId) await get().streamRun(runId);
       else set({ running: false });
+      if (get().projectId !== projectId) return;
       await Promise.all([get().refreshMeta(), get().reloadBoq()]);
     } catch (error) {
+      if (get().projectId !== projectId) return;
       set((s) => ({
         running: false,
         blocks: [
@@ -352,17 +374,31 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async patchItem(id, patch) {
+    const projectId = get().projectId;
+    if (!projectId || get().saving || get().running || get().agentRunning || get().importRunning) return false;
+    set({ saving: true });
+    let saved = false;
     try {
     const res = await fetch(`/api/boq-items/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     });
-    if (!res.ok) return false;
+    if (!res.ok) throw new Error((await res.json()).error ?? "保存失败，请重试");
+    saved = true;
+    if (get().projectId !== projectId) return true;
     await get().reloadBoq();
+    if (get().projectId !== projectId) return true;
     await get().refreshMeta();
     return true;
-    } catch { return false; }
+    } catch (error) {
+      if (get().projectId === projectId) {
+        if (saved) set({ loadingError: "清单修改已保存，刷新失败。请重新加载以查看最新数据。" });
+        toast.error(saved ? "修改已保存，数据刷新失败，请重新加载" : error instanceof Error ? error.message : "保存失败，请重试");
+      }
+      return saved;
+    }
+    finally { if (get().projectId === projectId) set({ saving: false }); }
   },
 
   async reloadBoq() {
@@ -394,17 +430,19 @@ export const useStore = create<State>((set, get) => ({
   },
 
   gotoBoqItem(key) {
+    if (get().saving || get().boqDirty || get().mappingDirty || get().settingsDirty) { toast.info("请先保存或取消当前编辑，再定位清单项"); return; }
     set((s) => {
       const views = s.views.some((v) => v.id === "view:boq")
-        ? s.views
+        ? s.views.map(v => v.id === "view:boq" && v.kind === "boqTable" ? { ...v, filter: undefined } : v)
         : [...s.views, { kind: "boqTable", id: "view:boq", title: "工程量清单" } as WorkspaceView];
-      return { views, boqQuery: key };
+      return { views, boqQuery: key, boqOnlyUnpriced: false, boqFocusVersion: s.boqFocusVersion + 1 };
     });
     get().setActiveView("view:boq");
   },
 
   setActiveView(id) {
-    if (id !== get().activeViewId && (get().mappingDirty || get().settingsDirty)) { set({ pendingViewId: id }); return; }
+    if (id !== get().activeViewId && get().saving) { toast.info("正在保存，请稍候再切换页面"); return; }
+    if (id !== get().activeViewId && (get().mappingDirty || get().settingsDirty || get().boqDirty)) { set({ pendingViewId: id }); return; }
     set(s => ({ activeViewId: id, closedViewIds: s.closedViewIds.filter(v => v !== id) }));
   },
 
@@ -416,14 +454,14 @@ export const useStore = create<State>((set, get) => ({
 
   closeView(id) {
     if (FIXED_VIEWS.has(id)) return;
-    if (get().activeViewId === id && (get().mappingDirty || get().settingsDirty)) return;
+    if (get().activeViewId === id && (get().mappingDirty || get().settingsDirty || get().boqDirty || get().saving)) return;
     set((s) => {
       const idx = s.views.findIndex((v) => v.id === id);
       if (idx < 0) return {};
       const views = s.views.filter((v) => v.id !== id);
       const activeViewId =
         s.activeViewId === id
-          ? "view:overview"
+          ? "view:boq"
           : s.activeViewId;
       return { views, activeViewId, closedViewIds: [...s.closedViewIds, id] };
     });
@@ -585,8 +623,7 @@ export const useStore = create<State>((set, get) => ({
     });
     // refresh data after mutations
     if (e.type === "receipt" || (e.type === "tool_finished" && e.payload.tool === "boq.update")) {
-      void get().reloadBoq();
-      void get().refreshMeta();
+      void Promise.all([get().reloadBoq(), get().refreshMeta()]).catch(() => toast.error("变更已执行，数据刷新失败，请重新加载"));
     }
   },
 }));

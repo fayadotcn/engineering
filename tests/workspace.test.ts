@@ -16,9 +16,28 @@ function fixture(items: unknown[] = []) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("专业结果与工程对话联动", () => {
-  it("打开工程先展示总览，历史结果仍可查看", async () => {
+  it("对话正在导入时，工作区不发起模型任务或批准另一项导入", async () => {
     fixture(); await useStore.getState().init("project-1");
-    expect(useStore.getState().activeViewId).toBe("view:overview");
+    useStore.setState({ importRunning: true });
+    const fetch = vi.mocked(globalThis.fetch); fetch.mockClear();
+    await useStore.getState().send("测算综合单价");
+    await useStore.getState().confirmImport("import-1", true);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(useStore.getState().running).toBe(false);
+  });
+
+  it("工作区保留未保存映射，不能直接确认导入", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    useStore.setState({ mappingDirty: true });
+    const fetch = vi.mocked(globalThis.fetch); fetch.mockClear();
+    await useStore.getState().confirmImport("import-1", true);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(useStore.getState().mappingDirty).toBe(true);
+  });
+
+  it("按需打开工作区先展示清单，概况和历史结果仍可查看", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    expect(useStore.getState().activeViewId).toBe("view:boq");
     expect(useStore.getState().views.some(v => v.id === "result")).toBe(true);
   });
 
@@ -86,6 +105,101 @@ describe("专业结果与工程对话联动", () => {
     useStore.getState().setActiveView("view:boq");
     expect(useStore.getState().activeViewId).toBe("view:facts");
     expect(useStore.getState().pendingViewId).toBe("view:boq");
+  });
+
+  it("清单草稿同样受切换保护，定位不能偷偷覆盖搜索词", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    useStore.setState({ activeViewId: "view:boq", boqDirty: true, boqQuery: "管道" });
+    useStore.getState().setActiveView("view:files");
+    expect(useStore.getState().activeViewId).toBe("view:boq");
+    expect(useStore.getState().pendingViewId).toBe("view:files");
+    useStore.getState().gotoBoqItem("电缆");
+    expect(useStore.getState().boqQuery).toBe("管道");
+  });
+
+  it("保存期间不能切走页面或批准导入", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    useStore.setState({ activeViewId: "view:boq", saving: true });
+    useStore.getState().setActiveView("view:files");
+    expect(useStore.getState().activeViewId).toBe("view:boq");
+    const fetch = vi.mocked(globalThis.fetch); fetch.mockClear();
+    await useStore.getState().confirmImport("import", true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("未保存条件不能被新任务或新文件导入覆盖", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    useStore.setState({ settingsDirty: true });
+    const fetch = vi.mocked(globalThis.fetch); fetch.mockClear();
+    await useStore.getState().send("测算");
+    await useStore.getState().upload({ name: "清单.xlsx" } as File);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(useStore.getState().running).toBe(false);
+  });
+
+  it("清单保存拒绝重复提交，失败后释放保存状态", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
+    const first = useStore.getState().patchItem("item", { quantity: "12" });
+    expect(useStore.getState().saving).toBe(true);
+    expect(await useStore.getState().patchItem("item", { quantity: "13" })).toBe(false);
+    expect(fetch).toHaveBeenCalledOnce();
+    finish(Response.json({ error: "工程量格式不正确" }, { status: 400 }));
+    expect(await first).toBe(false);
+    expect(useStore.getState().saving).toBe(false);
+  });
+
+  it("写入成功而刷新失败时说明真实状态，不诱导重复保存", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => init?.method === "PATCH" ? Response.json({}) : Response.json({}, { status: 503 })));
+    expect(await useStore.getState().patchItem("item", { unitPrice: "20" })).toBe(true);
+    expect(useStore.getState().loadingError).toContain("修改已保存");
+    expect(useStore.getState().saving).toBe(false);
+  });
+
+  it("切换工程后旧上传失败不能污染新工程或结束其任务", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    let fail!: (error: Error) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((_resolve, reject) => { fail = reject; })));
+    const uploading = useStore.getState().upload(new File(["data"], "清单.xlsx"));
+    fixture(); await useStore.getState().init("project-2");
+    useStore.setState({ running: true });
+    fail(new Error("旧请求断线"));
+    await uploading;
+    expect(useStore.getState().projectId).toBe("project-2");
+    expect(useStore.getState().blocks).not.toContainEqual(expect.objectContaining({ text: expect.stringContaining("旧请求") }));
+    expect(useStore.getState().running).toBe(true);
+  });
+
+  it("刷新失败保留已加载的清单和当前视图", async () => {
+    fixture([{ id: "pipe" }]); await useStore.getState().init("project-1");
+    useStore.getState().setActiveView("view:boq");
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({}, { status: 503 })));
+    await useStore.getState().init("project-1", true);
+    expect(useStore.getState().items).toEqual([{ id: "pipe" }]);
+    expect(useStore.getState().activeViewId).toBe("view:boq");
+    expect(useStore.getState().loadingError).toBeTruthy();
+  });
+
+  it("关闭过的结果可显式重新打开，刷新后不会丢掉焦点", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    useStore.getState().closeView("result");
+    useStore.getState().setActiveView("result");
+    await useStore.getState().init("project-1", true);
+    expect(useStore.getState().views.some(v => v.id === "result")).toBe(true);
+    expect(useStore.getState().activeViewId).toBe("result");
+  });
+
+  it("定位目标项重置旧专业筛选和未定价筛选", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    useStore.getState().replaceView({ kind: "boqTable", id: "view:boq", title: "清单", filter: { discipline: "FIRE", query: "喷淋" } });
+    useStore.setState({ boqOnlyUnpriced: true });
+    useStore.getState().gotoBoqItem("电缆");
+    expect(useStore.getState().boqOnlyUnpriced).toBe(false);
+    expect(useStore.getState().boqQuery).toBe("电缆");
+    expect(useStore.getState().views.find(v => v.id === "view:boq")).not.toHaveProperty("filter.discipline");
+    expect(useStore.getState().boqFocusVersion).toBe(1);
   });
 
   it("已结束任务中的未决确认不再作为可批准事项重放", async () => {

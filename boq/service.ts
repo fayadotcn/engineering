@@ -112,6 +112,9 @@ export async function updateBoqItems(
   const updates: Prisma.PrismaPromise<unknown>[] = [];
   for (const { id, patch } of patches) {
     const cur = existing.find((e) => e.id === id)!;
+    const lumpSum = cur.feeType === "总价措施" || cur.feeType === "其他项目";
+    if (lumpSum && (patch.quantity !== undefined || patch.unitPrice !== undefined))
+      throw new Error("总价措施和其他项目按总额计价，请直接修改合价");
     const qty = patch.quantity !== undefined ? round3(D(patch.quantity)) : cur.quantity;
     const price =
       patch.unitPrice !== undefined ? round2(D(patch.unitPrice)) : cur.unitPrice;

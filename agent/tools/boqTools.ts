@@ -238,21 +238,27 @@ const patchSchema = z.object({
   id: z.string(),
   unitPrice: z.string().optional(),
   quantity: z.string().optional(),
+  totalPrice: z.string().optional().describe("仅总价措施/其他项目可直接修改合价，其他项请改工程量或综合单价"),
   name: z.string().optional(),
   rawFeature: z.string().optional(),
 });
 
 registerTool({
   name: "boq.update",
-  description: "修改清单项（单价/工程量/名称/项目特征），自动重算合价并生成修改回执与 Diff",
+  description: "修改清单项（综合单价/工程量/名称/项目特征），总价措施和其他项目可直接改合价，生成修改回执与 Diff",
   implemented: true,
   schema: z.object({
     patches: z.array(patchSchema),
     reason: z.string().optional(),
   }),
   confirm: (a: { patches: unknown[]; reason?: string }) =>
-    `将修改 ${a.patches.length} 个清单项${a.reason ? `（${a.reason}）` : ""}，合价自动重算`,
+    `将修改 ${a.patches.length} 个清单项${a.reason ? `（${a.reason}）` : ""}，按各项计价口径更新金额`,
   handler: async (ctx, args: { patches: z.infer<typeof patchSchema>[]; reason?: string }) => {
+    if (args.patches.some(p => p.totalPrice !== undefined)) {
+      const items = await listBoq(ctx.projectId);
+      if (args.patches.some(p => p.totalPrice !== undefined && items.some(i => i.id === p.id && i.feeType !== "总价措施" && i.feeType !== "其他项目")))
+        throw new Error("分部分项和单价措施的合价由工程量×综合单价自动计算");
+    }
     const { before, after } = await updateBoqItems(
       ctx.projectId,
       args.patches.map((p) => {

@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Loader2 } from "lucide-react";
 import { toast } from "./primitives";
 
@@ -8,13 +8,15 @@ export function NewProject() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const router = useRouter();
+  const lock = useRef(false);
   useEffect(() => {
     const origin = new URLSearchParams(location.search).get("harnessOrigin");
     if (origin) sessionStorage.setItem("installation:harnessOrigin", origin);
   }, []);
 
   const create = async () => {
-    if (!name.trim() || busy) return;
+    if (!name.trim() || lock.current) return;
+    lock.current = true;
     setBusy(true);
     try {
     const res = await fetch("/api/projects", {
@@ -25,7 +27,7 @@ export function NewProject() {
     const p = await res.json();
     if (!res.ok || !p.id) throw new Error(p.error ?? "项目创建失败");
     router.push(`/p/${p.id}`);
-    } catch (error) { toast.error(error instanceof Error ? error.message : "项目创建失败"); setBusy(false); }
+    } catch (error) { toast.error(error instanceof Error ? error.message : "项目创建失败"); lock.current = false; setBusy(false); }
   };
 
   return (

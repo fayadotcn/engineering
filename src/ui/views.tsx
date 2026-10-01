@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "./store";
 import type {
   AnomalyRow,
+  BoqItemDTO,
   BreakdownSlice,
   DiffRow,
   FileCompareRow,
@@ -14,6 +15,7 @@ import { DISCIPLINE_LABEL, isPricableItem } from "@shared/types";
 import { ArrowDown, ArrowUp, ChevronDown, Download, FileSpreadsheet, AlertTriangle, Funnel, X } from "lucide-react";
 import { ConfirmDialog, EmptyState, toast } from "./primitives";
 import { projectTotals } from "@cost-engine/aggregate";
+import { readResponse } from "./http";
 
 const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -77,12 +79,15 @@ function ExcelHead({
 
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    const close = (event: Event) => { if (event.target instanceof Element && event.target.closest("[data-excel-menu]")) return; setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setOpen(false); btnRef.current?.focus(); } };
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
+    window.addEventListener("keydown", escape);
     return () => {
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", escape);
     };
   }, [open]);
 
@@ -118,6 +123,8 @@ function ExcelHead({
               open && "border-[var(--brand-accent)] bg-[var(--brand-soft)] text-[var(--brand-accent)]"
             )}
             title="排序与筛选"
+            aria-label={`${label}排序与筛选`}
+            aria-expanded={open}
           >
             <Icon size={11} strokeWidth={2.2} />
           </button>
@@ -127,6 +134,8 @@ function ExcelHead({
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div
+            data-excel-menu
+            aria-label={`${label}筛选与排序`}
             className="fixed z-40 w-52 overflow-auto rounded-lg border border-neutral-200 bg-[var(--surface)] p-1 text-left font-normal shadow-[var(--shadow-menu)]"
             style={{ left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: 320 }}
             onClick={(e) => e.stopPropagation()}
@@ -136,7 +145,8 @@ function ExcelHead({
                 {([["asc", "升序", ArrowUp], ["desc", "降序", ArrowDown]] as const).map(([d, l, Icon]) => (
                   <button
                     key={d}
-                    onClick={() => { onSort(sortDir === d ? null : d); setOpen(false); }}
+                    onClick={() => { onSort(sortDir === d ? null : d); setOpen(false); btnRef.current?.focus(); }}
+                    aria-pressed={sortDir === d}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--hover)]",
                       sortDir === d && "font-medium text-[var(--brand-accent)]"
@@ -152,6 +162,7 @@ function ExcelHead({
             {onText && (
               <div className="px-1.5 py-1">
                 <input
+                  aria-label={`筛选${label}`}
                   autoFocus={!options}
                   value={text ?? ""}
                   onChange={(e) => onText(e.target.value)}
@@ -167,7 +178,7 @@ function ExcelHead({
                     type="checkbox"
                     checked={!selected || selected.size === options.length}
                     onChange={onAll}
-                    className="accent-[#465d50]"
+                    className="accent-[var(--brand-accent)]"
                   />
                   <span className="text-neutral-600">（全选）</span>
                 </label>
@@ -181,7 +192,7 @@ function ExcelHead({
                         type="checkbox"
                         checked={!selected || selected.has(o.v)}
                         onChange={() => onToggle?.(o.v)}
-                        className="accent-[#465d50]"
+                        className="accent-[var(--brand-accent)]"
                       />
                       <span className="min-w-0 flex-1 truncate">{o.v || "（空白）"}</span>
                       <span className="text-[10.5px] text-neutral-400">{o.n}</span>
@@ -201,25 +212,24 @@ function ExcelHead({
    回执聚合面板：每一次数据修改可追溯、可撤销 */
 
 const ACTION_LABEL: Record<string, string> = {
-  BOQ_UPDATE: "清单修改", PRICE_APPLY: "价格写回", QUANTITY_ADJUST: "总价调整",
+  BOQ_UPDATE: "清单修改", PRICE_APPLY: "价格写回", QUANTITY_ADJUST: "总价调整", PRICE_ADJUST: "总价调整",
   FILE_IMPORT: "文件导入", FILE_DELETE: "文件删除", EXPORT: "导出",
   USER_EDIT: "手动编辑", FACT_SET: "台账写入", REVERT: "撤销", SETTINGS_UPDATE: "计价设置", PROJECT_CREATE: "新建工程",
 };
 
 export function ReceiptsView() {
-  const { receipts, reloadBoq } = useStore();
+  const { receipts, reloadBoq, running, agentRunning, importRunning } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
   const revert = async (id: string) => {
     setBusy(id);
-    const res = await fetch(`/api/receipts/${id}/revert`, { method: "POST" });
-    setBusy(null);
-    if (res.ok) {
-      toast.success("已撤销该修改");
+    try {
+      const res = await fetch(`/api/receipts/${id}/revert`, { method: "POST" });
+      if (!res.ok) throw new Error((await res.json()).error ?? "撤销失败，请重试");
       await reloadBoq();
-      useStore.getState().refreshMeta();
-    } else {
-      toast.error("撤销失败 — 该操作不可撤销或已被撤销");
-    }
+      await useStore.getState().refreshMeta();
+      toast.success("已撤销该修改");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "撤销失败，请重试"); }
+    finally { setBusy(null); }
   };
   return (
     <div className="h-full overflow-auto p-4">
@@ -253,8 +263,8 @@ export function ReceiptsView() {
                   {r.reversible && r.actionType !== "REVERT" ? (
                     <button
                       onClick={() => revert(r.id)}
-                      disabled={busy === r.id}
-                      className="invisible rounded px-1.5 py-0.5 text-[11px] text-neutral-500 hover:bg-[var(--hover)] hover:text-neutral-800 group-hover:visible disabled:opacity-40"
+                      disabled={!!busy || running || agentRunning || importRunning}
+                      className="rounded px-1.5 py-0.5 text-[11px] text-neutral-500 hover:bg-[var(--hover)] hover:text-neutral-800 disabled:opacity-40"
                     >
                       {busy === r.id ? "…" : "撤销"}
                     </button>
@@ -277,45 +287,65 @@ export function ReceiptsView() {
 /* ---------------- 清单表 ---------------- */
 
 type BoqSortKey = "code" | "name" | "quantity" | "unitPrice" | "totalPrice";
+type BoqEditField = "quantity" | "unitPrice" | "totalPrice";
 
-export function BoqTable() {
-  const { items, patchItem, boqQuery, setBoqQuery, running, agentRunning } = useStore();
+export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqTable" }> }) {
+  const { items, patchItem, boqQuery, boqOnlyUnpriced, setBoqQuery, running, agentRunning, importRunning, saving } = useStore();
   const query = boqQuery;
-  const [editing, setEditing] = useState<{ id: string; field: "unitPrice" | "quantity" } | null>(null);
+  const [discipline, setDiscipline] = useState<string>(view?.filter?.discipline ?? "");
+  const [onlyItems, setOnlyItems] = useState(!!view?.filter?.onlyItems);
+  const previousQuery = useRef(view?.filter?.query);
+  useEffect(() => {
+    if (view?.filter?.query !== undefined || previousQuery.current !== undefined) setBoqQuery(view?.filter?.query ?? "");
+    previousQuery.current = view?.filter?.query;
+  }, [view?.filter?.query, setBoqQuery]);
+  useEffect(() => { setDiscipline(view?.filter?.discipline ?? ""); setOnlyItems(!!view?.filter?.onlyItems); setLimit(300); }, [view?.filter?.discipline, view?.filter?.onlyItems]);
+  const [editing, setEditing] = useState<{ id: string; field: BoqEditField } | null>(null);
   const [draft, setDraft] = useState("");
   const [limit, setLimit] = useState(300);
   const [selected, setSelected] = useState<string | null>(null);
   const [colText, setColText] = useState({ code: "", name: "", feature: "" });
   const [unitSel, setUnitSel] = useState<Set<string> | null>(null); // null = 全选
   const [sort, setSort] = useState<{ key: BoqSortKey; dir: SortDir } | null>(null);
+  const [details, setDetails] = useState(false);
   const committing = useRef(false);
+  const editRef = useRef<typeof editing>(null);
+  useEffect(() => {
+    useStore.setState({ boqDirty: !!editing && draft !== items.find(i => i.id === editing.id)?.[editing.field] });
+    return () => { useStore.setState({ boqDirty: false }); };
+  }, [editing, draft, items]);
+  const cancelEdit = () => { if (committing.current) return; editRef.current = null; setEditing(null); };
+  const beginEdit = (item: BoqItemDTO, field: BoqEditField) => {
+    if (running || agentRunning || importRunning || saving || committing.current || editRef.current) return;
+    editRef.current = { id: item.id, field };
+    setEditing({ id: item.id, field });
+    setDraft(item[field]);
+  };
 
-  const commit = async (moveTab?: boolean) => {
-    if (!editing || committing.current) return;
+  const commit = async (moveTab?: 1 | -1) => {
+    if (!editing || !editRef.current || committing.current) return;
     const v = draft.trim();
-    if (v !== "" && isNaN(Number(v))) {
-      toast.error("请输入数字");
-      setEditing(null);
+    if (!v || !Number.isFinite(Number(v))) {
+      toast.error("请输入有效数字，零金额请填写 0");
       return;
     }
     const cur = editing;
     committing.current = true;
     setEditing(null);
-    const ok = await patchItem(cur.id, { [cur.field]: v });
+    const ok = v === items.find(i => i.id === cur.id)?.[cur.field] || await patchItem(cur.id, { [cur.field]: v });
     committing.current = false;
-    if (!ok) toast.error("保存失败，请重试");
-    if (moveTab) {
-      // 同行下一个字段，或下一行第一个字段
-      const idx = leafIds.indexOf(cur.id);
-      const next =
-        cur.field === "quantity"
-          ? { id: cur.id, field: "unitPrice" as const }
-          : idx >= 0 && idx + 1 < leafIds.length
-            ? { id: leafIds[idx + 1], field: "quantity" as const }
-            : null;
+    if (!ok) setEditing(cur);
+    else editRef.current = null;
+    if (moveTab && ok) {
+      const cells = leafIds.flatMap<{ id: string; field: BoqEditField }>(id => isPricableItem(items.find(i => i.id === id)!)
+        ? [{ id, field: "quantity" as const }, { id, field: "unitPrice" as const }]
+        : [{ id, field: "totalPrice" as const }]);
+      const idx = cells.findIndex(cell => cell.id === cur.id && cell.field === cur.field);
+      const next = idx >= 0 ? cells[idx + moveTab] : undefined;
       if (next) {
         const it = items.find((x) => x.id === next.id);
         if (it) {
+          editRef.current = next;
           setEditing(next);
           setDraft(it[next.field]);
         }
@@ -332,11 +362,13 @@ export function BoqTable() {
   }, [items]);
 
   const filtering = Boolean(
-    query.trim() || colText.code || colText.name || colText.feature || unitSel || sort
+    query.trim() || colText.code || colText.name || colText.feature || unitSel || sort || discipline || onlyItems || boqOnlyUnpriced
   );
 
   const filtered = items.filter((i) => {
     if (i.isHeader) return !filtering;
+    if (discipline && i.discipline !== discipline) return false;
+    if (boqOnlyUnpriced && (!isPricableItem(i) || Number(i.unitPrice) !== 0)) return false;
     const q = query.trim();
     if (q && !(i.name.includes(q) || i.code.includes(q) || i.rawFeature.includes(q))) return false;
     if (colText.code && !i.code.includes(colText.code)) return false;
@@ -359,7 +391,7 @@ export function BoqTable() {
     : filtered;
   const shown = sorted.slice(0, limit);
   // 有序叶子行（Tab 跳格沿当前排序/筛选顺序走）
-  const leafIds = sorted.filter((i) => !i.isHeader).map((i) => i.id);
+  const leafIds = shown.filter((i) => !i.isHeader).map((i) => i.id);
   const dataTotal = items.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   const dataShown = sorted.reduce((n, i) => n + (i.isHeader ? 0 : 1), 0);
   // 造价师视角：合价合计随筛选联动，未定价项计数常显
@@ -383,6 +415,7 @@ export function BoqTable() {
     setColText({ code: "", name: "", feature: "" });
     setUnitSel(null);
     setSort(null);
+    setDiscipline(""); setOnlyItems(false); useStore.setState({ boqOnlyUnpriced: false });
     setLimit(300);
   };
 
@@ -391,15 +424,19 @@ export function BoqTable() {
       <div className="cost-table-toolbar flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
         <Funnel size={12} className="shrink-0 text-neutral-400" />
         <input
+          disabled={!!editing || saving}
           value={query}
           onChange={(e) => { setBoqQuery(e.target.value); setLimit(300); }}
-          placeholder="搜索名称 / 编码 / 特征…"
+          placeholder="查找清单项目"
           aria-label="搜索工程清单"
           className="h-7 w-56 rounded-md border border-neutral-200 bg-[var(--surface)] px-2.5 text-[12px] outline-none focus:border-[var(--brand-accent)]"
         />
+        <button className="cost-btn" aria-pressed={!!boqOnlyUnpriced} disabled={!!editing || saving} onClick={() => { useStore.setState({ boqOnlyUnpriced: !boqOnlyUnpriced }); setLimit(300); }}>只看未报价{unpriced ? `（${unpriced}）` : ""}</button>
+        <details className="cost-simple-more"><summary>更多筛选</summary><div className="cost-more-body"><select aria-label="筛选清单专业" disabled={!!editing || saving} value={discipline} className="h-7 rounded-md border border-neutral-200 bg-[var(--surface)] px-2 text-xs" onChange={e => { setDiscipline(e.target.value); setLimit(300); }}><option value="">全部专业</option>{Object.entries(DISCIPLINE_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><label><input type="checkbox" checked={details} disabled={!!editing || saving} onChange={e => setDetails(e.target.checked)} />显示编码、特征和列筛选</label></div></details>
         {filtering && (
           <button
             onClick={clearAll}
+            disabled={!!editing || saving}
             className="flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-neutral-500 hover:bg-[var(--hover)] hover:text-neutral-700"
           >
             <X size={11} /> 清除筛选
@@ -412,38 +449,39 @@ export function BoqTable() {
           {sort && " · 已排序"}
         </span>
       </div>
-      <p className="px-3 py-2 text-[11px] text-neutral-500">双击工程量或综合单价可编辑，Enter 保存、Esc 取消。主材暂估价是组价输入。</p>
+      {editing && <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-neutral-500"><span>改好后点击保存。</span><button className="cost-btn primary" disabled={saving} onPointerDown={e => e.preventDefault()} onClick={() => void commit()}>保存修改</button><button className="cost-btn" disabled={saving} onPointerDown={e => e.preventDefault()} onClick={cancelEdit}>取消</button></div>}
+      {!editing && <p className="px-3 py-2 text-[11px] text-neutral-500">点击数量或单价即可修改。总额计价的费用直接改金额。</p>}
       <div className="flex-1 overflow-auto">
       <table className="xl-table">
-        <thead>
+        <thead inert={!!editing || saving}>
           <tr>
             <th className="xl-rn"></th>
-            <th className="group/th relative w-28">
+            {details && <th className="group/th relative w-28">
               <ExcelHead label="项目编码" sortDir={sort?.key === "code" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "code", dir: d } : null)} text={colText.code} onText={setText("code")} />
-            </th>
+            </th>}
             <th className="group/th relative">
-              <ExcelHead label="项目名称" sortDir={sort?.key === "name" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "name", dir: d } : null)} text={colText.name} onText={setText("name")} />
+              {details ? <ExcelHead label="项目名称" sortDir={sort?.key === "name" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "name", dir: d } : null)} text={colText.name} onText={setText("name")} /> : "项目"}
             </th>
-            <th className="group/th relative">
+            {details && <th className="group/th relative">
               <ExcelHead label="项目特征" text={colText.feature} onText={setText("feature")} />
-            </th>
+            </th>}
             <th className="group/th relative w-12">
-              <ExcelHead
+              {details ? <ExcelHead
                 label="单位"
                 options={units}
                 selected={unitSel ?? undefined}
                 onToggle={toggleUnit}
                 onAll={() => { setUnitSel(null); setLimit(300); }}
-              />
+              /> : "单位"}
             </th>
             <th className="group/th relative w-20 text-right">
-              <ExcelHead numeric label="工程量" sortDir={sort?.key === "quantity" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "quantity", dir: d } : null)} />
+              {details ? <ExcelHead numeric label="工程量" sortDir={sort?.key === "quantity" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "quantity", dir: d } : null)} /> : "数量"}
             </th>
             <th className="group/th relative w-24 text-right">
-              <ExcelHead numeric label="综合单价" sortDir={sort?.key === "unitPrice" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "unitPrice", dir: d } : null)} />
+              {details ? <ExcelHead numeric label="综合单价" sortDir={sort?.key === "unitPrice" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "unitPrice", dir: d } : null)} /> : "单价（元）"}
             </th>
             <th className="group/th relative w-28 text-right">
-              <ExcelHead numeric label="合价" sortDir={sort?.key === "totalPrice" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "totalPrice", dir: d } : null)} />
+              {details ? <ExcelHead numeric label="合价" sortDir={sort?.key === "totalPrice" ? sort.dir : null} onSort={(d) => setSort(d ? { key: "totalPrice", dir: d } : null)} /> : "金额（元）"}
             </th>
           </tr>
         </thead>
@@ -452,7 +490,7 @@ export function BoqTable() {
             it.isHeader ? (
               <tr key={it.id} className="xl-group">
                 <td className="xl-rn">{i + 1}</td>
-                <td colSpan={7} className="text-[12px]">
+                <td colSpan={details ? 7 : 5} className="text-[12px]">
                   {it.name}
                 </td>
               </tr>
@@ -460,31 +498,34 @@ export function BoqTable() {
               <tr
                 key={it.id}
                 className={cn(
-                  Number(it.quantity) === 0 && "opacity-45",
+                  isPricableItem(it) && Number(it.quantity) === 0 && "opacity-45",
                   selected === it.id && "xl-sel"
                 )}
-                title={Number(it.quantity) === 0 ? "工程量为 0" : undefined}
+                title={isPricableItem(it) && Number(it.quantity) === 0 ? "工程量为 0" : undefined}
                 onClick={() => setSelected(it.id)}
               >
                 <td className="xl-rn">{i + 1}</td>
-                <td className="mono text-neutral-500">{it.code}</td>
+                {details && <td className="mono text-neutral-500">{it.code}</td>}
                 <td className="max-w-72 truncate" title={it.name}>
                   {it.name}
+                  {!details && it.rawFeature && <div className="max-w-64 truncate text-[11px] text-neutral-500" title={it.rawFeature}>{it.rawFeature}</div>}
                   {it.feeType && it.feeType !== "分部分项" && (
                     <span className="ml-1 rounded bg-neutral-100 px-1 py-px text-[10px] text-neutral-500">
                       {it.feeType}
                     </span>
                   )}
                 </td>
-                <td className="max-w-56 truncate text-neutral-500" title={it.rawFeature}>
+                {details && <td className="max-w-56 truncate text-neutral-500" title={it.rawFeature}>
                   {it.rawFeature}
-                </td>
+                </td>}
                 <td className="text-neutral-500">{it.unit}</td>
-                {(["quantity", "unitPrice"] as const).map((f) => (
+                {(["quantity", "unitPrice", "totalPrice"] as const).map((f) => {
+                  const editable = isPricableItem(it) ? f !== "totalPrice" : f === "totalPrice";
+                  return (
                   <td
                     key={f}
                     className={cn(
-                      "xl-edit mono text-right",
+                      "mono text-right", editable && "xl-edit",
                       editing?.id === it.id && editing.field === f && "xl-active",
                       f === "unitPrice" && Number(it.unitPrice) === 0 && isPricableItem(it) &&
                         "bg-[var(--warning-soft-bg)] font-medium",
@@ -492,36 +533,38 @@ export function BoqTable() {
                         "text-[var(--warning-soft-fg)]"
                     )}
                     title={
-                      f === "unitPrice" && Number(it.unitPrice) === 0
-                        ? isPricableItem(it) ? "未定价 — 双击补价" : "总额计价行（无量价）"
-                        : "双击编辑"
+                      !editable ? isPricableItem(it) ? "工程量×综合单价自动计算" : "总额计价行，请编辑合价"
+                        : f === "unitPrice" && Number(it.unitPrice) === 0 ? "未报价 — 点击填写" : "点击或按 Enter 修改"
                     }
-                    onDoubleClick={() => {
-                      if (running || agentRunning || committing.current) return;
-                      setEditing({ id: it.id, field: f });
-                      setDraft(it[f]);
+                    tabIndex={editable ? 0 : undefined}
+                    onKeyDown={e => { if (editable && e.target === e.currentTarget && e.key === "Enter") { e.preventDefault(); beginEdit(it, f); } }}
+                    onClick={e => {
+                      if (editable) { e.stopPropagation(); setSelected(it.id); beginEdit(it, f); }
                     }}
                   >
                     {editing?.id === it.id && editing.field === f ? (
                       <input
                         autoFocus
+                        aria-label={`${it.name} ${FIELD_LABEL[f]}`}
+                        inputMode="decimal"
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
-                        onBlur={() => void commit()}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") void commit();
+                          e.stopPropagation();
+                          if (e.nativeEvent.isComposing) return;
+                          if (e.key === "Enter") { e.preventDefault(); void commit(); }
                           if (e.key === "Tab") {
                             e.preventDefault();
-                            void commit(true);
+                            void commit(e.shiftKey ? -1 : 1);
                           }
-                          if (e.key === "Escape") setEditing(null);
+                          if (e.key === "Escape") cancelEdit();
                         }}
                         className="w-20 border-0 bg-transparent px-0 py-0 text-right text-[12.5px] outline-none"
                       />
-                    ) : f === "unitPrice" ? (
+                    ) : f === "totalPrice" ? fmtMoney(it.totalPrice) : f === "unitPrice" ? (
                       <>
                         {fmtMoney(it[f])}
-                        {Number(it.mainMaterialPrice ?? 0) > 0 && (
+                        {details && Number(it.mainMaterialPrice ?? 0) > 0 && (
                           <div
                             className="text-[10px] font-normal text-neutral-400"
                             title="主材暂估价（组价输入）"
@@ -529,7 +572,7 @@ export function BoqTable() {
                             材 {fmtMoney(it.mainMaterialPrice)}
                           </div>
                         )}
-                        {(it.pricingPlan?.filter((l) => !l.suggested).length ?? 0) > 0 && (
+                        {details && (it.pricingPlan?.filter((l) => !l.suggested).length ?? 0) > 0 && (
                           <div
                             className="text-[10px] font-normal text-[var(--accent,#7a6a4f)]"
                             title={it.pricingPlan!.filter((l) => !l.suggested).map((l) => `${l.quotaCode} ${l.quotaName}`).join("\n")}
@@ -542,13 +585,13 @@ export function BoqTable() {
                       it[f]
                     )}
                   </td>
-                ))}
-                <td className="mono text-right">{fmtMoney(it.totalPrice)}</td>
+                ); })}
               </tr>
             )
           )}
         </tbody>
       </table>
+      {items.length > 0 && dataShown === 0 && <EmptyState title="没有符合筛选条件的清单项" hint="清除筛选或更换关键词后再查看。" />}
       {sorted.length > shown.length && (
         <button
           onClick={() => setLimit((l) => l + 500)}
@@ -566,7 +609,7 @@ export function BoqTable() {
       )}
       </div>
       {items.length > 0 && (
-        <div className="flex items-center gap-3 border-t border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
           <span className="text-[11.5px] text-neutral-500">
             合价合计
             <b className="mono ml-1.5 text-[12.5px] font-medium text-neutral-800">
@@ -666,7 +709,7 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                         <td className="w-12 text-center">
                           <button
                             onClick={() => gotoBoqItem(it.code || it.name)}
-                            className="invisible rounded px-1.5 py-0.5 text-[11px] text-neutral-400 hover:bg-[var(--active)] hover:text-neutral-700 group-hover:visible"
+                            className="rounded px-1.5 py-0.5 text-[11px] text-neutral-500 hover:bg-[var(--active)] hover:text-neutral-700"
                             title="在清单中定位"
                           >
                             定位
@@ -700,19 +743,20 @@ const MATCH_LABEL: Record<string, string> = {
 };
 
 export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: "quotationMatch" }> }) {
+  const [details, setDetails] = useState(false);
   return (
     <div className="h-full overflow-auto p-4">
+      <details className="cost-simple-more mb-3"><summary>更多信息</summary><div className="cost-more-body"><label><input type="checkbox" checked={details} onChange={e => setDetails(e.target.checked)} />显示品牌和匹配评分</label></div></details>
       <div className="xl-sheet overflow-hidden rounded-lg">
       <table className="xl-table">
         <thead>
           <tr>
             <th className="xl-rn"></th>
             <th>询价材料</th>
-            <th>规格</th>
-            <th>品牌</th>
-            <th className="text-right">询价</th>
+            {details && <><th>规格</th><th>品牌</th></>}
+            <th className="text-right">材料价（元）</th>
             <th>匹配清单项</th>
-            <th className="w-20">置信度</th>
+            {details && <th className="w-20">匹配评分</th>}
             <th className="w-20">状态</th>
           </tr>
         </thead>
@@ -720,21 +764,13 @@ export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: 
           {view.rows.map((r: QuotationMatchRow, ri) => (
             <tr key={r.quotationItemId}>
               <td className="xl-rn">{ri + 1}</td>
-              <td className="max-w-48 truncate" title={r.materialName}>{r.materialName}</td>
-              <td className="mono text-neutral-500">{r.spec || "—"}</td>
-              <td className="text-neutral-500">{r.brand || "—"}</td>
+              <td className="max-w-48 truncate" title={r.materialName}>{r.materialName}{!details && (r.spec || r.brand) && <div className="truncate text-[11px] text-neutral-500" title={[r.spec, r.brand].filter(Boolean).join(" · ")}>{[r.spec, r.brand].filter(Boolean).join(" · ")}</div>}</td>
+              {details && <><td className="mono text-neutral-500">{r.spec || "—"}</td><td className="text-neutral-500">{r.brand || "—"}</td></>}
               <td className="mono text-right">{fmtMoney(r.price)}</td>
               <td className="max-w-64 truncate text-neutral-600">
                 {r.matchedNames.join("、") || "—"}
               </td>
-              <td>
-                <div className="h-1 w-16 rounded bg-neutral-100">
-                  <div
-                    className={cn("h-1 rounded", r.confidence >= 60 ? "bg-green-500" : r.confidence >= 30 ? "bg-amber-400" : "bg-neutral-300")}
-                    style={{ width: `${Math.min(r.confidence, 100)}%` }}
-                  />
-                </div>
-              </td>
+              {details && <td className="mono text-neutral-500">{r.confidence}</td>}
               <td>
                 <span className={cn("rounded px-1.5 py-0.5 text-[11px]", MATCH_STYLE[r.status])}>
                   {MATCH_LABEL[r.status]}
@@ -745,6 +781,7 @@ export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: 
         </tbody>
       </table>
       </div>
+      {!view.rows.length && <EmptyState title="暂无材料价匹配结果" hint="先上传询价表，或让助手查询材料价格。" />}
     </div>
   );
 }
@@ -847,6 +884,7 @@ export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff"
 
 export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "quotaResult" }> }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [details, setDetails] = useState(false);
   const matched = view.rows.filter((r) => r.quotaCode).length;
   const needMain = view.rows.filter((r) => r.needsMainPrice).length;
   const ambiguous = view.rows.filter((r) => r.ambiguous).length;
@@ -856,19 +894,15 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2 text-[11.5px]">
-        <span className="text-neutral-400">
-          综合单价 = 人工+辅材+机械 + 主材价×耗量 + (人工+机械)×(管理费
-          {(view.mgmtRate * 100).toFixed(0)}%+利润{(view.profitRate * 100).toFixed(0)}%)
-        </span>
         <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-neutral-500">
-          匹配 {matched}/{view.rows.length}
+          {view.rows.length} 项中，{matched} 项找到定额
         </span>
         {needMain > 0 && (
           <span
             className="rounded px-1.5 py-0.5"
             style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
           >
-            {needMain} 项缺主材价
+            {needMain} 项还缺材料价
           </span>
         )}
         {ambiguous > 0 && (
@@ -877,7 +911,7 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
             style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
             title="存在得分相近且基价不同的备选子目，点击行可查看备选，或查定额说明核实"
           >
-            {ambiguous} 项存疑
+            {ambiguous} 项需要核对定额
           </span>
         )}
         {deviant > 0 && (
@@ -889,27 +923,24 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
           </span>
         )}
       </div>
+      <details className="cost-simple-more mb-3"><summary>查看费用构成和计算方法</summary><div className="cost-more-body"><label><input type="checkbox" checked={details} onChange={e => setDetails(e.target.checked)} />显示人工、材料、机械和取费</label><p className="w-full text-xs text-neutral-500">综合单价 = 人工+辅材+机械 + 主材价×耗量 + (人工+机械)×(管理费{(view.mgmtRate * 100).toFixed(0)}%+利润{(view.profitRate * 100).toFixed(0)}%)</p></div></details>
       <div className="xl-sheet overflow-hidden rounded-lg">
       <table className="xl-table">
         <thead>
           <tr>
             <th className="xl-rn"></th>
             <th>清单项</th>
-            <th>定额子目</th>
-            <th className="text-right">人工</th>
-            <th className="text-right">辅材</th>
-            <th className="text-right">机械</th>
-            <th className="text-right">主材</th>
-            <th className="text-right">管+利</th>
-            <th className="text-right">测算价</th>
-            <th className="text-right">清单价</th>
+            <th>状态 / 明细</th>
+            {details && <><th className="text-right">人工</th><th className="text-right">辅材</th><th className="text-right">机械</th><th className="text-right">主材</th><th className="text-right">管+利</th></>}
+            <th className="text-right">建议单价（元）</th>
+            <th className="text-right">原单价（元）</th>
             <th className="text-right">偏差</th>
           </tr>
         </thead>
         <tbody>
           {view.rows.map((r, ri) => {
             const expanded = open === r.itemId;
-            const hasDetail = !!(r.quotaCode && (r.quotaGcnr || r.quotaFb || r.quotaChapter || r.quotaBase || r.quotaMainName));
+            const hasDetail = !!r.quotaCode;
             return (
             <Fragment key={r.itemId}>
             <tr
@@ -922,25 +953,26 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
               <td className="max-w-40 truncate" title={r.name}>{r.name}</td>
               <td className="text-neutral-500">
                 {r.quotaCode ? (
-                  <span className="mono inline-flex items-center gap-1 text-[11px]">
+                  <button disabled={!hasDetail} aria-label={`查看${r.name}的定额工作内容`} aria-expanded={expanded} onClick={e => { e.stopPropagation(); if (hasDetail) setOpen(expanded ? null : r.itemId); }} className="mono inline-flex items-center gap-1 text-[11px]">
                     {hasDetail && <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />}
-                    {r.quotaCode}
+                    {details ? r.quotaCode : "查看明细"}
+                    {r.needsMainPrice && <span className="font-sans text-amber-600">缺材料价</span>}
                     {r.ambiguous && (
                       <span className="rounded bg-amber-100 px-1 py-px text-[9.5px] font-sans font-medium text-amber-700" title={r.altQuota ? `备选：${r.altQuota}` : "存在得分相近的备选子目"}>
                         存疑
                       </span>
                     )}
-                  </span>
-                ) : "—"}
+                  </button>
+                ) : "未找到定额"}
               </td>
-              <td className="mono text-right">{r.labor ?? "—"}</td>
+              {details && <><td className="mono text-right">{r.labor ?? "—"}</td>
               <td className="mono text-right">{r.materialAux ?? "—"}</td>
               <td className="mono text-right">{r.machine ?? "—"}</td>
               <td className="mono text-right">
                 {r.needsMainPrice ? <span className="text-amber-600">缺主材价</span> : r.mainMaterial ?? "—"}
               </td>
-              <td className="mono text-right">{r.fee ?? "—"}</td>
-              <td className="mono text-right font-medium">{r.calcPrice ?? "—"}</td>
+              <td className="mono text-right">{r.fee ?? "—"}</td></>}
+              <td className="mono text-right font-medium">{r.calcPrice ?? "—"}{r.needsMainPrice && <div className="text-[10px] font-sans font-normal text-amber-600">未含缺失材料价</div>}</td>
               <td className="mono text-right text-neutral-500">{fmtMoney(r.listPrice)}</td>
               <td className={cn(
                 "mono text-right",
@@ -952,7 +984,7 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
             {expanded && (
               <tr>
                 <td className="xl-rn"></td>
-                <td colSpan={10} className="whitespace-normal!" style={{ background: "var(--sidebar)" }}>
+                <td colSpan={details ? 10 : 5} className="whitespace-normal!" style={{ background: "var(--sidebar)" }}>
                   <div className="space-y-1 py-1.5 text-[11.5px] leading-relaxed">
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                       <span className="font-medium text-neutral-700">{r.quotaCode} {r.quotaName}</span>
@@ -1007,6 +1039,7 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
 /* ---------------- 费用汇总表（取费） ---------------- */
 
 export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: "feeSummary" }> }) {
+  const [details, setDetails] = useState(false);
   return (
     <div className="h-full overflow-auto p-4">
       {view.unpricedCount > 0 && (
@@ -1014,17 +1047,17 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
           className="mb-3 rounded-lg px-3 py-2 text-[12px]"
           style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
         >
-          {view.unpricedCount} 项清单未定价，以下费用未包含其金额——可先「用材料库补齐未定价项」
+          还有 {view.unpricedCount} 项未报价，以下总价尚不完整。请先在清单页点击“自动测算”。
         </div>
       )}
+      <details className="cost-simple-more mb-3"><summary>更多信息</summary><div className="cost-more-body"><label><input type="checkbox" checked={details} onChange={e => setDetails(e.target.checked)} />显示计算基础和费率</label></div></details>
       <div className="xl-sheet overflow-hidden rounded-lg">
         <table className="xl-table">
           <thead>
             <tr>
               <th className="w-16 text-center">序号</th>
               <th>费用名称</th>
-              <th>计算基础</th>
-              <th className="w-20 text-right">费率</th>
+              {details && <><th>计算基础</th><th className="w-20 text-right">费率</th></>}
               <th className="w-32 text-right">金额（元）</th>
               <th>备注</th>
             </tr>
@@ -1043,8 +1076,7 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
               >
                 <td className="text-center text-neutral-500">{r.seq}</td>
                 <td className={cn(r.level !== "leaf" && "font-medium")}>{r.name}</td>
-                <td className="text-neutral-500">{r.basis}</td>
-                <td className="mono text-right">{r.rate ?? "—"}</td>
+                {details && <><td className="text-neutral-500">{r.basis}</td><td className="mono text-right">{r.rate ?? "—"}</td></>}
                 <td className={cn("mono text-right", r.level === "total" && "text-[13px] font-semibold", r.level === "subtotal" && "font-medium")}>
                   {fmtMoney(r.amount)}
                 </td>
@@ -1143,7 +1175,7 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
   const s = view.summary;
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-200 bg-[var(--surface)] px-4 py-2 text-[12px]">
+      <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--surface)] px-4 py-2 text-[12px]">
         <span className="text-neutral-500">
           差额合计 <b className="mono text-neutral-800">{fmtMoney(s.totalDelta)}</b> 元
         </span>
@@ -1156,7 +1188,7 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
             {(s as { qtyOver15?: number }).qtyOver15} 项量差&gt;15% 应调价
           </span>
         ) : null}
-        <div className="ml-auto flex gap-1">
+        <div className="ml-auto flex flex-wrap gap-1">
           {[
             ["DIFF", `差异 ${s.total - s.same}`],
             ["ONLY_A", `仅A ${s.onlyA}`],
@@ -1167,6 +1199,7 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
             <button
               key={k}
               onClick={() => setFilter(k)}
+              aria-pressed={filter === k}
               className={cn(
                 "rounded px-2 py-1 text-[11.5px]",
                 filter === k ? "bg-neutral-900 text-white" : "text-neutral-500 hover:bg-neutral-100"
@@ -1177,6 +1210,7 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
           ))}
         </div>
       </div>
+      <p className="px-4 py-2 text-xs text-neutral-500 break-words">A：{view.labelA} · B：{view.labelB}</p>
       <div className="flex-1 overflow-auto">
         <table className="xl-table text-[12px]">
           <thead>
@@ -1221,6 +1255,7 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
                 </td>
               </tr>
             ))}
+            {!rows.length && <tr><td colSpan={9} className="py-8 text-center text-neutral-500">{filter === "DIFF" ? "两版清单没有差异" : "该类别没有清单项"}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1254,6 +1289,7 @@ export function SpecResultView({ view }: { view: Extract<WorkspaceView, { kind: 
       <div className="text-[11px] text-neutral-400">
         检索词「{view.query}」· {view.hits.length} 条相关条文 · 来源：《四川省2020建设工程工程量清单计价定额》说明及计算规则
       </div>
+      {!view.hits.length && <EmptyState title="没有找到相关条文" hint="换用材料名称、施工工艺或定额编号，再检索一次。" />}
       {view.hits.map((h, i) => (
         <div key={i} className="rounded-xl border border-neutral-200 bg-[var(--surface)] shadow-sm">
           <div className="flex items-center gap-2 border-b border-neutral-100 px-5 py-3">
@@ -1319,13 +1355,15 @@ export function FactList() {
 export function ExportResult({ view }: { view: Extract<WorkspaceView, { kind: "exportResult" }> }) {
   return (
     <div className="flex h-full items-center justify-center p-8">
-      <div className="w-80 rounded-xl border border-neutral-200 bg-[var(--surface)] p-5">
+      <div className="w-full max-w-80 rounded-xl border border-neutral-200 bg-[var(--surface)] p-5 break-words">
         <FileSpreadsheet size={20} className="text-neutral-400" />
         <div className="mt-3 text-[13px] font-medium">{view.filename}</div>
         <div className="mt-1 text-xs text-neutral-500">{view.summary}</div>
         <a
           href={`/api/artifacts/${view.artifactId}/download`}
-          className="mt-4 flex h-8 items-center justify-center gap-1.5 rounded-md bg-neutral-900 text-xs text-white hover:bg-neutral-700"
+          download={view.filename}
+          aria-label={`下载${view.filename}`}
+          className="cost-btn primary mt-4 w-full"
         >
           <Download size={13} /> 下载
         </a>
@@ -1335,30 +1373,39 @@ export function ExportResult({ view }: { view: Extract<WorkspaceView, { kind: "e
 }
 
 const FILE_STATUS: Record<string, { label: string; cls: string }> = {
+  UPLOADED: { label: "待解析", cls: "bg-neutral-100 text-neutral-500" },
   PARSED: { label: "已解析", cls: "bg-[var(--success-soft-bg)] text-[var(--success-soft-fg)]" },
   FAILED: { label: "解析失败", cls: "bg-[var(--danger-soft-bg)] text-[var(--danger-soft-fg)]" },
   PARSING: { label: "解析中", cls: "bg-[var(--warning-soft-bg)] text-[var(--warning-soft-fg)]" },
 };
 
 export function FileList() {
-  const { files, views, setActiveView, init, projectId, running, agentRunning } = useStore();
+  const { files, views, blocks, closedViewIds, setActiveView, init, projectId, running, agentRunning, importRunning, saving } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
   const [pendingDel, setPendingDel] = useState<{ id: string; name: string } | null>(null);
+  const lock = useRef(false);
+  const blocked = !!busy || running || agentRunning || importRunning || saving;
+  const openFile = async (id: string) => {
+    setActiveView(id);
+    if (!views.some(v => v.id === id) && projectId) await init(projectId, true);
+  };
   const remove = async () => {
-    if (!pendingDel) return;
+    if (!pendingDel || lock.current || blocked) return;
+    lock.current = true;
     setBusy(pendingDel.id);
+    useStore.setState({ saving: true });
     try {
       const res = await fetch(`/api/files/${pendingDel.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("删除失败，请重试");
+      await readResponse(res, "删除失败，请重试");
       toast.success(`已删除「${pendingDel.name}」及其导入数据`);
       setPendingDel(null);
       if (projectId) await init(projectId, true);
     } catch (error) { toast.error(error instanceof Error ? error.message : "删除失败，请重试"); }
-    finally { setBusy(null); }
+    finally { lock.current = false; setBusy(null); if (useStore.getState().projectId === projectId) useStore.setState({ saving: false }); }
   };
   return (
     <div className="h-full overflow-auto p-4">
-      <p className="cost-file-hint">文件保留在当前工程内。核对列映射或查看文档后，再继续组价。</p>
+      <p className="cost-file-hint">上传后系统会整理文件；需要你检查的表格会显示“待核对”。</p>
       <div className="xl-sheet overflow-auto rounded-lg">
         <table className="xl-table">
           <thead>
@@ -1371,7 +1418,7 @@ export function FileList() {
             </tr>
           </thead>
           <tbody>
-            {files.map((f, fi) => { const view = views.find(v => v.kind === "columnMapping" && v.fileId === f.id || v.kind === "document" && v.id === `view:doc:${f.id}`); return (
+            {files.map((f, fi) => { const view = views.find(v => v.kind === "columnMapping" && v.fileId === f.id || v.kind === "document" && v.id === `view:doc:${f.id}`); const closedId = closedViewIds.find(id => id === `view:mapping:${f.id}` || id === `view:doc:${f.id}`); const awaiting = blocks.some(b => b.type === "confirm" && !b.decided && (b.fileId === f.id || b.description.includes(f.filename))); return (
               <tr key={f.id} className="group">
                 <td className="xl-rn">{fi + 1}</td>
                 <td>
@@ -1387,17 +1434,17 @@ export function FileList() {
                   <span
                     className={cn(
                       "rounded px-1.5 py-0.5 text-[11px]",
-                      FILE_STATUS[f.status]?.cls ?? "bg-neutral-100 text-neutral-500"
+                      awaiting ? FILE_STATUS.PARSING.cls : FILE_STATUS[f.status]?.cls ?? "bg-neutral-100 text-neutral-500"
                     )}
                   >
-                    {FILE_STATUS[f.status]?.label ?? f.status}
+                    {awaiting ? "待核对" : FILE_STATUS[f.status]?.label ?? f.status}
                   </span>
                 </td>
                 <td className="text-center">
-                  {view && <button className="cost-file-action" onClick={() => setActiveView(view.id)}>{view.kind === "columnMapping" ? "核对映射" : "查看文档"}</button>}
+                  {(view || closedId) && <button className="cost-file-action" onClick={() => void openFile(view?.id ?? closedId!)}>{view?.kind === "columnMapping" || closedId?.startsWith("view:mapping:") ? "核对表格" : "查看文档"}</button>}
                   <button
                     onClick={() => setPendingDel({ id: f.id, name: f.filename })}
-                    disabled={!!busy || running || agentRunning}
+                    disabled={blocked}
                     className="cost-file-action danger"
                   >
                     删除
@@ -1415,7 +1462,7 @@ export function FileList() {
         title={`删除「${pendingDel?.name ?? ""}」？`}
         description="将同时删除该文件导入的全部清单/询价数据，此操作不可撤销（会记录删除回执）。"
         confirmText="删除"
-        busy={!!busy}
+        busy={blocked}
         onConfirm={remove}
         onCancel={() => setPendingDel(null)}
       />

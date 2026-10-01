@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { ProjectActivity } from "./activity";
 import { gistOf, summaryLine } from "./activity";
 
@@ -18,8 +17,6 @@ const SHEET_LABEL: Record<string, string> = { BOQ: "清单", QUOTATION: "询价"
 export type CardHandlers = {
   /** 打开资料列映射视图，让人核对低置信度的列 */
   onReviewMapping: () => void;
-  /** 批准或取消暂停中的导入 */
-  onConfirm: (approve: boolean) => Promise<void>;
   /** 打开工作区并定位到某个结果视图 */
   onFocusView: (viewId: string) => void;
   /** 把下一步交给 Agent（对话即造价） */
@@ -33,7 +30,6 @@ export function ActivityCards({ activity, importing, importingFile, progress, ha
   progress: string;
   handlers: CardHandlers;
 }) {
-  const [busy, setBusy] = useState(false);
   if (importing) {
     return <section className="installation-card busy" role="status">
       <header><SpinIcon />{progress || "正在识别文件…"}</header>
@@ -46,15 +42,11 @@ export function ActivityCards({ activity, importing, importingFile, progress, ha
 
   if (confirm) {
     const low = imported?.sheets.filter((s) => s.lowColumns > 0) ?? [];
-    const approve = async () => { setBusy(true); try { await handlers.onConfirm(true); } finally { setBusy(false); } };
     return <section className="installation-card warn" role="status">
       <header><WarnIcon />导入需要你确认</header>
-      <p className="installation-card-lead">{low.length ? `${low.length} 张表需要核对列角色或资料类型` : "请核对资料类型与列映射，再确认导入"}</p>
-      <details><summary>查看导入说明</summary><p className="installation-card-note">{confirm.description}</p></details>
+      <p className="installation-card-lead">{low.length ? `${low.length} 张表的识别结果需要核对` : "检查表格类型和各列名称，再确认导入"}</p>
       <div className="installation-card-actions">
-        <button className="primary" disabled={busy} onClick={handlers.onReviewMapping}>核对映射</button>
-        <button disabled={busy} onClick={() => void approve()}>确认导入</button>
-        <button disabled={busy} onClick={() => { setBusy(true); void handlers.onConfirm(false).finally(() => setBusy(false)); }}>取消</button>
+        <button className="primary" onClick={handlers.onReviewMapping}>核对并确认导入<NextIcon /></button>
       </div>
     </section>;
   }
@@ -64,16 +56,20 @@ export function ActivityCards({ activity, importing, importingFile, progress, ha
 
   if (resultAt && resultAt >= importedAt && result) {
     const gist = gistOf(result.summary);
-    return <section className="installation-card">
-      <header><OkIcon />本次结果</header>
+    const complete = result.status === "DONE";
+    const primary = result.views[result.views.length - 1];
+    const others = result.views.slice(0, -1);
+    return <section className={`installation-card${complete ? "" : " warn"}`}>
+      <header>{complete ? <OkIcon /> : <WarnIcon />}{complete ? "本次结果" : "任务尚未完成"}</header>
       {gist && <p className="installation-card-lead">{gist}</p>}
-      <details><summary>查看 {result.views.length} 份结果</summary><div className="installation-card-views">
-        {result.views.map((view) => <button key={view.id} onClick={() => handlers.onFocusView(view.id)}>
+      <div className="installation-card-actions"><button className="primary" onClick={() => handlers.onFocusView(primary.id)}>查看{primary.title}<NextIcon /></button></div>
+      {others.length > 0 && <details><summary>其他结果（{others.length}）</summary><div className="installation-card-views">
+        {others.map((view) => <button key={view.id} onClick={() => handlers.onFocusView(view.id)}>
           <span>{view.title}</span>
           {view.rows !== undefined && <em>{view.rows} 项</em>}
           <NextIcon />
         </button>)}
-      </div></details>
+      </div></details>}
     </section>;
   }
 
@@ -83,11 +79,10 @@ export function ActivityCards({ activity, importing, importingFile, progress, ha
     return <section className="installation-card">
       <header><DocIcon />已导入「{imported.filename}」</header>
       <p className="installation-card-lead">{summaryLine(imported.summary)}</p>
-      {sheets && <p className="installation-card-note clamp">{sheets}</p>}
+      {sheets && <details><summary>识别了 {imported.sheets.length} 张表</summary><p className="installation-card-note">{sheets}</p></details>}
       {unpriced > 0 && <p className="installation-card-note">有 {unpriced} 项还没有综合单价</p>}
       <div className="installation-card-actions">
-        <button onClick={() => handlers.onFocusView("view:boq")}>查看清单</button>
-        {unpriced > 0 && <button onClick={() => handlers.onSend("预览材料库对缺主材价项的匹配结果，不写回")}>预览主材匹配</button>}
+        <button className="primary" onClick={() => handlers.onFocusView(imported.totals?.items ? "view:boq" : "view:files")}>{imported.totals?.items ? "查看清单" : "查看资料"}<NextIcon /></button>
       </div>
     </section>;
   }

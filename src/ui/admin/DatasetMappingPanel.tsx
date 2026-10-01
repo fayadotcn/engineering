@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { COLUMN_ROLE_LABEL, COLUMN_ROLES } from "@shared/types";
 import { reconcilePriceRole } from "@shared/mapping";
 import { ConfirmDialog, toast } from "../primitives";
+import { readResponse } from "../http";
 import { FileSpreadsheet, Loader2, RefreshCw, Save, X } from "lucide-react";
 
 // 数据集列映射面板：展示后端自动识别结果（含置信度/证据），管理员可改列角色
@@ -80,18 +81,23 @@ export function DatasetMappingPanel({
   kind,
   onClose,
   onIngested,
+  onDirtyChange,
 }: {
   datasetId: string;
   filename: string;
   kind: string;
   onClose: () => void;
-  onIngested: () => void;
+  onIngested: () => void | Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [mapping, setMapping] = useState<DatasetMappingDTO | null>(null);
   const [failed, setFailed] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [busy, setBusy] = useState(false);
   const [confirmIngest, setConfirmIngest] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [reload, setReload] = useState(0);
+  const lock = useRef(false);
 
   useEffect(() => {
     let dead = false;
@@ -100,8 +106,7 @@ export function DatasetMappingPanel({
     void (async () => {
       try {
         const res = await fetch(`/api/admin/datasets/${datasetId}/mapping`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const m = (await res.json()) as DatasetMappingDTO;
+        const m = await readResponse<DatasetMappingDTO>(res, "映射信息加载失败");
         if (!dead) setMapping(m);
       } catch {
         if (!dead) setFailed(true);
@@ -110,7 +115,7 @@ export function DatasetMappingPanel({
     return () => {
       dead = true;
     };
-  }, [datasetId]);
+  }, [datasetId, reload]);
 
   // 保存后返回完整映射对象：草稿随最新识别结果重置
   useEffect(() => {
@@ -126,6 +131,12 @@ export function DatasetMappingPanel({
       const d = drafts[s.sheetName];
       return d && !draftEquals(d, s);
     });
+  useEffect(() => {
+    onDirtyChange?.(dirty || busy);
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    if (dirty || busy) window.addEventListener("beforeunload", warn);
+    return () => { window.removeEventListener("beforeunload", warn); onDirtyChange?.(false); };
+  }, [dirty, busy, onDirtyChange]);
 
   const setRole = (sheetName: string, col: number, role: string) => {
     const s = mapping?.sheets.find((x) => x.sheetName === sheetName);
@@ -164,8 +175,8 @@ export function DatasetMappingPanel({
   };
 
   const save = async () => {
-    if (!mapping) return;
-    setBusy(true);
+    if (!mapping || lock.current || !dirty) return;
+    lock.current = true; setBusy(true);
     try {
       let last: DatasetMappingDTO | null = null;
       for (const s of mapping.sheets) {
@@ -180,33 +191,34 @@ export function DatasetMappingPanel({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ sheetName: s.sheetName, columns, type: d.type }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        last = (await res.json()) as DatasetMappingDTO;
+        last = await readResponse<DatasetMappingDTO>(res, "保存失败，请重试");
       }
       if (last) setMapping(last);
       toast.success("列映射已保存");
-    } catch {
-      toast.error("保存失败，请重试");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存失败，请重试");
+    } finally {
+      lock.current = false; setBusy(false);
     }
-    setBusy(false);
   };
 
   const ingest = async () => {
-    setConfirmIngest(false);
-    setBusy(true);
+    if (lock.current || dirty || !mapping?.sheets.length) return;
+    lock.current = true; setBusy(true);
     try {
       const res = await fetch(`/api/admin/datasets/${datasetId}/ingest`, {
         method: "POST",
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { rowCount } = (await res.json()) as { rowCount: number; status: string };
+      const { rowCount } = await readResponse<{ rowCount: number }>(res, "导入失败，请重试");
+      setConfirmIngest(false);
       toast.success(`已导入 ${rowCount} 行`);
-      onIngested();
+      await onIngested();
       onClose();
-    } catch {
-      toast.error("导入失败，请重试");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "导入失败，请重试");
+    } finally {
+      lock.current = false; setBusy(false);
     }
-    setBusy(false);
   };
 
   if (failed)
@@ -214,13 +226,7 @@ export function DatasetMappingPanel({
       <div className="border-t border-neutral-100 px-4 py-6 text-center text-[12px] text-neutral-400">
         映射信息加载失败
         <button
-          onClick={() => {
-            setFailed(false);
-            void fetch(`/api/admin/datasets/${datasetId}/mapping`)
-              .then((r) => (r.ok ? r.json() : Promise.reject()))
-              .then((m) => setMapping(m as DatasetMappingDTO))
-              .catch(() => setFailed(true));
-          }}
+          onClick={() => setReload(n => n + 1)}
           className="ml-2 rounded-md border border-neutral-200 px-2 py-0.5 text-[11.5px] text-neutral-500 hover:bg-[var(--hover)]"
         >
           重试
@@ -230,21 +236,23 @@ export function DatasetMappingPanel({
 
   if (!mapping)
     return (
-      <div className="flex h-28 items-center justify-center border-t border-neutral-100 text-neutral-400">
-        <Loader2 size={15} className="animate-spin" />
+      <div className="flex h-28 items-center justify-center gap-2 border-t border-neutral-100 text-xs text-neutral-500" role="status">
+        <Loader2 size={15} className="animate-spin" />正在读取列映射
       </div>
     );
 
   return (
     <div className="border-t border-neutral-100 px-4 py-3">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2 break-words">
         <FileSpreadsheet size={15} className="text-neutral-400" />
         <span className="text-[13px] font-medium">{mapping.filename || filename}</span>
         <span className="text-[11px] text-neutral-400">
-          调整列角色后保存，确认后按映射导入
+          检查每列是否识别正确；有错误就改一下，再保存。
         </span>
         <button
-          onClick={onClose}
+          onClick={() => { if (dirty) setConfirmClose(true); else onClose(); }}
+          disabled={busy}
+          aria-label="收起列映射"
           title="收起"
           className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 hover:bg-[var(--hover)] hover:text-neutral-600"
         >
@@ -258,16 +266,17 @@ export function DatasetMappingPanel({
         </div>
       )}
 
-      {mapping.sheets.map((s) => {
+      <fieldset disabled={busy} className="min-w-0" aria-busy={busy}>{mapping.sheets.map((s) => {
         const d = drafts[s.sheetName] ?? toDraft(s);
         return (
           <div key={s.sheetName} className="xl-sheet mb-3 overflow-hidden rounded-lg">
-            <div className="flex items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
               <span className="text-[12.5px] font-medium">{s.sheetName}</span>
               <div className="flex flex-col gap-0.5">
                 <select
                   value={d.type}
                   title={s.typeEvidence}
+                  aria-label={`${s.sheetName}的表格类型`}
                   onChange={(e) => setType(s.sheetName, e.target.value as SheetType)}
                   className="h-6 w-fit rounded border border-neutral-200 bg-white px-1 text-[11px]"
                   style={
@@ -287,23 +296,23 @@ export function DatasetMappingPanel({
                 </select>
                 {kind === "MATERIAL_PRICE" && (
                   <span className="text-[10px] leading-tight text-neutral-400">
-                    只有「询价表」类型的 sheet 会导入价格库
+                    只有「询价表」类型的工作表会导入价格库
                   </span>
                 )}
               </div>
               {s.templateHit && (
                 <span className="rounded bg-[var(--success-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--success-soft-fg)]">
-                  模板命中
+                  已识别
                 </span>
               )}
               {s.userEdited && (
                 <span className="rounded bg-[var(--warning-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--warning-soft-fg)]">
-                  用户已调整
+                  已修改
                 </span>
               )}
               <span className="ml-auto text-[11px] text-neutral-400">
-                置信 {Math.round(s.minConfidence * 100)}%
-                {s.typeConfidence < 0.9 && ` · 类型 ${Math.round(s.typeConfidence * 100)}%`}
+                {s.minConfidence < 0.9 ? "需要核对" : "已识别"}
+                {s.typeConfidence < 0.9 && " · 请核对表格类型"}
                 {" · "}
                 {s.rowCount} 行
               </span>
@@ -314,7 +323,7 @@ export function DatasetMappingPanel({
               </div>
             )}
             <div className="overflow-x-auto">
-              <table className="xl-table">
+              <table className="xl-table mapping-table">
                 <thead>
                   <tr>
                     <th className="xl-rn"></th>
@@ -329,6 +338,7 @@ export function DatasetMappingPanel({
                     {Array.from({ length: s.colCount }, (_, i) => (
                       <th key={i} className="p-0.5">
                         <select
+                          aria-label={`${s.sheetName}的${colLetter(i)}列角色`}
                           value={d.byCol[i] ?? ""}
                           onChange={(e) => setRole(s.sheetName, i, e.target.value)}
                           className={cn(
@@ -385,23 +395,23 @@ export function DatasetMappingPanel({
             </div>
           </div>
         );
-      })}
+      })}</fieldset>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={save}
           disabled={!dirty || busy}
-          className="flex h-8 items-center gap-1.5 rounded-md bg-neutral-900 px-3.5 text-[12.5px] text-white hover:bg-neutral-700 disabled:opacity-40"
+          className="cost-btn primary"
         >
-          <Save size={13} /> 保存映射
+          <Save size={13} /> 保存修改
         </button>
         <button
           onClick={() => {
             if (mapping.status === "PARSED") setConfirmIngest(true);
             else void ingest();
           }}
-          disabled={busy || dirty}
-          title={dirty ? "请先保存映射" : undefined}
+          disabled={busy || dirty || !mapping.sheets.length}
+          title={dirty ? "请先保存修改" : undefined}
           className={cn(
             "flex h-8 items-center gap-1.5 rounded-md px-3.5 text-[12.5px] disabled:opacity-40",
             mapping.status === "PENDING"
@@ -417,7 +427,9 @@ export function DatasetMappingPanel({
           {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
           {mapping.status === "PENDING" ? "确认导入" : "重新导入"}
         </button>
+        <button className="cost-btn" disabled={busy || !dirty} onClick={() => setDrafts(Object.fromEntries(mapping.sheets.map(s => [s.sheetName, toDraft(s)])))}>取消修改</button>
       </div>
+      <ConfirmDialog open={confirmClose} title="放弃未保存的映射？" confirmText="放弃并收起" onCancel={() => setConfirmClose(false)} onConfirm={onClose} />
 
       <ConfirmDialog
         open={confirmIngest}

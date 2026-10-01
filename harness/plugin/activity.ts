@@ -110,21 +110,6 @@ export async function streamRun(
   }
 }
 
-export async function confirmRun(businessUrl: string, runId: string, approve: boolean): Promise<{ ok: boolean; message?: string }> {
-  try {
-    const res = await fetch(`${businessUrl}/api/runs/${encodeURIComponent(runId)}/confirm`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ approve }),
-    });
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) return { ok: false, message: data.error ?? `操作失败（HTTP ${res.status}）` };
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "操作失败" };
-  }
-}
-
 /** 从 markdown 摘要里取一句能放在卡片上的结论。 */
 export function gistOf(summary: string, limit = 96): string {
   const lines = summary

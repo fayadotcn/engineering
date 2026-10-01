@@ -3,7 +3,7 @@ import { prisma } from "@database/client";
 import { registerTool } from "./registry";
 import { listBoq } from "@boq/service";
 import { storage } from "@file/storage";
-import { parseWorkbook, writeBackPrices, buildExportWorkbook, type ColumnMap, type CellPatch } from "@file/excel";
+import { writeBackPrices, buildExportWorkbook, type ColumnMap, type CellPatch } from "@file/excel";
 import { ensureInspection, mappingToView } from "@file/inspection";
 import { fromJson } from "@shared/json";
 import { projectTotals } from "@cost-engine/aggregate";
@@ -27,6 +27,8 @@ registerTool({
   implemented: true,
   schema: z.object({ fileId: z.string(), sheetName: z.string().optional() }),
   handler: async (ctx, args: { fileId: string; sheetName?: string }) => {
+    const owned = await prisma.projectFile.findUnique({ where: { id: args.fileId } });
+    if (!owned || owned.projectId !== ctx.projectId) throw new Error("文件不存在或不属于当前项目");
     const { file, mapping, isPdf } = await ensureInspection(args.fileId);
     if (isPdf || !mapping) return { observation: { pdf: true, filename: file.filename } };
     const view = mappingToView(file, mapping);
@@ -71,22 +73,18 @@ registerTool({
       : await prisma.projectFile.findFirst({
           where: {
             projectId: ctx.projectId,
-            kind: { startsWith: "BOQ" },
+            status: "PARSED",
+            boqItems: { some: { isHeader: false } },
             filename: { endsWith: ".xlsx" },
           },
           orderBy: { createdAt: "desc" },
-        }) ?? await prisma.projectFile.findFirst({
-          where: {
-            projectId: ctx.projectId,
-            kind: { startsWith: "BOQ" },
-            filename: { endsWith: ".xls" },
-          },
-          orderBy: { createdAt: "desc" },
         });
-    if (!file) return { observation: { error: "没有可写回的清单源文件" } };
+    if (!file || file.projectId !== ctx.projectId) throw new Error("没有属于当前项目的可写回清单源文件");
+    if (!/\.xlsx$/i.test(file.filename)) throw new Error("保留源格式写回需要 .xlsx 文件；其他格式请使用清单 Excel 导出");
 
     const items = await listBoq(ctx.projectId);
     const mine = items.filter((i) => i.fileId === file.id && !i.isHeader);
+    if (!mine.length) throw new Error("该源文件没有已导入的清单项，请先完成导入");
     const meta = fromJson<{
       sheets?: { name: string; columns: string[] }[];
     }>(file.meta, {});
@@ -142,40 +140,51 @@ registerTool({
   implemented: true,
   schema: z.object({ filename: z.string().optional() }),
   handler: async (ctx, args: { filename?: string }) => {
-    const items = await listBoq(ctx.projectId);
+    const [items, files] = await Promise.all([
+      listBoq(ctx.projectId),
+      prisma.projectFile.findMany({ where: { projectId: ctx.projectId }, select: { id: true, filename: true } }),
+    ]);
     if (!items.length) return { observation: { error: "清单为空" } };
 
-    // group by source sheet, keep original column layout when known
+    const filenames = new Map(files.map(f => [f.id, f.filename]));
+    // 同名工作表仍按源文件分开，避免把招标版和结算版混成一张表。
     const bySheet = new Map<string, typeof items>();
     items.forEach((i) => {
-      const arr = bySheet.get(i.sheetName) ?? [];
+      const key = JSON.stringify([i.fileId, i.sheetName]);
+      const arr = bySheet.get(key) ?? [];
       arr.push(i);
-      bySheet.set(i.sheetName, arr);
+      bySheet.set(key, arr);
     });
-    const headerLabels = ["序号", "项目编码", "项目名称", "项目特征", "计量单位", "工程量", "综合单价", "合价"];
-    const sheets = [...bySheet.entries()].map(([sheetName, rows]) => ({
-      sheetName: sheetName.slice(0, 28) || "清单",
-      columns: {},
-      headerLabels,
-      rows: rows
-        .sort((a, b) => a.sortOrder - b.sortOrder)
-        .map((r, idx) => ({
-          rowIndex: r.rowIndex,
-          isHeader: r.isHeader,
-          values: (r.isHeader
-            ? { 项目名称: r.name }
-            : {
-                序号: String(idx + 1),
-                项目编码: r.code,
-                项目名称: r.name,
-                项目特征: r.rawFeature,
-                计量单位: r.unit,
-                工程量: r.quantity,
-                综合单价: r.unitPrice,
-                合价: r.totalPrice,
-              }) as Record<string, string>,
-        })),
-    }));
+    const headerLabels = ["序号", "项目编码", "项目名称", "项目特征", "计量单位", "工程量", "综合单价", "合价", "费用类别", "源文件", "源工作表"];
+    const sheets = [...bySheet.values()].map(rows => {
+      let seq = 0;
+      return {
+        sheetName: rows[0].sheetName,
+        columns: {},
+        headerLabels,
+        rows: rows
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((r) => ({
+            rowIndex: r.rowIndex,
+            isHeader: r.isHeader,
+            values: (r.isHeader
+              ? { 项目名称: r.name }
+              : {
+                  序号: String(++seq),
+                  项目编码: r.code,
+                  项目名称: r.name,
+                  项目特征: r.rawFeature,
+                  计量单位: r.unit,
+                  工程量: r.quantity,
+                  综合单价: r.unitPrice,
+                  合价: r.totalPrice,
+                  费用类别: r.feeType,
+                  源文件: r.fileId ? filenames.get(r.fileId) ?? "" : "手工录入",
+                  源工作表: r.sheetName,
+                }) as Record<string, string>,
+          })),
+      };
+    });
     const out = await buildExportWorkbook(sheets);
     const filename = args.filename ?? `清单导出_${new Date().toISOString().slice(0, 10)}.xlsx`;
     const artifact = await saveArtifact(ctx, out, filename);

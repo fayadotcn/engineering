@@ -75,7 +75,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const eventsOf = async (runId: string) =>
     (await prisma.agentEvent.findMany({ where: { runId }, orderBy: { seq: "asc" } })) as readonly EventRow[];
 
-  const importRun = recent.find(isImport);
+  // 待确认文件可能早于最近一次成功导入；入口必须指向这次确认自己的映射。
+  const importRun = waiting && isImport(waiting) ? waiting : recent.find(isImport);
   const importEvents = importRun ? await eventsOf(importRun.id) : [];
   const mapping = mappingOf(importEvents);
   // 计价计数直接取导入时 project.summary 的观测结果，比为了两个数字重算整张清单便宜得多

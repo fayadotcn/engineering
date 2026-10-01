@@ -46,7 +46,7 @@ export function Toaster() {
   const { toasts, dismiss } = useToast();
   if (!toasts.length) return null;
   return (
-    <div className="pointer-events-none fixed bottom-5 right-5 z-[80] flex w-72 flex-col gap-2">
+    <div className="cost-toaster pointer-events-none fixed bottom-5 right-5 z-[80] flex w-72 flex-col gap-2">
       {toasts.map((t) => (
         <div
           key={t.id}
@@ -54,7 +54,7 @@ export function Toaster() {
           className="fadein pointer-events-auto flex items-start gap-2.5 rounded-xl border border-neutral-200 bg-[var(--surface)] px-3.5 py-3 shadow-[var(--shadow-lg)]"
         >
           <span className="mt-px shrink-0">{TOAST_STYLE[t.kind].icon}</span>
-          <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-neutral-700">{t.text}</span>
+          <span className="min-w-0 flex-1 break-words text-[12.5px] leading-relaxed text-neutral-700">{t.text}</span>
           <button
             onClick={() => dismiss(t.id)}
             aria-label="关闭提示"
@@ -128,14 +128,14 @@ export function ConfirmDialog({
         >
           <AlertTriangle size={15} />
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 break-words">
           <div className="text-[14px] font-medium">{title}</div>
           {description && (
             <div className="mt-1 text-[12.5px] leading-relaxed text-neutral-500">{description}</div>
           )}
         </div>
       </div>
-      <div className="mt-5 flex justify-end gap-2">
+      <div className="mt-5 flex flex-wrap justify-end gap-2">
         <button
           onClick={onCancel}
           disabled={busy}
@@ -173,7 +173,7 @@ export function EmptyState({
     <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
       {icon && <div className="text-neutral-300">{icon}</div>}
       <div className="text-[12px] text-neutral-400">{title}</div>
-      {hint && <div className="text-[11px] text-neutral-300">{hint}</div>}
+      {hint && <div className="max-w-sm px-4 text-[11px] text-neutral-500">{hint}</div>}
     </div>
   );
 }

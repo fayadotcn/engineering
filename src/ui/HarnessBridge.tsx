@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { HARNESS_THEME } from "@shared/harnessTheme";
 
 /** Business requests stay inside the professional panel's own origin. */
 export function HarnessBridge() {
@@ -20,21 +21,16 @@ export function HarnessBridge() {
         if (!disposed) window.parent.postMessage({ type: "installation:catalog", projectId: pathname.match(/^\/p\/([^/]+)$/)?.[1], projects: projects.map((p: { id: string; name: string; harnessSessionId: string; _count: { boqItems: number; files: number } }) => ({ id: p.id, name: p.name, sessionId: p.harnessSessionId, rows: p._count.boqItems, files: p._count.files })) }, origin);
       } catch { /* The professional page reports its own load errors. */ }
     };
-    const receive = async (event: MessageEvent) => {
+    const receive = (event: MessageEvent) => {
       if (event.origin !== origin || event.source !== window.parent) return;
       if (event.data?.type === "installation:theme") {
         document.documentElement.dataset.theme = event.data.dark ? "dark" : "light";
+        for (const key of Object.keys(HARNESS_THEME)) {
+          const value = event.data.values?.[key];
+          if (typeof value === "string" && value.trim()) document.documentElement.style.setProperty(key, value);
+        }
         return;
       }
-      if (event.data?.type !== "installation:linkSession") return;
-      const { projectId, sessionId, requestId } = event.data;
-      if (typeof projectId !== "string" || typeof sessionId !== "string") return;
-      try {
-        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ harnessSessionId: sessionId }) });
-        if (!res.ok) throw new Error((await res.json()).error ?? "会话关联保存失败");
-        window.parent.postMessage({ type: "installation:sessionLinked", requestId, ok: true }, origin);
-        void catalog();
-      } catch (error) { window.parent.postMessage({ type: "installation:sessionLinked", requestId, ok: false, text: error instanceof Error ? error.message : "会话关联保存失败" }, origin); }
     };
     window.addEventListener("message", receive);
     void catalog();

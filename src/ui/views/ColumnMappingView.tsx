@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { COLUMN_ROLE_LABEL, COLUMN_ROLES, type WorkspaceView } from "@shared/types";
 import { reconcilePriceRole } from "@shared/mapping";
 import { ConfirmDialog, toast } from "../primitives";
+import { readResponse } from "../http";
 import { FileSpreadsheet, Save, RefreshCw } from "lucide-react";
 
 type MappingView = Extract<WorkspaceView, { kind: "columnMapping" }>;
@@ -48,6 +49,8 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
     Object.fromEntries(view.sheets.map((s) => [s.sheetName, toDraft(s)]))
   );
   const [busy, setBusy] = useState(false);
+  const lock = useRef(false);
+  const blocked = busy || store.running || store.agentRunning || store.importRunning;
   const [confirmReingest, setConfirmReingest] = useState(false);
 
   const [baseline, setBaseline] = useState(view);
@@ -80,7 +83,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
     setDrafts((prev) => {
       const d = { ...prev[sheetName], type };
       // 类型切换时单价角色随动（裸「单价」↔ 综合单价），用户当场看到变化
-      const s = view.sheets.find((x) => x.sheetName === sheetName);
+      const s = baseline.sheets.find((x) => x.sheetName === sheetName);
       const { columns } = reconcilePriceRole(
         type,
         draftToColumns(d),
@@ -93,10 +96,12 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
     });
 
   const save = async () => {
-    setBusy(true);
+    if (lock.current || blocked || !dirty) return;
+    lock.current = true; setBusy(true); useStore.setState({ saving: true });
+    const projectId = store.projectId;
     try {
       let lastView: MappingView | null = null;
-      for (const s of view.sheets) {
+      for (const s of baseline.sheets) {
         const d = drafts[s.sheetName];
         if (!d || draftEquals(d, s)) continue;
         const columns: Record<string, number | null> = {};
@@ -108,9 +113,9 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ sheetName: s.sheetName, columns, type: d.type }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        lastView = (await res.json()).view as MappingView;
+        lastView = (await readResponse<{ view: MappingView }>(res, "保存失败，请重试")).view;
       }
+      if (useStore.getState().projectId !== projectId) return;
       if (lastView) {
         setBaseline(lastView);
         store.replaceView(lastView);
@@ -119,19 +124,22 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         );
       }
       toast.success("列映射已保存");
-    } catch {
-      toast.error("保存失败，请重试");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存失败，请重试");
+    } finally {
+      lock.current = false; setBusy(false); if (useStore.getState().projectId === projectId) useStore.setState({ saving: false });
     }
-    setBusy(false);
   };
 
   const reingest = async () => {
-    setConfirmReingest(false);
-    setBusy(true);
+    if (lock.current || blocked || dirty) return;
+    lock.current = true; setBusy(true); useStore.setState({ saving: true });
+    const projectId = store.projectId;
     try {
       const res = await fetch(`/api/files/${view.fileId}/reingest`, { method: "POST" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { runId } = await res.json();
+      const { runId } = await readResponse<{ runId?: string }>(res, "重新导入失败，请重试");
+      if (useStore.getState().projectId !== projectId) return;
+      setConfirmReingest(false);
       useStore.setState((s) => ({
         blocks: [...s.blocks, { type: "upload", filename: view.filename }],
       }));
@@ -140,31 +148,33 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         await store.streamRun(runId);
         await Promise.all([store.refreshMeta(), store.reloadBoq()]);
       }
-    } catch {
-      toast.error("重新导入失败，请重试");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重新导入失败，请重试");
+    } finally {
+      lock.current = false; setBusy(false); if (useStore.getState().projectId === projectId) useStore.setState({ saving: false });
     }
-    setBusy(false);
   };
 
   return (
     <div className="h-full overflow-auto p-4">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2 break-words">
         <FileSpreadsheet size={15} className="text-neutral-400" />
         <span className="text-[13px] font-medium">{view.filename}</span>
         <span className="text-[11px] text-neutral-400">
-          {store.blocks.some(b => b.type === "confirm" && !b.decided) ? "核对类型与列角色，修改后先保存，再确认导入。" : "修改后保存映射，再重新导入更新已有数据。"}
+          {store.blocks.some(b => b.type === "confirm" && !b.decided) ? "检查表格类型和各列名称；有错误就改一下，再保存。" : "修改后保存修改，再重新导入更新已有数据。"}
         </span>
       </div>
 
-      {view.sheets.map((s) => {
+      <fieldset disabled={blocked} className="min-w-0" aria-busy={busy}>{baseline.sheets.map((s) => {
         const d = drafts[s.sheetName] ?? toDraft(s);
         return (
           <div key={s.sheetName} className="xl-sheet mb-4 overflow-hidden rounded-lg">
-            <div className="flex items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
               <span className="text-[12.5px] font-medium">{s.sheetName}</span>
               <select
                 value={d.type}
                 title={s.typeEvidence}
+                aria-label={`${s.sheetName}的表格类型`}
                 onChange={(e) => setType(s.sheetName, e.target.value as Sheet["type"])}
                 className="h-6 rounded border border-neutral-200 bg-white px-1 text-[11px]"
                 style={
@@ -184,22 +194,22 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
               </select>
               {s.templateHit && (
                 <span className="rounded bg-[var(--success-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--success-soft-fg)]">
-                  模板命中
+                  已识别
                 </span>
               )}
               {s.userEdited && (
                 <span className="rounded bg-[var(--warning-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--warning-soft-fg)]">
-                  用户已调整
+                  已修改
                 </span>
               )}
               <span className="ml-auto text-[11px] text-neutral-400">
-                置信 {Math.round(s.minConfidence * 100)}%
-                {s.typeConfidence < 0.9 && ` · 类型 ${Math.round(s.typeConfidence * 100)}%`}
+                {s.minConfidence < 0.9 ? "需要核对" : "已识别"}
+                {s.typeConfidence < 0.9 && " · 请核对表格类型"}
                 {" · "}{s.rowCount} 行
               </span>
             </div>
             <div className="overflow-x-auto">
-              <table className="xl-table">
+              <table className="xl-table mapping-table">
                 <thead>
                   <tr>
                     <th className="xl-rn"></th>
@@ -214,6 +224,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                     {Array.from({ length: s.colCount }, (_, i) => (
                       <th key={i} className="p-0.5">
                         <select
+                          aria-label={`${s.sheetName}的${colLetter(i)}列角色`}
                           value={d.byCol[i] ?? ""}
                           onChange={(e) => setRole(s.sheetName, i, e.target.value)}
                           className={cn(
@@ -270,27 +281,28 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
             </div>
           </div>
         );
-      })}
+      })}</fieldset>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={save}
-          disabled={!dirty || busy || store.running || store.agentRunning}
-          className="flex h-8 items-center gap-1.5 rounded-md bg-neutral-900 px-3.5 text-[12.5px] text-white hover:bg-neutral-700 disabled:opacity-40"
+          disabled={!dirty || blocked}
+          className="cost-btn primary"
         >
-          <Save size={13} /> 保存映射
+          <Save size={13} /> 保存修改
         </button>
         <button
           onClick={() => {
             if (view.fileStatus === "PARSED") setConfirmReingest(true);
             else void reingest();
           }}
-          disabled={busy || dirty || store.running || store.agentRunning || store.blocks.some(b => b.type === "confirm" && !b.decided)}
-          title={dirty ? "请先保存映射" : undefined}
+          disabled={blocked || dirty || store.blocks.some(b => b.type === "confirm" && !b.decided)}
+          title={dirty ? "请先保存修改" : undefined}
           className="flex h-8 items-center gap-1.5 rounded-md border border-neutral-200 px-3.5 text-[12.5px] text-neutral-600 hover:bg-[var(--hover)] disabled:opacity-40"
         >
-          <RefreshCw size={13} /> 按此映射重新导入
+          <RefreshCw size={13} /> 重新导入
         </button>
+        <button className="cost-btn" disabled={!dirty || blocked} onClick={() => setDrafts(Object.fromEntries(baseline.sheets.map(s => [s.sheetName, toDraft(s)])))}>取消修改</button>
       </div>
 
       <ConfirmDialog
@@ -298,7 +310,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         title={`重新导入「${view.filename}」？`}
         description="将删除该文件已导入数据并按当前映射重新导入。"
         confirmText="重新导入"
-        busy={busy}
+        busy={blocked}
         onConfirm={reingest}
         onCancel={() => setConfirmReingest(false)}
       />

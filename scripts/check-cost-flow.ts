@@ -91,6 +91,9 @@ async function main() {
     const cleared = await getPricePrefs(id); assert.equal(cleared.region, undefined); assert.deepEqual(cleared.brands, []);
 
     await cordis.plugin(SystemPrompt); await cordis.plugin(ToolRuntime, { mode: "native" });
+    // Synthetic approval is confined to this isolated verification context.
+    let approvalCount = 0;
+    cordis.provide("approval", { request: async () => { approvalCount++; return "allowed-once"; } });
     const { apply } = await import(pathToFileURL(path.join(root, "harness/plugin/dist/host.mjs")).href) as { apply(ctx: Context, config: { businessUrl: string }): void };
     apply(cordis, { businessUrl: base });
     const result = await cordis.tools.execute({ name: "installation__project__read", arguments: { projectId: id }, callId: "cost-verification" as never, signal: new AbortController().signal });
@@ -108,7 +111,36 @@ async function main() {
     assert.equal(exportedBook.worksheets[0].rowCount, 3);
     const summary = await request(`/api/projects/${id}/summary`);
     assert.equal(summary.fees.preTax, "864.30"); assert.equal(summary.fees.grandTotal, "942.09");
-    console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、官方 Harness 工具执行、真实 Excel 导出");
+
+    const feeFile = await prisma.projectFile.create({ data: { projectId: id, filename: "措施清单.xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", storageKey: "isolated-test", sizeBytes: 0, status: "PARSED", kind: "BOQ_TENDER" } });
+    const feeItem = await prisma.boqItem.create({ data: { projectId: id, fileId: feeFile.id, sheetName: "数据", rowIndex: 2, name: "安全文明施工费", feeType: "总价措施", totalPrice: "1200.50", sortOrder: 100 } });
+    const feeEdit = await request(`/api/boq-items/${feeItem.id}`, "PATCH", { totalPrice: "1500.555" });
+    assert.equal(feeEdit.totalPrice, "1500.56"); assert.equal(feeEdit.unitPrice, "0"); assert.equal(feeEdit.quantity, "0");
+    const feeReceipt = (await request(`/api/projects/${id}`)).receipts.find((r: { actionType: string; summary: string }) => r.actionType === "USER_EDIT" && r.summary.includes("安全文明施工费"));
+    assert(feeReceipt);
+    await request(`/api/boq-items/${feeItem.id}`, "PATCH", { unitPrice: "20" }, 400);
+    await request(`/api/boq-items/${feeItem.id}`, "PATCH", { quantity: "1" }, 400);
+    await request(`/api/boq-items/${feeItem.id}`, "PATCH", { totalPrice: "NaN" }, 400);
+    await request(`/api/boq-items/${item.id}`, "PATCH", { totalPrice: "999" }, 400);
+    const withFee = await request(`/api/projects/${id}/summary`);
+    assert.equal(withFee.fees.preTax, "2364.86"); assert.equal(withFee.fees.grandTotal, "2577.70");
+    await request(`/api/receipts/${feeReceipt.id}/revert`, "POST");
+    assert.equal((await request(`/api/projects/${id}/boq`)).find((i: { id: string }) => i.id === feeItem.id).totalPrice, "1200.5");
+
+    const updatedByAgent = await cordis.tools.execute({ name: "installation__boq__update", arguments: { projectId: id, patches: [{ id: feeItem.id, totalPrice: "1400" }] }, agent: { id: sessionId } as never, callId: "cost-fee" as never, signal: new AbortController().signal });
+    assert.equal(updatedByAgent.isError, false, JSON.stringify(updatedByAgent.content));
+    assert.equal(approvalCount, 1);
+    assert.equal((await request(`/api/projects/${id}/boq`)).find((i: { id: string }) => i.id === feeItem.id).totalPrice, "1400");
+    const exportWithFee = await cordis.tools.execute({ name: "installation__report__exportExcel", arguments: { projectId: id }, callId: "cost-fee-export" as never, signal: new AbortController().signal });
+    assert.equal(exportWithFee.isError, false, JSON.stringify(exportWithFee.content));
+    const feeExportText = exportWithFee.content.find(c => c.type === "text"); assert(feeExportText?.type === "text");
+    const feeExportId = JSON.parse(feeExportText.text).observation.artifactId;
+    const feeExport = new ExcelJS.Workbook(); await feeExport.xlsx.load(await fetch(`${base}/api/artifacts/${feeExportId}/download`).then(r => r.arrayBuffer()));
+    assert.deepEqual(feeExport.worksheets.map(s => s.name), ["数据", "数据 (2)"]);
+    assert.equal(feeExport.worksheets[1].getCell("H2").value, 1400);
+    assert.equal(feeExport.worksheets[1].getCell("I2").value, "总价措施");
+    assert.equal(feeExport.worksheets[1].getCell("J2").value, "措施清单.xlsx");
+    console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、官方 Harness 工具执行、总额编辑与撤销、同名源表 Excel 导出");
     console.log(`隔离验收工程：${checkDir}`);
   } finally { await cordis.fiber.dispose(); await prisma.$disconnect(); server.kill(); }
 }

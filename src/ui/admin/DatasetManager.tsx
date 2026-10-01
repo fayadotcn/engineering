@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -13,6 +13,7 @@ import {
 import { ConfirmDialog, toast } from "../primitives";
 import { DatasetMappingPanel } from "./DatasetMappingPanel";
 import { PriceRowsPanel } from "./PriceRowsPanel";
+import { readResponse } from "../http";
 
 interface DatasetDTO {
   id: string;
@@ -33,9 +34,9 @@ interface Preview {
 }
 
 const KINDS = [
-  { k: "MATERIAL_PRICE", label: "材料价格库", hint: "支持任意格式价格表——系统自动识别列，低置信会暂停等你确认" },
-  { k: "QUOTA", label: "定额库", hint: "消耗量定额子目（定额编号/名称/人工费/材料费/机械费）" },
-  { k: "GENERIC", label: "通用数据", hint: "其他参考资料，仅存储与画像，不导入行" },
+  { k: "MATERIAL_PRICE", label: "材料价格", hint: "上传 Excel 价格表，系统自动整理；不确定的地方会请你核对。" },
+  { k: "QUOTA", label: "定额", hint: "上传定额表，供各工程计算安装费用。" },
+  { k: "GENERIC", label: "参考资料", hint: "上传其他 Excel 资料，方便以后查看。" },
 ] as const;
 
 const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
@@ -49,60 +50,72 @@ function DatasetCard({
   d,
   onRefresh,
   autoPanel,
+  onDirtyChange,
 }: {
   d: DatasetDTO;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
+  onDirtyChange: (id: string, dirty: boolean) => void;
   autoPanel?: CardPanel;
 }) {
   const [panel, setPanel] = useState<CardPanel | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const lock = useRef(false);
+  const mounted = useRef(true);
+  const reportDirty = useCallback((value: boolean) => { setDirty(value); onDirtyChange(d.id, value); }, [d.id, onDirtyChange]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; onDirtyChange(d.id, false); }; }, [d.id, onDirtyChange]);
 
   // 上传后低置信自动展开映射面板
   useEffect(() => {
     if (autoPanel) setPanel(autoPanel);
   }, [autoPanel]);
 
-  const togglePanel = (p: CardPanel) => setPanel((cur) => (cur === p ? null : p));
+  const togglePanel = (p: CardPanel) => { if (!dirty && !busy && !previewLoading) setPanel((cur) => (cur === p ? null : p)); };
 
-  const togglePreview = async () => {
-    if (panel !== "preview" && !preview) {
-      const res = await fetch(`/api/admin/datasets/${d.id}`);
-      if (res.ok) setPreview(await res.json());
-    }
-    togglePanel("preview");
+  const togglePreview = async (retry = false) => {
+    if (dirty || busy || previewLoading) return;
+    if (panel === "preview" && !retry) { setPanel(null); return; }
+    setPanel("preview");
+    if (preview) return;
+    setPreviewLoading(true); setPreviewError("");
+    try {
+      const result = await readResponse<Preview>(await fetch(`/api/admin/datasets/${d.id}`), "预览加载失败，请重试");
+      if (mounted.current) setPreview(result);
+    } catch (error) { if (mounted.current) setPreviewError(error instanceof Error ? error.message : "预览加载失败"); }
+    finally { if (mounted.current) setPreviewLoading(false); }
   };
 
   const toggleActive = async () => {
-    setBusy(true);
+    if (lock.current || dirty) return;
+    lock.current = true; setBusy(true);
     try {
     const res = await fetch(`/api/admin/datasets/${d.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ active: !d.active }),
     });
-    if (res.ok) {
-      toast.success(d.active ? `已停用「${d.name}」— 匹配/测算不再引用` : `已启用「${d.name}」`);
-      onRefresh();
-    } else throw new Error("操作失败");
+    await readResponse(res, "操作失败");
+    toast.success(d.active ? `已停用「${d.name}」— 匹配/测算不再引用` : `已启用「${d.name}」`);
+    await onRefresh();
     } catch (error) { toast.error(error instanceof Error ? error.message : "操作失败"); }
-    finally { setBusy(false); }
+    finally { lock.current = false; setBusy(false); }
   };
 
   const remove = async () => {
-    setBusy(true);
+    if (lock.current || dirty) return;
+    lock.current = true; setBusy(true);
     try {
     const res = await fetch(`/api/admin/datasets/${d.id}`, { method: "DELETE" });
-    if (res.ok) {
-      setConfirmDel(false);
-      toast.success(`已删除数据集「${d.name}」`);
-      onRefresh();
-    } else {
-      throw new Error("删除失败，请重试");
-    }
+    await readResponse(res, "删除失败，请重试");
+    setConfirmDel(false);
+    toast.success(`已删除数据集「${d.name}」`);
+    await onRefresh();
     } catch (error) { toast.error(error instanceof Error ? error.message : "删除失败，请重试"); }
-    finally { setBusy(false); }
+    finally { lock.current = false; setBusy(false); }
   };
 
   const chevron = (p: CardPanel) => (
@@ -113,17 +126,17 @@ function DatasetCard({
   );
 
   return (
-    <div className={cn("overflow-hidden rounded-md border border-neutral-200 bg-[var(--surface)]", !d.active && "opacity-55")}>
+    <div className="overflow-hidden rounded-md border border-neutral-200 bg-[var(--surface)]">
       <div className="cost-dataset-row flex flex-wrap items-center gap-3 px-4 py-3">
         <FileSpreadsheet size={15} className="shrink-0 text-neutral-400" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium">{d.name}</div>
-          <div className="mt-0.5 text-[11px] text-neutral-400">
+          <div className="mt-0.5 break-words text-[11px] text-neutral-500">
             {d.filename} ·{" "}
             {d.status === "FAILED"
               ? "解析失败"
               : d.status === "PENDING"
-                ? "待确认映射"
+                ? "需要核对表格"
                 : `${d.rowCount} 行`}{" "}
             · {d.createdAt.slice(0, 10)}
           </div>
@@ -144,57 +157,55 @@ function DatasetCard({
             待确认
           </span>
         )}
-        <span className="rounded bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500">{d.kindLabel}</span>
-        {d.kind === "MATERIAL_PRICE" && d.status === "PENDING" && (
+        {!d.active && <span className="text-xs text-neutral-500">已停用</span>}
+        {d.kind === "MATERIAL_PRICE" && (d.status === "PENDING" || d.status === "FAILED") && (
           <button
             onClick={() => togglePanel("mapping")}
+            disabled={dirty || busy}
+            aria-expanded={panel === "mapping"}
             className="flex h-7 items-center gap-1 rounded-md px-3 text-[11.5px] font-medium text-white"
             style={{ background: "var(--brand-accent)" }}
           >
-            <Check size={12} /> 确认映射
+            <Check size={12} /> 核对表格
           </button>
         )}
         {d.kind === "MATERIAL_PRICE" && d.status === "PARSED" && (
-          <>
-            <button onClick={() => togglePanel("prices")} className={toggleBtn}>
-              <Table size={11} /> 价格数据 {chevron("prices")}
-            </button>
-            <button onClick={() => togglePanel("mapping")} className={toggleBtn}>
-              <Columns3 size={11} /> 列映射 {chevron("mapping")}
-            </button>
-          </>
-        )}
-        {d.kind === "QUOTA" && (
-          <button onClick={togglePreview} className={toggleBtn}>
-            预览 {chevron("preview")}
+          <button disabled={dirty || busy} aria-expanded={panel === "prices"} onClick={() => togglePanel("prices")} className="cost-btn">
+            <Table size={12} /> {panel === "prices" ? "收起数据" : "打开数据"}
           </button>
         )}
+        {d.kind !== "MATERIAL_PRICE" && (
+          <button disabled={busy || previewLoading} aria-expanded={panel === "preview"} onClick={() => void togglePreview()} className={toggleBtn}>
+            {panel === "preview" ? "收起数据" : "打开数据"} {chevron("preview")}
+          </button>
+        )}
+        <details className="cost-simple-more cost-dataset-more"><summary>更多</summary><div className="cost-more-body">
+        {d.kind === "MATERIAL_PRICE" && d.status === "PARSED" && <button disabled={dirty || busy} aria-expanded={panel === "mapping"} onClick={() => togglePanel("mapping")} className={toggleBtn}><Columns3 size={12} />调整表格识别</button>}
         <button
           onClick={toggleActive}
-          disabled={busy}
+          disabled={busy || dirty}
           role="switch"
           aria-checked={d.active}
           aria-label={`${d.name}参与匹配与测算`}
-          className="flex h-5 w-9 items-center rounded-full px-0.5 transition-colors"
-          style={{ background: d.active ? "var(--brand-accent)" : "var(--hairline-strong)" }}
+          className={toggleBtn}
           title={d.active ? "已启用 — 点击停用" : "已停用 — 点击启用"}
         >
-          <span
-            className={cn(
-              "h-4 w-4 rounded-full bg-white shadow transition-transform",
-              d.active && "translate-x-4"
-            )}
-          />
+          {d.active ? "停用这份数据" : "启用这份数据"}
         </button>
         <button
           onClick={() => setConfirmDel(true)}
-          disabled={busy}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+          disabled={busy || dirty}
+          aria-label={`删除数据集${d.name}`}
+          className={toggleBtn}
           title="删除数据集"
         >
-          {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={13} />}
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={13} />}删除
         </button>
+        </div></details>
       </div>
+      {dirty && <p className="px-4 pb-2 text-xs text-neutral-500" role="status">请先保存或取消编辑，再切换面板、筛选或停用数据集。</p>}
+      {panel === "preview" && previewLoading && <div className="cost-empty" role="status"><Loader2 size={14} className="animate-spin" />正在加载预览</div>}
+      {panel === "preview" && previewError && <div className="cost-error" role="alert">{previewError}<button className="cost-btn" onClick={() => void togglePreview(true)}>重试</button></div>}
       <ConfirmDialog
         open={confirmDel}
         danger
@@ -211,8 +222,8 @@ function DatasetCard({
             <thead>
               <tr>
                 <th className="xl-rn"></th>
-                {preview.columns.map((c) => (
-                  <th key={c}>{c}</th>
+                {preview.columns.map((c, i) => (
+                  <th key={i}>{c}</th>
                 ))}
               </tr>
             </thead>
@@ -227,6 +238,7 @@ function DatasetCard({
               ))}
             </tbody>
           </table>
+          {!preview.rows.length && <p className="px-3 py-5 text-center text-xs text-neutral-500">暂无可预览的行数据</p>}
           {preview.total > preview.rows.length && (
             <div className="px-3 py-2 text-[11px] text-neutral-400">
               显示前 {preview.rows.length} 行，共 {preview.total} 行
@@ -235,7 +247,7 @@ function DatasetCard({
         </div>
       )}
       {panel === "prices" && d.kind === "MATERIAL_PRICE" && (
-        <PriceRowsPanel datasetId={d.id} />
+        <PriceRowsPanel datasetId={d.id} onDirtyChange={reportDirty} />
       )}
       {panel === "mapping" && (
         <DatasetMappingPanel
@@ -244,6 +256,7 @@ function DatasetCard({
           kind={d.kind}
           onClose={() => setPanel(null)}
           onIngested={onRefresh}
+          onDirtyChange={reportDirty}
         />
       )}
     </div>
@@ -261,15 +274,22 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
   const [autoMappingId, setAutoMappingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [dirtyIds, setDirtyIds] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const uploadLock = useRef(false);
+  const reportDirty = useCallback((id: string, dirty: boolean) => setDirtyIds(ids => dirty ? ids.includes(id) ? ids : [...ids, id] : ids.filter(x => x !== id)), []);
+  const blocked = busy || dirtyIds.length > 0;
 
   const refresh = async () => {
-    const res = await fetch("/api/admin/datasets");
-    if (res.ok) setDatasets(await res.json());
+    try {
+      const result = await readResponse<DatasetDTO[]>(await fetch("/api/admin/datasets"), "数据集列表刷新失败");
+      setDatasets(result); setLoadError("");
+    } catch (error) { setLoadError(error instanceof Error ? error.message : "数据集列表刷新失败"); }
   };
 
   const upload = async (f: File) => {
-    if (busy) return;
-    setBusy(true);
+    if (uploadLock.current || dirtyIds.length) return;
+    uploadLock.current = true; setBusy(true);
     try {
     const fd = new FormData();
     fd.append("file", f);
@@ -299,7 +319,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
     } else toast.success(`已导入 ${ds.rowCount} 行`);
     await refresh();
     } catch (error) { toast.error(error instanceof Error ? error.message : "上传失败，请重试"); }
-    finally { setBusy(false); }
+    finally { uploadLock.current = false; setBusy(false); }
   };
 
   const grouped = KINDS.filter(k => k.k === kind).map((k) => ({
@@ -309,7 +329,8 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
 
   return (
     <div className="cost-datasets mt-8 space-y-8">
-      <nav className="cost-library-tabs" aria-label="共享数据类型">{KINDS.map(k => <button key={k.k} aria-current={kind === k.k ? "page" : undefined} className={kind === k.k ? "active" : ""} disabled={busy} onClick={() => { setKind(k.k); setQuery(""); }}><strong>{k.label}</strong><span>{datasets.filter(d => d.kind === k.k).length}</span></button>)}</nav>
+      <nav className="cost-library-tabs" aria-label="共享数据类型">{KINDS.map(k => <button key={k.k} aria-current={kind === k.k ? "page" : undefined} className={kind === k.k ? "active" : ""} disabled={blocked} onClick={() => { setKind(k.k); setQuery(""); }}><strong>{k.label}</strong><span>{datasets.filter(d => d.kind === k.k).length}</span></button>)}</nav>
+      {loadError && <div className="cost-error" role="alert">{loadError}<button className="cost-btn" disabled={busy} onClick={() => void refresh()}>重试</button></div>}
       {/* 上传区 */}
       <div className="rounded-md border border-neutral-200 bg-[var(--surface)] p-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -327,7 +348,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
           />
           <button
             onClick={() => fileRef.current?.click()}
-            disabled={busy}
+            disabled={blocked}
             className="ml-auto flex h-9 items-center gap-1.5 rounded-md px-4 text-[12.5px] font-medium text-white transition-all enabled:active:translate-y-px disabled:opacity-50"
             style={{ background: "var(--brand-accent)" }}
           >
@@ -336,9 +357,10 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
           </button>
         </div>
         {kind === "MATERIAL_PRICE" && (
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <span className="text-[11.5px] text-neutral-400">整表默认值（可选）</span>
+          <details className="cost-simple-more mt-2.5"><summary>补充地区、日期或品牌（可选）</summary><div className="cost-more-body">
             <select
+              disabled={busy}
+              aria-label="整表默认价格类型"
               value={defPriceType}
               onChange={(e) => setDefPriceType(e.target.value)}
               className="h-7 rounded-md border border-neutral-200 bg-white px-1.5 text-[11.5px] text-neutral-600"
@@ -351,24 +373,30 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               <option value="LABOR">人工价</option>
             </select>
             <input
+              disabled={busy}
+              aria-label="整表默认地区"
               value={defRegion}
               onChange={(e) => setDefRegion(e.target.value)}
               placeholder="地区"
               className="h-7 w-24 rounded-md border border-neutral-200 bg-white px-2 text-[11.5px] outline-none focus:border-[var(--brand-accent)]"
             />
             <input
+              disabled={busy}
+              aria-label="整表默认期次"
               value={defPeriod}
               onChange={(e) => setDefPeriod(e.target.value)}
               placeholder="如 2024-06，留空自动从表/文件名识别"
               className="h-7 w-64 rounded-md border border-neutral-200 bg-white px-2 text-[11.5px] outline-none focus:border-[var(--brand-accent)]"
             />
             <input
+              disabled={busy}
+              aria-label="整表默认品牌"
               value={defBrand}
               onChange={(e) => setDefBrand(e.target.value)}
               placeholder="品牌（整表默认）"
               className="h-7 w-32 rounded-md border border-neutral-200 bg-white px-2 text-[11.5px] outline-none focus:border-[var(--brand-accent)]"
             />
-          </div>
+          </div></details>
         )}
         <p className="mt-2.5 text-[11.5px] text-neutral-400">
           {KINDS.find((k) => k.k === kind)?.hint}
@@ -376,7 +404,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
       </div>
 
       {/* 分组列表 */}
-      <label className="cost-search"><input aria-label="搜索数据集" placeholder="搜索数据集名称或文件名" value={query} onChange={e => setQuery(e.target.value)} /></label>
+      <label className="cost-search"><input disabled={blocked} aria-label="搜索数据集" placeholder="搜索数据集名称或文件名" value={query} onChange={e => setQuery(e.target.value)} /></label>
       {grouped.map((g) => (
         <section key={g.k}>
           <div className="mb-2 flex items-baseline gap-2">
@@ -389,6 +417,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
                 key={d.id}
                 d={d}
                 onRefresh={refresh}
+                onDirtyChange={reportDirty}
                 autoPanel={d.id === autoMappingId ? "mapping" : undefined}
               />
             ))}

@@ -6,6 +6,7 @@ import { z } from "zod";
 
 const edit = z.object({
   unitPrice: z.string().optional(), quantity: z.string().optional(), mainMaterialPrice: z.string().optional(),
+  totalPrice: z.string().optional(),
   name: z.string().trim().min(1).max(500).optional(), rawFeature: z.string().max(10000).optional(),
 }).strict().refine(value => Object.keys(value).length > 0);
 
@@ -21,11 +22,15 @@ export async function PATCH(
   const body = parsed.data;
   const item = await prisma.boqItem.findUnique({ where: { id } });
   if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (item.isHeader) return NextResponse.json({ error: "分部标题不能编辑金额或工程量" }, { status: 400 });
+  if (body.totalPrice !== undefined && item.feeType !== "总价措施" && item.feeType !== "其他项目")
+    return NextResponse.json({ error: "此项合价由工程量×综合单价自动计算" }, { status: 400 });
 
   const patch: Record<string, string> = {};
   if (body.unitPrice !== undefined) patch.unitPrice = String(body.unitPrice);
   if (body.quantity !== undefined) patch.quantity = String(body.quantity);
   if (body.mainMaterialPrice !== undefined) patch.mainMaterialPrice = String(body.mainMaterialPrice);
+  if (body.totalPrice !== undefined) patch.totalPrice = body.totalPrice;
   if (body.name !== undefined) patch.name = String(body.name);
   if (body.rawFeature !== undefined) patch.rawFeature = String(body.rawFeature);
 
