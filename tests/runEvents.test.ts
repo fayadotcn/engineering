@@ -44,6 +44,22 @@ describe("Agent 事件归约", () => {
     expect(s.blocks).toEqual([expect.objectContaining({ type: "confirm", decided: "approved" })]);
   });
 
+  it("run 终态收口未决确认——服务重启丢 resolver 后卡片不再可操作", () => {
+    const s = fold([
+      ev(0, "confirm_request", { confirmId: "c", tool: "boq.update", description: "改 2 项" }),
+      // 服务端重启：run 被判终态直接推 run_finished，没有 confirm_resolved
+      ev(1, "run_finished", { status: "FAILED" }),
+    ]);
+    expect(s.blocks[0]).toMatchObject({ type: "confirm", decided: "rejected" });
+    // 已决定的确认不受 run_finished 影响
+    const s2 = fold([
+      ev(0, "confirm_request", { confirmId: "c", tool: "boq.update", description: "改 2 项" }),
+      ev(1, "confirm_resolved", { confirmId: "c", approved: true }),
+      ev(2, "run_finished", { status: "DONE" }),
+    ]);
+    expect(s2.blocks[0]).toMatchObject({ type: "confirm", decided: "approved" });
+  });
+
   it("模型降级标记在下一轮模型产出思考时解除", () => {
     const s = fold([
       ev(0, "model_fallback", { reason: "402" }),

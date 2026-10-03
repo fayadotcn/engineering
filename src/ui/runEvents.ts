@@ -122,7 +122,12 @@ export function reduceEvent(s: RunState, e: AgentEventDTO, runId: string): Parti
     case "error":
       return { blocks: [...s.blocks, { type: "error", text: p.text, runId }] };
     case "run_finished":
-      return { blocks: settleLive(s.blocks) };
+      // 终态收口：服务重启丢内存 resolver 时，run 已被判终态但卡片上还
+      // 留着可操作确认——把本 run 未决确认按拒绝结案，不让用户点进死请求
+      return {
+        blocks: settleLive(s.blocks).map((b) =>
+          b.type === "confirm" && b.runId === runId && !b.decided ? { ...b, decided: "rejected" } : b),
+      };
     default:
       return {};
   }
