@@ -4,9 +4,10 @@ import { buildExportWorkbook, writeBackPrices } from "@file/excel";
 import type { BoqItemDTO } from "@shared/types";
 import { getTool, type ToolContext } from "@agent/tools/registry";
 
-const mocks = vi.hoisted(() => ({ files: vi.fn(), file: vi.fn(), items: vi.fn(), put: vi.fn(), artifact: vi.fn(), inspect: vi.fn() }));
+const mocks = vi.hoisted(() => ({ files: vi.fn(), file: vi.fn(), items: vi.fn(), put: vi.fn(), artifact: vi.fn(), inspect: vi.fn(), feeParams: vi.fn() }));
 vi.mock("@database/client", () => ({ prisma: { projectFile: { findMany: mocks.files, findUnique: mocks.file }, artifact: { create: mocks.artifact } } }));
 vi.mock("@boq/service", () => ({ listBoq: mocks.items }));
+vi.mock("@project/facts", () => ({ loadFeeParams: mocks.feeParams }));
 vi.mock("@file/storage", () => ({ storage: { put: mocks.put } }));
 vi.mock("@file/inspection", () => ({ ensureInspection: mocks.inspect, mappingToView: vi.fn() }));
 import "@agent/tools/excelTools";
@@ -23,9 +24,15 @@ const load = async (buffer: Buffer) => {
   await wb.xlsx.load(buffer as unknown as ArrayBuffer);
   return wb;
 };
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetAllMocks();
   mocks.files.mockResolvedValue([{ id: "f1", filename: "招标清单.xlsx" }, { id: "f2", filename: "结算清单.xlsx" }]);
+  const { D } = await import("@cost-engine/money");
+  mocks.feeParams.mockResolvedValue({
+    measureRate: D(0), regulationRate: D(0), provisionalRate: D(0), provisionalAmount: D(0),
+    taxRate: D(0.09), addonRate: D(0), laborBase: null, laborAdjustRate: D(0), coeffMeasureFee: D(0),
+    set: { measure: false, regulation: false, provisional: false, tax: true },
+  });
   mocks.put.mockResolvedValue("export.xlsx");
   mocks.artifact.mockImplementation(async ({ data }) => ({ id: "a1", ...data }));
 });
@@ -42,23 +49,28 @@ describe("可追溯的清单导出", () => {
     const result = await getTool("report.exportExcel")!.handler!(ctx, {});
     expect(result.receipts?.[0].actionType).toBe("EXPORT");
     const wb = await load(mocks.put.mock.calls[0][0]);
-    expect(wb.worksheets.map(s => s.name)).toEqual(["清单", "清单 (2)"]);
-    expect(wb.worksheets[0].getCell("A2").value).toBe("");
-    expect(wb.worksheets[0].getCell("A3").value).toBe("1");
-    expect(wb.worksheets[0].getCell("B3").value).toBe("030001");
-    expect(wb.worksheets[0].getCell("F3").value).toBe(41);
-    expect(wb.worksheets[0].getCell("G3").value).toBe("3层×12个+5");
-    expect(wb.worksheets[0].getCell("G4").value).toBe("");
-    expect(wb.worksheets[0].getCell("I4").value).toBe(1250.5);
+    // 首页固定费用汇总（交付口径），其后按源表分页
+    expect(wb.worksheets.map(s => s.name)).toEqual(["费用汇总", "清单", "清单 (2)"]);
+    const feeWs = wb.worksheets[0];
+    const feeRows: string[] = [];
+    feeWs.eachRow((r) => { const v = r.getCell(5).value; if (typeof v === "number") feeRows.push(String(r.getCell(2).value)); });
+    expect(feeRows).toContain("税前工程造价");
+    expect(wb.worksheets[1].getCell("A2").value).toBe("");
+    expect(wb.worksheets[1].getCell("A3").value).toBe("1");
+    expect(wb.worksheets[1].getCell("B3").value).toBe("030001");
+    expect(wb.worksheets[1].getCell("F3").value).toBe(41);
+    expect(wb.worksheets[1].getCell("G3").value).toBe("3层×12个+5");
+    expect(wb.worksheets[1].getCell("G4").value).toBe("");
+    expect(wb.worksheets[1].getCell("I4").value).toBe(1250.5);
     // J=定价状态：可计价行显式标已定价/未定价，非计价行留白；未定价行整行淡琥珀底色
-    expect(wb.worksheets[0].getCell("J3").value).toBe("已定价");
-    expect(wb.worksheets[0].getCell("J4").value).toBe("");
-    expect(wb.worksheets[0].getCell("K4").value).toBe("总价措施");
-    expect(wb.worksheets[0].getCell("L4").value).toBe("招标清单.xlsx");
-    expect(wb.worksheets[0].getCell("J5").value).toBe("未定价");
-    expect((wb.worksheets[0].getRow(5).getCell(1).fill as ExcelJS.FillPattern).fgColor?.argb).toBe("FFFFF7E0");
-    expect(wb.worksheets[1].getCell("L2").value).toBe("结算清单.xlsx");
-    expect(wb.worksheets[1].getCell("I2").value).toBe(600);
+    expect(wb.worksheets[1].getCell("J3").value).toBe("已定价");
+    expect(wb.worksheets[1].getCell("J4").value).toBe("");
+    expect(wb.worksheets[1].getCell("K4").value).toBe("总价措施");
+    expect(wb.worksheets[1].getCell("L4").value).toBe("招标清单.xlsx");
+    expect(wb.worksheets[1].getCell("J5").value).toBe("未定价");
+    expect((wb.worksheets[1].getRow(5).getCell(1).fill as ExcelJS.FillPattern).fgColor?.argb).toBe("FFFFF7E0");
+    expect(wb.worksheets[2].getCell("L2").value).toBe("结算清单.xlsx");
+    expect(wb.worksheets[2].getCell("I2").value).toBe(600);
   });
 
   it("超长、非法及忽略大小写后的重复表名仍能完整导出", async () => {

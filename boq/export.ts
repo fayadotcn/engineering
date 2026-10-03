@@ -1,6 +1,8 @@
 import { prisma } from "@database/client";
 import { buildExportWorkbook } from "@file/excel";
 import { projectTotals } from "@cost-engine/aggregate";
+import { feeSummary } from "@cost-engine/fees";
+import { loadFeeParams } from "@project/facts";
 import { isPricableItem } from "@shared/types";
 import { D } from "@cost-engine/money";
 import { listBoq } from "./service";
@@ -68,7 +70,29 @@ export async function assembleExportSheets(projectId: string) {
       ],
     };
   });
-  return { sheets, items, total: projectTotals(items).totalAmount };
+  // 交付口径：导出件首页附费用汇总（分部分项→措施→其他项目→规费→税金→含税造价），
+  // 与工作台 cost.feeSummary 同一函数同一费率来源，明细页合计能对上汇总行
+  const fee = feeSummary(items, await loadFeeParams(projectId));
+  const FEE_LABELS = ["序号", "费用名称", "计算基础", "费率", "金额（元）", "备注"];
+  const feeSheet = {
+    sheetName: "费用汇总",
+    columns: {},
+    headerLabels: FEE_LABELS,
+    rows: fee.rows.map((r) => ({
+      rowIndex: 0,
+      isHeader: false,
+      bold: r.level !== "leaf",
+      values: {
+        序号: r.seq,
+        费用名称: r.name,
+        计算基础: r.basis,
+        费率: r.rate ?? "",
+        "金额（元）": r.amount,
+        备注: r.note ?? "",
+      } as Record<string, string>,
+    })),
+  };
+  return { sheets: [feeSheet, ...sheets], items, total: projectTotals(items).totalAmount };
 }
 
 export async function buildProjectExport(projectId: string) {
