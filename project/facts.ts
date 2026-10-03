@@ -125,7 +125,8 @@ export function parseAmountValue(raw: string | null | undefined): number | null 
   const yi = s.match(/^(-?[\d.]+)亿$/);
   const wan = s.match(/^(-?[\d.]+)万$/);
   const v = yi ? Number(yi[1]) * 1e8 : wan ? Number(wan[1]) * 10000 : Number(s);
-  return Number.isFinite(v) ? v : null;
+  // 万/亿换算的 float 噪声（1.2万→12000.000000000002）截断到 2 位小数——金额粒度到分即可
+  return Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
 }
 
 /** 面积事实归一化：「12000㎡」/「1.2万平米」→ 12000。 */

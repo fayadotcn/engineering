@@ -3,6 +3,7 @@ import type { ToolResult } from "./tools/registry";
 import { REGION_RE } from "@dataset/priceParse";
 import { parseRateValue, parseAreaValue } from "@project/facts";
 import { autopilotPlan } from "./autopilot";
+import { D } from "@cost-engine/money";
 
 // Planner produces steps. A step is either a static {tool,args} or a
 // dynamic function that can inspect previous observations — this is the
@@ -165,7 +166,7 @@ export class RulePlanner implements Planner {
       const lump = rest.match(/^(.*?)[，,\s]+(\d+(?:\.\d+)?)\s*(万)?\s*元?\s*$/);
       if (lump) {
         if (!feeType) feeType = /措施|文明|安全|临设|雨季|夜间|赶工|二次搬运/.test(lump[1]) ? "总价措施" : "其他项目";
-        const amt = lump[3] ? String(Number(lump[2]) * 10000) : lump[2];
+        const amt = lump[3] ? D(lump[2]).mul(10000).toString() : lump[2];
         return {
           steps: [{ tool: "boq.addItem", args: { name: lump[1].trim(), totalPrice: amt, feeType }, activity: `正在补录「${lump[1].trim()}」` }],
         };
@@ -327,7 +328,7 @@ export class RulePlanner implements Planner {
     }
     if (/总价|含税|总额|造价/.test(m) && target && !perArea) {
       const mult = target[2] === "亿" ? 1e8 : target[2] === "万" ? 1e4 : target[2] === "千" ? 1e3 : 1;
-      const targetTotal = Number(target[1].replace(/,/g, "")) * mult;
+      const targetTotal = D(target[1].replace(/,/g, "")).mul(mult).toNumber();
       const inclTax = /含税/.test(m);
       const taxFact = ctx.facts.find((f) => f.key === "税率")?.value;
       // 台账值须走 parseRateValue 归一化——「9%」直接 Number() 得 NaN
