@@ -92,7 +92,7 @@ export async function listBoq(
   // 但历史数据每个文件都从 0 起排，裸按 sortOrder 会让不同文件的行交错。
   // 统一按（文件导入先后 → 表内序号）排：手工补录（无文件）永远在最后。
   const fileRank = new Map<string, number>();
-  for (const it of items.filter(i => i.file).sort((a, b) => a.file!.createdAt.getTime() - b.file!.createdAt.getTime())) {
+  for (const it of items.filter(i => i.file).sort((a, b) => a.file!.createdAt.getTime() - b.file!.createdAt.getTime() || a.fileId!.localeCompare(b.fileId!))) {
     if (!fileRank.has(it.fileId!)) fileRank.set(it.fileId!, fileRank.size);
   }
   items.sort((a, b) => {
