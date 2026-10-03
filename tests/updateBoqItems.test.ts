@@ -50,7 +50,7 @@ describe("updateBoqItems feeType/unitProject", () => {
     const { after } = await updateBoqItems("p1", [
       { id: "i1", patch: { feeType: "总价措施", totalPrice: "1200" } },
     ]);
-    const data = mocks.update.mock.calls[0][0].data;
+    const data = mocks.update.mock.calls[0][0].data as Record<string, { toString(): string }>;
     expect(data.feeType).toBe("总价措施");
     expect(data.totalPrice.toString()).toBe("1200");
     expect(after[0].feeType).toBe("总价措施");
@@ -60,7 +60,7 @@ describe("updateBoqItems feeType/unitProject", () => {
     const cur = row({ feeType: "总价措施", quantity: new Decimal("0"), unitPrice: new Decimal("0"), totalPrice: new Decimal("1200") });
     setup(cur, { ...cur, feeType: "分部分项", totalPrice: "0" });
     await updateBoqItems("p1", [{ id: "i1", patch: { feeType: "分部分项" } }]);
-    const data = mocks.update.mock.calls[0][0].data;
+    const data = mocks.update.mock.calls[0][0].data as Record<string, { toString(): string }>;
     expect(data.feeType).toBe("分部分项");
     expect(data.totalPrice.toString()).toBe("0"); // 0×0 重算覆盖源直填值
   });
