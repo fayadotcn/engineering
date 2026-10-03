@@ -55,35 +55,38 @@ export async function PATCH(
   if (body.feeType !== undefined) patch.feeType = body.feeType;
   if (body.unitProject !== undefined) patch.unitProject = body.unitProject;
 
-  let result;
-  try { result = await updateBoqItems(item.projectId, [
-    { id, patch },
-  ]); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "修改失败" }, { status: 400 }); }
-  const { before, after } = result;
+  // 行更新 + 回执同事务（与 POST/DELETE 同口径）：回执失败不留无审计的修改
+  let after: Awaited<ReturnType<typeof updateBoqItems>>["after"] = [];
   let receiptId: string | null = null;
   let changes: { field: string; label: string; from: string | null; to: string | null }[] = [];
-  if (after.length) {
-    const b = before[0];
-    const a = after[0];
-    changes = (["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "code", "rawFeature", "feeType", "unitProject"] as const)
-      .filter((f) => b[f] !== a[f])
-      .map((f) => ({ field: f, label: FIELD_LABEL[f] ?? f, from: b[f] ?? null, to: a[f] ?? null }));
-    if (changes.length) {
+  try {
+    receiptId = await prisma.$transaction(async (tx) => {
+      const { before, after: a2 } = await updateBoqItems(item.projectId, [{ id, patch }], tx);
+      after = a2;
+      if (!a2.length) return null;
+      const b = before[0];
+      const a = a2[0];
+      changes = (["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "code", "rawFeature", "feeType", "unitProject"] as const)
+        .filter((f) => b[f] !== a[f])
+        .map((f) => ({ field: f, label: FIELD_LABEL[f] ?? f, from: b[f] ?? null, to: a[f] ?? null }));
+      if (!changes.length) return null;
       const text = changes
         .map((c) => c.field === "quantityExpr" && c.to ? `工程量计算式: ${c.to}` : `${c.label}: ${disp(c.from)} → ${disp(c.to)}`)
         .join("；");
-      const receipt = await prisma.actionReceipt.create({
+      const receipt = await tx.actionReceipt.create({
         data: {
           projectId: item.projectId,
           actionType: "USER_EDIT",
           summary: `用户在工作区修改「${a.name}」：${text}`,
           before: toJson(before),
-          after: toJson(after),
+          after: toJson(a2),
           createdBy: "user",
         },
       });
-      receiptId = receipt.id;
-    }
+      return receipt.id;
+    });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "修改失败" }, { status: 400 });
   }
   return NextResponse.json({ item: after[0] ?? null, receiptId, changes });
 }
