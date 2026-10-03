@@ -290,6 +290,32 @@ registerTool({
     for (const ci of [4, 5, 6, 7, 8]) tRow.getCell(ci).numFmt = moneyFmt;
     sCost.columns = [{ width: 16 }, { width: 30 }, { width: 10 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 10 }, { width: 10 }];
 
+    // 综合单价分析表（表-09 口径）：每个已组价清单项列出定额子目级
+    // 人工/辅材/主材/机械/管利分解（均为每清单单位口径）+ 综合单价合计。
+    // 建议增列行（suggested）不计入测算价，不进分析表。
+    const planned = leaf.filter((it) => (it.pricingPlan ?? []).some((l) => !l.suggested));
+    if (planned.length) {
+      const sP = wb.addWorksheet("综合单价分析");
+      sP.addRow(["项目编码", "项目名称", "定额编号", "定额子目", "单位", "人工费", "辅材费", "主材费", "机械费", "管利费", "子目小计"]).font = bold.font;
+      for (const it of planned) {
+        for (const l of it.pricingPlan!.filter((x) => !x.suggested)) {
+          const main = l.mainPrice !== null && D(l.mainPrice).gt(0) ? D(l.mainPrice).mul(l.mainQty ?? 1) : null;
+          const r = sP.addRow([
+            it.code, it.name, l.quotaCode, l.quotaName, it.unit,
+            Number(D(l.labor ?? 0)), Number(D(l.materialAux ?? 0)),
+            main === null ? "—" : Number(main.toFixed(2)),
+            Number(D(l.machine ?? 0)), Number(D(l.fee ?? 0)),
+            Number(D(l.subtotal ?? 0)),
+          ]);
+          for (const ci of [6, 7, 8, 9, 10, 11]) { const c = r.getCell(ci); if (typeof c.value === "number") c.numFmt = moneyFmt; }
+        }
+        const tr = sP.addRow([it.code, `${it.name}（合计）`, "", `综合单价 ${D(it.unitPrice).toFixed(2)} × 工程量 ${it.quantity}`, it.unit, "", "", "", "", "", Number(D(it.totalPrice))]);
+        tr.font = bold.font;
+        tr.getCell(11).numFmt = moneyFmt;
+      }
+      sP.columns = [{ width: 14 }, { width: 24 }, { width: 12 }, { width: 26 }, { width: 7 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 12 }];
+    }
+
     // 主要材料表（报告标准交付物）：定额组价主材行 + 主材暂估价两路归集，同名同价合并
     type MatRow = { name: string; spec: string; unit: string; qty: ReturnType<typeof D>; price: ReturnType<typeof D>; source: string };
     const matMap = new Map<string, MatRow>();
@@ -376,7 +402,7 @@ registerTool({
         title: "分析报告",
         artifactId: artifact.id,
         filename: artifact.label,
-        summary: `汇总/取费/清单/专业/材料/成本构成${matRows.length ? "/主要材料表" : ""}/台账/异常 ${wb.worksheets.length} 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
+        summary: `汇总/取费/清单/专业/材料/成本构成${planned.length ? "/综合单价分析" : ""}${matRows.length ? "/主要材料表" : ""}/台账/异常 ${wb.worksheets.length} 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
       }],
       receipts: [{
         actionType: "EXPORT",

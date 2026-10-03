@@ -137,6 +137,31 @@ describe("report.generate 主要材料表与单方造价", () => {
     expect((r.observation as { grandTotal?: string }).grandTotal).toBeTruthy();
   });
 
+  it("综合单价分析表：已确认子目分解人材机管利，建议行不入表", async () => {
+    mocks.items.mockResolvedValue([
+      item({
+        pricingPlan: [
+          { quotaCode: "5A0001", quotaName: "钢管安装", labor: "10", materialAux: "2", machine: "1", fee: "3", subtotal: "67.04", mainMaterialName: "镀锌钢管", mainQty: "1.02", mainPrice: "50" },
+          { quotaCode: "5A0002", quotaName: "冲洗消毒", labor: "5", materialAux: "1", machine: "0", fee: "1", subtotal: "7", mainMaterialName: null, mainQty: null, mainPrice: null, suggested: true },
+        ],
+      }),
+      item({ id: "i2", name: "无组价项", pricingPlan: [] }),
+    ]);
+    const r = await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    const sP = wb.getWorksheet("综合单价分析");
+    expect(sP).toBeTruthy();
+    const rows: (string | number)[][] = [];
+    sP!.eachRow((row) => rows.push((row.values as (string | number)[]).slice(1)));
+    const line = rows.find((x) => x[2] === "5A0001")!;
+    expect(line[5]).toBeCloseTo(10);   // 人工费
+    expect(line[7]).toBeCloseTo(51);   // 主材费 = 50×1.02
+    expect(line[10]).toBeCloseTo(67.04); // 小计
+    expect(rows.some((x) => x[2] === "5A0002")).toBe(false); // suggested 不入表
+    expect(rows.some((x) => String(x[3]).includes("综合单价"))).toBe(true); // 合计行
+    expect(String((r.views?.[0] as { summary?: string } | undefined)?.summary)).toContain("综合单价分析");
+  });
+
   it("清单为空 → 不生成报告", async () => {
     mocks.items.mockResolvedValue([]);
     const r = await getTool("report.generate")!.handler!(ctx, {});
