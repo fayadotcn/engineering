@@ -17,6 +17,9 @@ export async function POST(req: Request) {
 
   const filename = (form.get("filename") as string | null)?.trim() || file.name;
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (!buffer.length) return NextResponse.json({ error: "空文件" }, { status: 400 });
+  if (buffer.length > 80 * 1024 * 1024)
+    return NextResponse.json({ error: "文件过大（限 80MB）" }, { status: 413 });
   // 上传时可选带的行级默认值（材料价格库：地区/期次/价格类型/品牌）
   const text = (k: string) => (form.get(k) as string | null)?.trim() || undefined;
   const ds = await createDataset(kind as DatasetKind, filename, buffer, {
