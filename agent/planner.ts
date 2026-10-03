@@ -139,16 +139,33 @@ export class RulePlanner implements Planner {
       };
     }
 
-    // 补录清单项：「补录 灭火器 20个 单价85」——尾部按「数量+单位+单价」解析
+    // 补录清单项：「补录 灭火器 20个 单价85」——尾部按「数量+单位+单价」解析；
+    // 带计价类型词时按对应 feeType 落行：「补录总价措施 安全文明施工费 12000元」直填合价
     const addM = m.match(/(?:补录|新增|添加)\s*(?:一|1)?\s*(?:条|项|个)?\s*(?:清单项?)?[：:，,]?\s*(.+)/);
     if (addM) {
-      const rest = addM[1].trim();
+      let rest = addM[1].trim();
+      let feeType: string | undefined;
+      const typeM = rest.match(/^(总价措施|其他项目|单价措施|分部分项)\s*[，,]?\s*(.*)$/);
+      if (typeM && typeM[2]) {
+        feeType = typeM[1];
+        rest = typeM[2].trim();
+      }
       const tail = rest.match(/^(.*?)[，,\s]+(\d+(?:\.\d+)?)\s*(个|台|套|米|m|㎡|m2|m²|立方米|m3|m³|项|根|块|组|盏|座|樘|条|只|处|点|kg|公斤|t|吨|km|工日|台班)\s*[，,]?\s*(?:单价|综合单价)?\s*(\d+(?:\.\d+)?)\s*元?\s*$/);
-      if (!tail)
-        return { steps: [], fallbackMessage: "补录格式：补录 名称，数量单位，单价。例如「补录 灭火器 20个 单价85元」" };
-      return {
-        steps: [{ tool: "boq.addItem", args: { name: tail[1].trim(), quantity: tail[2], unit: tail[3], unitPrice: tail[4] }, activity: `正在补录「${tail[1].trim()}」` }],
-      };
+      if (tail) {
+        return {
+          steps: [{ tool: "boq.addItem", args: { name: tail[1].trim(), quantity: tail[2], unit: tail[3], unitPrice: tail[4], ...(feeType ? { feeType } : {}) }, activity: `正在补录「${tail[1].trim()}」` }],
+        };
+      }
+      // 总额计价行没有量价结构——「补录总价措施 安全文明施工费 12000」尾部只有一个金额
+      const lump = rest.match(/^(.*?)[，,\s]+(\d+(?:\.\d+)?)\s*(万)?\s*元?\s*$/);
+      if (lump) {
+        if (!feeType) feeType = /措施|文明|安全|临设|雨季|夜间|赶工|二次搬运/.test(lump[1]) ? "总价措施" : "其他项目";
+        const amt = lump[3] ? String(Number(lump[2]) * 10000) : lump[2];
+        return {
+          steps: [{ tool: "boq.addItem", args: { name: lump[1].trim(), totalPrice: amt, feeType }, activity: `正在补录「${lump[1].trim()}」` }],
+        };
+      }
+      return { steps: [], fallbackMessage: "补录格式：补录 名称，数量单位，单价。例如「补录 灭火器 20个 单价85元」；总额计价项如「补录总价措施 安全文明施工费 12000元」" };
     }
 
     // file ingest (triggered by upload)

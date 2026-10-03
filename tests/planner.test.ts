@@ -227,3 +227,22 @@ describe("补录清单项路由", () => {
     expect(p.fallbackMessage).toContain("补录格式");
   });
 });
+
+describe("补录总额计价项", () => {
+  it("「补录总价措施 安全文明施工费 12000元」→ feeType+totalPrice", async () => {
+    const p = await plan("补录总价措施 安全文明施工费 12000元");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.addItem");
+    expect(s?.args).toMatchObject({ name: "安全文明施工费", feeType: "总价措施", totalPrice: "12000" });
+  });
+  it("「补录其他项目 暂列金额 5万元」→ 万换算为 50000", async () => {
+    const p = await plan("补录其他项目 暂列金额 5万元");
+    const s = await resolve(p.steps[0]);
+    expect(s?.args).toMatchObject({ name: "暂列金额", feeType: "其他项目", totalPrice: "50000" });
+  });
+  it("无类型词但名称像措施费 → 默认总价措施", async () => {
+    const p = await plan("补录 夜间施工增加费 8000");
+    const s = await resolve(p.steps[0]);
+    expect(s?.args).toMatchObject({ name: "夜间施工增加费", feeType: "总价措施", totalPrice: "8000" });
+  });
+});
