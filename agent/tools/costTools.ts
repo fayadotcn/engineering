@@ -6,7 +6,7 @@ import { adjustToTarget } from "@cost-engine/adjust";
 import { analyzeCostComposition } from "@cost-engine/costComposition";
 import { D, decStr, fmtMoney, round3, sum, withTax } from "@cost-engine/money";
 import { feeSummary, compareDeclared } from "@cost-engine/fees";
-import { getFact, getFacts, setFact, parseRateValue, loadFeeParams } from "@project/facts";
+import { getFact, getFacts, setFact, parseRateValue, parseAreaValue, loadFeeParams } from "@project/facts";
 import type { DiffRow } from "@shared/types";
 
 registerTool({
@@ -87,19 +87,33 @@ registerTool({
       })
       .filter(Boolean);
 
+    // 造价指标（单方造价）：台账「建筑面积」>0 时给出 元/㎡ 口径——指标分析的最低骨架
+    const areaFact = facts.find((x) => /面积/.test(x.key));
+    const area = parseAreaValue(areaFact?.value);
+    const indicators =
+      area !== null && area > 0
+        ? [
+            { label: "建筑面积", value: `${D(area).toFixed(0)} ㎡` },
+            { label: "单方造价(含税)", value: `${D(r.grandTotal).div(area).toFixed(2)} 元/㎡` },
+            { label: "单方造价(税前)", value: `${D(r.preTax).div(area).toFixed(2)} 元/㎡` },
+          ]
+        : undefined;
+
     return {
       observation: {
         grandTotal: r.grandTotal, preTax: r.preTax, unpricedCount: r.unpricedCount,
         rows: r.rows.map((x) => ({ name: x.name, rate: x.rate, amount: x.amount })),
         declaredCheck: declaredCheck.length ? declaredCheck : undefined,
+        indicators,
       },
       views: [
         {
           kind: "feeSummary", id: `view:fees:${ctx.runId}`, title: "费用汇总表",
           rows: r.rows, grandTotal: r.grandTotal, unpricedCount: r.unpricedCount,
+          indicators,
         },
       ],
-      message: `含税工程造价 ${fmtMoney(r.grandTotal)} 元（税前 ${fmtMoney(r.preTax)} 元）${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}${driftNotes.length ? `；${driftNotes.join("；")}` : ""}`,
+      message: `含税工程造价 ${fmtMoney(r.grandTotal)} 元（税前 ${fmtMoney(r.preTax)} 元）${indicators ? `；单方造价 ${D(r.grandTotal).div(area!).toFixed(2)} 元/㎡` : ""}${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}${driftNotes.length ? `；${driftNotes.join("；")}` : ""}`,
     };
   },
 });

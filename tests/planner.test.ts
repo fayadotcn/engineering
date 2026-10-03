@@ -116,3 +116,17 @@ describe("范围化比例调整（类别/名称词锁范围）", () => {
     expect(s?.args.allowedItemIds).toBeUndefined();
   });
 });
+
+describe("单方造价指标路由", () => {
+  it("「单方造价是多少」→ cost.feeSummary（带面积指标）", async () => {
+    const p = await plan("这个项目单方造价是多少");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("cost.feeSummary");
+  });
+  it("「建筑面积设为12000㎡」→ project.setFact", async () => {
+    const p = await plan("建筑面积设为12000㎡");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("project.setFact");
+    expect(s?.args).toMatchObject({ key: "建筑面积" });
+  });
+});

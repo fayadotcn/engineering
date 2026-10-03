@@ -281,6 +281,8 @@ export type WorkspaceView =
       }[];
       grandTotal: string;
       unpricedCount: number;
+      /** 造价指标（单方造价等）；建筑面积事实缺省时不出 */
+      indicators?: { label: string; value: string }[];
     }
   | {
       kind: "costComposition";

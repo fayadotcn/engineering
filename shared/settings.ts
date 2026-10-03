@@ -13,4 +13,5 @@ export const PRICING_FIELDS = [
   { key: "税率", label: "适用税率", hint: "填写适用税率；0% 表示明确不计税", group: "组价与取费" },
   { key: "檐口高度", label: "檐口高度（m）", hint: "系数措施费的计取条件", group: "工程条件" },
   { key: "操作物高度", label: "操作物高度（m）", hint: "系数措施费的计取条件", group: "工程条件" },
+  { key: "建筑面积", label: "建筑面积（㎡）", hint: "填写后费用汇总自动出单方造价指标", group: "工程条件" },
 ] as const;

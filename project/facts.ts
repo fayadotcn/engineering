@@ -72,6 +72,9 @@ export function validatePricingFact(key: string, value: string): void {
     if (amount === null || amount < 0) throw new Error("暂列金额应为非负金额");
   } else if (["檐口高度", "操作物高度"].includes(key) && (!Number.isFinite(Number(value)) || Number(value) < 0)) {
     throw new Error(`${key}应为非负米数`);
+  } else if (/面积/.test(key)) {
+    const area = parseAreaValue(value);
+    if (area === null || area < 0) throw new Error(`${key}应为非负平方米数`);
   } else if (key === "价格期" && !/^20\d{2}-(0[1-9]|1[0-2])$/.test(value)) {
     throw new Error("价格期请填写 YYYY-MM");
   } else if (key === "价格类型" && !["INFO", "MARKET", "SUPPLY", "LABOR", "信息价", "市场价", "供应价", "人工价"].includes(value)) {
@@ -106,6 +109,13 @@ export function parseAmountValue(raw: string | null | undefined): number | null 
   const wan = s.match(/^([\d.]+)万$/);
   const v = wan ? Number(wan[1]) * 10000 : Number(s);
   return Number.isFinite(v) ? v : null;
+}
+
+/** 面积事实归一化：「12000㎡」/「1.2万平米」→ 12000。 */
+export function parseAreaValue(raw: string | null | undefined): number | null {
+  if (!raw?.trim()) return null;
+  const s = String(raw).replace(/平方米|平米|㎡|m²|m2/gi, "");
+  return parseAmountValue(s);
 }
 
 /** 加载取费参数（台账事实 → FeeParams），供 cost.feeSummary 工具与报告导出共用。 */

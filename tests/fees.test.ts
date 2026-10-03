@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { D } from "../cost-engine/money";
 import { feeSummary } from "../cost-engine/fees";
-import { parseRateValue, parseAmountValue } from "../project/facts";
+import { parseRateValue, parseAmountValue, parseAreaValue, validatePricingFact } from "../project/facts";
 import type { BoqItemDTO } from "../shared/types";
 
 const item = (totalPrice: string, unitPrice = "1", feeType: BoqItemDTO["feeType"] = "分部分项"): BoqItemDTO =>
@@ -167,5 +167,18 @@ describe("事实值归一化", () => {
     expect(parseAmountValue("50万")).toBe(500000);
     expect(parseAmountValue("5,000元")).toBe(5000);
     expect(parseAmountValue("abc")).toBeNull();
+  });
+  it("parseAreaValue 兼容 ㎡/平米/万 单位", () => {
+    expect(parseAreaValue("12000㎡")).toBe(12000);
+    expect(parseAreaValue("1.2万平米")).toBe(12000);
+    expect(parseAreaValue("8000")).toBe(8000);
+    expect(parseAreaValue("abc")).toBeNull();
+    expect(parseAreaValue(null)).toBeNull();
+  });
+  it("validatePricingFact 校验建筑面积", () => {
+    expect(() => validatePricingFact("建筑面积", "12000㎡")).not.toThrow();
+    expect(() => validatePricingFact("建筑面积", "1.2万")).not.toThrow();
+    expect(() => validatePricingFact("建筑面积", "很大")).toThrow();
+    expect(() => validatePricingFact("建筑面积", "-100")).toThrow();
   });
 });

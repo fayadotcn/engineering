@@ -57,6 +57,13 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
           </tbody>
         </table>
       </div>
+      {view.indicators?.length ? (
+        <div className="mt-3 flex flex-wrap justify-end gap-2">
+          {view.indicators.map((i) => (
+            <span key={i.label} className="chip">{i.label} <b className="mono font-medium">{i.value}</b></span>
+          ))}
+        </div>
+      ) : null}
       <div className="mt-3 flex items-baseline justify-end gap-2 text-[12px] text-neutral-500">
         含税工程造价
         <span className="mono text-xl font-semibold" style={{ color: "var(--ink-1)" }}>
