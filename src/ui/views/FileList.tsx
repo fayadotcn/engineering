@@ -136,6 +136,7 @@ export function FileList() {
                     </button>
                   )}
                   {(view || closedId) && <button className="cost-file-action" onClick={() => void openFile(view?.id ?? closedId!)}>{view?.kind === "columnMapping" || closedId?.startsWith("view:mapping:") ? "核对表格" : "查看文档"}</button>}
+                  <a className="cost-file-action" href={`/api/files/${f.id}/download`} download title="下载上传的原文件">下载</a>
                   <button
                     onClick={() => setPendingDel({ id: f.id, name: f.filename })}
                     disabled={blocked}
