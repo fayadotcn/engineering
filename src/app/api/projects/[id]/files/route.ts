@@ -27,12 +27,32 @@ export async function POST(
   const filename = (form.get("filename") as string | null)?.trim() || file.name;
   const contentHash = createHash("sha1").update(buffer).digest("hex");
 
-  // 同项目同内容去重：已解析过的文件不再建记录、不起 run
+  // 同项目同内容去重：已解析过的文件不再建记录、不起 run；
+  // 上次导入失败/中断的同内容文件直接触发重导（deleteByFile 保证幂等），不堆重复记录
   const dup = await prisma.projectFile.findFirst({
-    where: { projectId, contentHash, status: "PARSED" },
+    where: { projectId, contentHash },
     orderBy: { createdAt: "desc" },
   });
-  if (dup) return NextResponse.json({ file: dup, runId: null, duplicate: true });
+  if (dup) {
+    if (dup.status === "PARSED")
+      return NextResponse.json({ file: dup, runId: null, duplicate: true });
+    // 已有进行中的导入任务就直接复用，避免同文件并发导入（deleteByFile 竞态）
+    const live = await prisma.agentRun.findFirst({
+      where: {
+        projectId,
+        status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+        userMessage: { contains: `「${dup.filename}」` },
+        createdAt: { gt: new Date(Date.now() - 15 * 60 * 1000) },
+      },
+    });
+    if (live) return NextResponse.json({ file: dup, runId: live.id, duplicate: true });
+    const { runId } = await startRun({
+      projectId,
+      message: `重新导入文件「${dup.filename}」`,
+      extra: { ingestFileId: dup.id },
+    });
+    return NextResponse.json({ file: dup, runId, duplicate: true });
+  }
 
   const ext = path.extname(filename) || ".bin";
   const storageKey = await storage.put(buffer, ext);
@@ -54,7 +74,7 @@ export async function POST(
   // ingest goes through the agent runtime so it's fully traced
   const { runId } = await startRun({
     projectId,
-    message: `分析并导入文件「${file.name}」`,
+    message: `分析并导入文件「${filename}」`,
     extra: { ingestFileId: record.id },
   });
 
