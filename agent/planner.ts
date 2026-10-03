@@ -635,6 +635,38 @@ export class RulePlanner implements Planner {
       return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的可计价清单项` : "没有可写主材价的清单项" };
     }
 
+    // 工程量修改：「管道工程量改为100」「电缆数量改为 3×12+5」——
+    // 纯数字直写 quantity；计算式走求值并把原文写进 quantityExpr 留痕（量×价重算合价）
+    const qtySetM = m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(?:工程量|数量)(?:改|设|调)(?:为|成|到|整为|整成)?\s*[：:]?\s*(.+?)\s*$/);
+    if (qtySetM && !/单价|价格|合价|总价|费率|税率/.test(m)) {
+      const scope = qtySetM[1].replace(/^(把|将|对|请|所有|全部|整个|清单项?|各项|项目)+/, "");
+      const rawVal = qtySetM[2].replace(/[""'"'「『」』]/g, "").replace(/\s*(米|㎡|m|个|台|套|项|根|盏|座|樘)\s*$/, "").trim();
+      const numVal = Number(rawVal.replace(/,/g, ""));
+      let qtyVal = "";
+      let exprVal: string | undefined;
+      if (Number.isFinite(numVal)) {
+        if (numVal < 0) return { steps: [], fallbackMessage: "工程量必须是非负数值" };
+        qtyVal = String(numVal);
+      } else {
+        const { evalExpr } = await import("@cost-engine/calcExpr");
+        try { qtyVal = String(evalExpr(rawVal)); exprVal = rawVal; }
+        catch { return { steps: [], fallbackMessage: `工程量计算式无效：${rawVal}` }; }
+      }
+      const compute = async (): Promise<PlanStep | null> => {
+        const { listBoq } = await import("@boq/service");
+        const { isPricableItem } = await import("@shared/types");
+        const items = (await listBoq(ctx.projectId)).filter((i) => !i.isHeader && i.name.trim() && isPricableItem(i));
+        const pool = scopeFilter(items, scope);
+        if (!pool.length) return null;
+        return {
+          tool: "boq.update",
+          args: { patches: pool.map((i) => ({ id: i.id, quantity: qtyVal, ...(exprVal ? { quantityExpr: exprVal } : {}) })), reason: `工程量设为 ${rawVal}${scope ? `（范围：${scope}）` : ""}` },
+          activity: "正在更新工程量",
+        };
+      };
+      return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的可计价清单项` : "没有可修改的清单项" };
+    }
+
     // 名称/项目特征修正：「把X的名称改为Y」「给X的特征补上沟槽连接」——特征不符检查的处置通道。
     // 须在改价路由之前：特征文本可能含「单价/价格」字样，先到先判
     const nameFeatM = m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(项目特征|特征|名称)(?:改|设|补|填写)(?:为|成|上|到|充)\s*[：:=""]?(.+?)\s*[""」』]?$/);

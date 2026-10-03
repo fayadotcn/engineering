@@ -95,7 +95,7 @@ describe("updateBoqItems quantityExpr 单独编辑", () => {
     const cur = row({ quantityExpr: "3×12" });
     setup(cur, { ...cur, quantityExpr: "" });
     await updateBoqItems("p1", [{ id: "i1", patch: { quantityExpr: "" } }]);
-    const data = mocks.update.mock.calls[0][0].data as Record<string, unknown>;
+    const data = mocks.update.mock.calls[0][0].data as Record<string, { toString(): string }>;
     expect(data.quantityExpr).toBe("");
     expect(data.quantity.toString()).toBe("10"); // 量不变
   });

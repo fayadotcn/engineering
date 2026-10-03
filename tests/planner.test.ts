@@ -551,3 +551,36 @@ describe("撤销路由（receipt.undo）", () => {
     expect(s?.tool).toBe("boq.filter");
   });
 });
+
+describe("工程量修改路由", () => {
+  it("「把镀锌钢管的工程量改为88」→ boq.update quantity", async () => {
+    const p = await plan("把镀锌钢管的工程量改为88");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    const patches = s?.args.patches as { id: string; quantity: string }[];
+    expect(patches).toEqual([{ id: "i2", quantity: "88" }]);
+  });
+  it("「电力电缆数量改为 3×12+5」→ 求值+留痕原文", async () => {
+    const p = await plan("电力电缆数量改为3×12+5");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    const patches = s?.args.patches as { id: string; quantity: string; quantityExpr?: string }[];
+    expect(patches[0]).toEqual({ id: "i1", quantity: "41", quantityExpr: "3×12+5" });
+  });
+  it("「镀锌钢管工程量改为-5」→ 负量拦截", async () => {
+    const p = await plan("镀锌钢管工程量改为-5");
+    expect(p.steps).toEqual([]);
+    expect(p.fallbackMessage).toContain("非负");
+  });
+  it("「工程量改为100」无范围词 → 不匹配（防全表写量）", async () => {
+    const p = await plan("工程量改为100");
+    const s = p.steps.length ? await resolve(p.steps[0]) : null;
+    expect(s?.tool).not.toBe("boq.update");
+  });
+  it("「把电力电缆单价改为5元」不落改量路由", async () => {
+    const p = await plan("把电力电缆单价改为5元");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    expect((s?.args.patches as { unitPrice?: string }[])[0].unitPrice).toBe("5.00");
+  });
+});
