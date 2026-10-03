@@ -295,3 +295,13 @@ describe("检查并导出路由", () => {
     expect((await resolve(p.steps[0]))?.tool).toBe("report.exportExcel");
   });
 });
+
+describe("甲供材扣减路由", () => {
+  it.each(["扣减甲供材已计的主材价", "甲供材不要计价", "把甲供材的主材价清零"])(
+    "「%s」→ material.clearOwnerSuppliedPrice", async (m) => {
+      const p = await plan(m);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("material.clearOwnerSuppliedPrice");
+    }
+  );
+});

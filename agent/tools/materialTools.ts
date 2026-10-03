@@ -352,6 +352,39 @@ registerTool({
   },
 });
 
+// 甲供材核对/扣减共用：取 OWNER_SUPPLIED 文件的材料行，对清单项做匹配，
+// 返回已计主材暂估价的冲突项（结算口径甲供材不计入承包价）。
+async function ownerSuppliedScan(ctx: { projectId: string }) {
+  const { prisma } = await import("@database/client");
+  const { D } = await import("@cost-engine/money");
+  const ownerFiles = await prisma.projectFile.findMany({
+    where: { projectId: ctx.projectId, kind: "OWNER_SUPPLIED" },
+    select: { id: true, filename: true },
+  });
+  if (!ownerFiles.length) return { ownerFiles, supplied: [] as Awaited<ReturnType<typeof listQuotations>>, conflicts: [], matchedClean: 0, matchedItems: 0 };
+  const ownerIds = new Set(ownerFiles.map((f) => f.id));
+  const supplied = (await listQuotations(ctx.projectId)).filter((q) => q.fileId && ownerIds.has(q.fileId));
+  if (!supplied.length) return { ownerFiles, supplied, conflicts: [], matchedClean: 0, matchedItems: 0 };
+  const items = await listBoq(ctx.projectId);
+  const { rows: matched } = matchQuotations(items, supplied);
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const seen = new Set<string>();
+  const conflicts: { item: BoqItemDTO; via: string }[] = [];
+  let matchedClean = 0;
+  for (const r of matched) {
+    if (r.status === "UNMATCHED") continue;
+    for (const id of r.matchedBoqItemIds) {
+      const it = byId.get(id);
+      if (!it || !isPricableItem(it) || seen.has(it.id)) continue;
+      seen.add(it.id);
+      if (D(it.mainMaterialPrice ?? "0").gt(0))
+        conflicts.push({ item: it, via: `${r.materialName}${r.spec ? ` ${r.spec}` : ""}` });
+      else matchedClean++;
+    }
+  }
+  return { ownerFiles, supplied, conflicts, matchedClean, matchedItems: seen.size };
+}
+
 // 甲供材核对：发包人供货（OWNER_SUPPLIED 文件）里的材料，清单项再计主材暂估价
 // 就是重复计价——结算口径甲供材不计入承包价。命中但未取价的行是正常态，只报红旗项。
 registerTool({
@@ -360,38 +393,14 @@ registerTool({
   implemented: true,
   schema: z.object({}),
   handler: async (ctx) => {
-    const { prisma } = await import("@database/client");
-    const { D } = await import("@cost-engine/money");
-    const ownerFiles = await prisma.projectFile.findMany({
-      where: { projectId: ctx.projectId, kind: "OWNER_SUPPLIED" },
-      select: { id: true, filename: true },
-    });
+    const { ownerFiles, supplied, conflicts, matchedClean, matchedItems } = await ownerSuppliedScan(ctx);
     if (!ownerFiles.length)
       return { observation: { supplied: 0 }, message: "项目里还没有甲供材表——上传发包人供货清单后即可核对" };
-    const ownerIds = new Set(ownerFiles.map((f) => f.id));
-    const supplied = (await listQuotations(ctx.projectId)).filter((q) => q.fileId && ownerIds.has(q.fileId));
     if (!supplied.length)
       return {
         observation: { supplied: 0, files: ownerFiles.map((f) => f.filename) },
         message: `甲供材文件 ${ownerFiles.map((f) => `「${f.filename}」`).join("")} 已登记但没有材料行（sheet 需识别为询价型表格）`,
       };
-    const items = await listBoq(ctx.projectId);
-    const { rows: matched } = matchQuotations(items, supplied);
-    const byId = new Map(items.map((i) => [i.id, i]));
-    const seen = new Set<string>();
-    const conflicts: { item: BoqItemDTO; via: string }[] = [];
-    let matchedClean = 0;
-    for (const r of matched) {
-      if (r.status === "UNMATCHED") continue;
-      for (const id of r.matchedBoqItemIds) {
-        const it = byId.get(id);
-        if (!it || !isPricableItem(it) || seen.has(it.id)) continue;
-        seen.add(it.id);
-        if (D(it.mainMaterialPrice ?? "0").gt(0))
-          conflicts.push({ item: it, via: `${r.materialName}${r.spec ? ` ${r.spec}` : ""}` });
-        else matchedClean++;
-      }
-    }
     const anomalyRows: AnomalyRow[] = conflicts.map((c) => ({
       groupKey: `OWNER:${c.item.id}`,
       label: c.via,
@@ -404,7 +413,7 @@ registerTool({
       reason: `甲供材「${c.via}」对应的清单项已计主材暂估价 ${c.item.mainMaterialPrice} 元——甲供材由发包人供货，不应计入承包价，请核实扣减`,
     }));
     return {
-      observation: { supplied: supplied.length, matchedItems: seen.size, conflicts: conflicts.length, clean: matchedClean },
+      observation: { supplied: supplied.length, matchedItems, conflicts: conflicts.length, clean: matchedClean },
       views: anomalyRows.length ? [{
         kind: "anomalyTable" as const, id: "view:owner-supplied", title: "甲供材重复计价核对",
         anomalyType: "OWNER_SUPPLIED" as const, rows: anomalyRows,
@@ -412,6 +421,45 @@ registerTool({
       message: conflicts.length
         ? `甲供材核对：${conflicts.length} 项清单计了主材价但材料属发包人供货（重复计价），详见核对表`
         : `甲供材核对通过：${supplied.length} 条甲供材、${matchedClean} 项命中清单均未重复计价`,
+    };
+  },
+});
+
+// 甲供材扣减：核对出重复计价后，把冲突项的主材暂估价清零（综合单价由组价链重算），
+// 全字段快照回执可撤销。confirm 门后执行。
+registerTool({
+  name: "material.clearOwnerSuppliedPrice",
+  description: "甲供材扣减：把甲供材对应清单项已计的主材暂估价清零（重复计价扣减），生成 Diff 与可撤销回执",
+  implemented: true,
+  schema: z.object({}),
+  confirm: () => "将把甲供材对应清单项的主材暂估价清零（结算口径甲供材不计入承包价；综合单价需重新组价，可撤销）",
+  handler: async (ctx) => {
+    const { ownerFiles, supplied, conflicts } = await ownerSuppliedScan(ctx);
+    if (!ownerFiles.length)
+      return { observation: { cleared: 0 }, message: "项目里没有甲供材表，无需扣减" };
+    if (!supplied.length)
+      return { observation: { cleared: 0 }, message: "甲供材文件没有材料行，无需扣减" };
+    if (!conflicts.length)
+      return { observation: { cleared: 0 }, message: "未发现甲供材重复计价，无需扣减" };
+    const patches = conflicts.map((c) => ({ id: c.item.id, patch: { mainMaterialPrice: "0" } }));
+    const { before, after } = await updateBoqItems(ctx.projectId, patches);
+    const diffRows: DiffRow[] = before.map((b, i) => ({
+      itemId: b.id, code: b.code, name: b.name,
+      field: "mainMaterialPrice", before: b.mainMaterialPrice ?? "0", after: after[i].mainMaterialPrice,
+    }));
+    return {
+      observation: { cleared: conflicts.length },
+      views: [
+        { kind: "diff", id: `view:diff:${ctx.runId}`, title: "甲供材扣减 Diff", receiptId: "", rows: diffRows },
+        { kind: "boqTable", id: "view:boq", title: "工程量清单" },
+      ],
+      receipts: [{
+        actionType: "MATERIAL_PRICE_FILL",
+        summary: `甲供材扣减：${conflicts.length} 项主材暂估价清零（发包人供货不计入承包价）`,
+        before: before.map((b) => ({ id: b.id, name: b.name, mainMaterialPrice: b.mainMaterialPrice ?? "0" })),
+        after: after.map((a) => ({ id: a.id, name: a.name, mainMaterialPrice: a.mainMaterialPrice })),
+      }],
+      message: `已清零 ${conflicts.length} 项清单的主材暂估价（${conflicts.slice(0, 5).map((c) => c.item.name).join("、")}${conflicts.length > 5 ? " 等" : ""}）——综合单价请重新「测算组价」`,
     };
   },
 });

@@ -154,3 +154,40 @@ describe("material.checkOwnerSupplied 甲供材核对", () => {
     expect(r.message).toContain("上传");
   });
 });
+
+describe("material.clearOwnerSuppliedPrice 甲供材扣减", () => {
+  it("冲突项主材暂估价清零 + 回执；工具带确认门", async () => {
+    const a = boq("镀锌钢管", "DN100");
+    a.mainMaterialPrice = "60";
+    const b = boq("闸阀", "DN100"); // 命中但未计价——不在扣减范围
+    db.items = [a, b];
+    db.ownerFiles = [{ id: "f-owner", filename: "甲供材表.xlsx" }];
+    db.quotes = [
+      quote("镀锌钢管", "DN100", "60", "m", "f-owner"),
+      quote("闸阀", "DN100", "300", "个", "f-owner"),
+    ];
+    expect(getTool("material.clearOwnerSuppliedPrice")!.confirm).toBeTruthy();
+    const r = (await call("material.clearOwnerSuppliedPrice")) as {
+      observation: { cleared: number };
+      receipts?: { actionType: string }[];
+      message?: string;
+    };
+    expect(r.observation.cleared).toBe(1);
+    const { updateBoqItems } = await import("@boq/service");
+    const patches = vi.mocked(updateBoqItems).mock.calls.at(-1)![1];
+    expect(patches).toEqual([{ id: a.id, patch: { mainMaterialPrice: "0" } }]);
+    expect(r.receipts?.[0]?.summary).toContain("甲供材扣减");
+  });
+
+  it("无冲突 → 不动清单", async () => {
+    const a = boq("镀锌钢管", "DN100"); // 未计价
+    db.items = [a];
+    db.ownerFiles = [{ id: "f-owner", filename: "甲供材表.xlsx" }];
+    db.quotes = [quote("镀锌钢管", "DN100", "60", "m", "f-owner")];
+    const { updateBoqItems } = await import("@boq/service");
+    vi.mocked(updateBoqItems).mockClear();
+    const r = (await call("material.clearOwnerSuppliedPrice")) as { observation: { cleared: number }; message?: string };
+    expect(r.observation.cleared).toBe(0);
+    expect(vi.mocked(updateBoqItems)).not.toHaveBeenCalled();
+  });
+});
