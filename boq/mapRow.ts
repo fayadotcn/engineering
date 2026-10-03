@@ -63,9 +63,12 @@ export function rowToBoqInput(
   // 综合单价分析表自带的人材机分解列（每清单单位）→ 成本构成分析直接消费
   const laborUnit = D(numCell(row.cells.laborPrice));
   const machineUnit = D(numCell(row.cells.machinePrice));
-  const total = (row.cells.totalPrice ?? "").trim()
-    ? D(numCell(row.cells.totalPrice))
-    : lineTotal(qty, price);
+  // 合价单元格非数值（「—」「详见计算式」）时退回 量×价，别落 0 吃掉一行真钱
+  const totalCell = (row.cells.totalPrice ?? "").trim();
+  const total =
+    totalCell !== "" && !isNonNumeric(totalCell)
+      ? D(numCell(totalCell))
+      : lineTotal(qty, price);
 
   const derived: string[] = [];
   // 成本表等无综合单价列：合价÷工程量 反推

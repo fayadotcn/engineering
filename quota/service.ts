@@ -19,6 +19,8 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
     const { prisma } = await import("@database/client");
     const rows = await prisma.quotaRow.findMany({
       where: { OR: [{ datasetId: null }, { dataset: { active: true } }] },
+      // 同分定额按编号裁决——无固定序时 top2 结果不可复现
+      orderBy: [{ code: "asc" }, { id: "asc" }],
     });
     const db: QuotaEntry[] = rows.map((r) => {
       const mk = JSON.parse(r.matchKeys || "{}") as Record<string, string>;

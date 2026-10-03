@@ -822,6 +822,8 @@ export async function findLibraryPrice(
   const rows = await prisma.materialPrice.findMany({
     where: priceCandidateWhere(name, spec),
     include: { dataset: { select: { name: true } } },
+    // 同分候选的裁决依赖输入顺序——固定排序保证匹配结果可复现
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 80,
   });
   const pick = pickBestPriceRow(rows.map(toCandidate), { name, spec }, prefs);
@@ -874,6 +876,7 @@ export async function matchLibraryForItem(
       item.features?.material
     ),
     include: { dataset: { select: { name: true } } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: 100,
   });
   const pick = pickBestPriceRow(

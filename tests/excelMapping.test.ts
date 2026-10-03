@@ -330,6 +330,23 @@ describe("通用清单列映射", () => {
     expect(raw.__nonNumeric).toContain("quantity");
   });
 
+  it("rowToBoqInput：合价非数值退回 量×价，不落 0", async () => {
+    const buf = await wb([
+      ["序号", "名称", "单位", "数量", "单价", "合价"],
+      [1, "镀锌钢管", "m", 120, 85.5, "—"],
+      [2, "电缆", "m", 200, 40, 8000],
+      [3, "桥架", "m", 50, 96, 4800],
+    ]);
+    const s = firstSheet(parseWorkbook(buf));
+    const row = s.rows.find((r) => r.cells.name === "镀锌钢管")!;
+    const out = rowToBoqInput(row, s, {
+      projectId: "p", fileId: "f", sortOrder: 0, section: "", feeType: "分部分项",
+    });
+    expect(String(out.totalPrice)).toBe("10260");
+    const raw = JSON.parse(out.rawCells as string);
+    expect(raw.__nonNumeric).toContain("totalPrice");
+  });
+
   it("「含税单价」→ taxIncluded=true；「不含税/除税单价」不误判含税", async () => {
     const incl = await wb([
       ["序号", "名称", "单位", "工程量", "含税单价", "合价"],
