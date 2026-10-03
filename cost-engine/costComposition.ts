@@ -73,9 +73,10 @@ function partsFromPlan(item: BoqItemDTO, qty: Decimal): Parts | null {
   let labor = D(0), aux = D(0), machine = D(0), main = D(0);
   let mainUnknown = false;
   for (const l of lines) {
-    labor = labor.plus(l.labor);
-    aux = aux.plus(l.materialAux);
-    machine = machine.plus(l.machine);
+    // 旧库里的 pricingPlan 行可能缺字段（字段上线前写入的方案）——缺省按 0，绝不让分析整表抛错
+    labor = labor.plus(D(l.labor ?? 0));
+    aux = aux.plus(D(l.materialAux ?? 0));
+    machine = machine.plus(D(l.machine ?? 0));
     if (l.mainMaterialName) {
       if (l.mainQty && l.mainPrice) main = main.plus(D(l.mainQty).mul(D(l.mainPrice)));
       else mainUnknown = true; // 需要主材但没有价：材料费不完整
