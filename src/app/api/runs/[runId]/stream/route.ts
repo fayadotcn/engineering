@@ -26,8 +26,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
       const queued: AgentEventDTO[] = [];
       closeController = () => { try { controller.close(); } catch {} };
       const send = (e: AgentEventDTO) => {
-        if (closed || e.seq <= lastSeq) return;
-        lastSeq = e.seq;
+        // 负 seq = 瞬时事件（不落库）：直通，不参与 lastSeq 去重，
+        // 否则它永远 <= lastSeq 被滤掉
+        if (closed || (e.seq >= 0 && e.seq <= lastSeq)) return;
+        if (e.seq >= 0) lastSeq = e.seq;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`));
         if (e.type === "run_finished") cleanup();
       };

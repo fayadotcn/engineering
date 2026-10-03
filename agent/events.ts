@@ -29,6 +29,9 @@ export type Emit = {
 
 export function makeEmitter(runId: string, startSeq = 0): Emit {
   let seq = startSeq;
+  // 瞬时事件用负数 seq：不占持久化序号空间——否则崩溃接管按 _max+1 续号时
+  // 会重用某个已被客户端见过的 live seq，error 事件被去重丢掉
+  let liveSeq = -1;
   const emit = async function (
     type: AgentEventType | string,
     payload: Record<string, unknown>
@@ -40,7 +43,7 @@ export function makeEmitter(runId: string, startSeq = 0): Emit {
     for (const fn of subscribers.get(runId) ?? []) fn(e);
   } as Emit;
   emit.live = (type, payload) => {
-    const e: AgentEventDTO = { seq: seq++, type: type as AgentEventType, payload };
+    const e: AgentEventDTO = { seq: liveSeq--, type: type as AgentEventType, payload };
     for (const fn of subscribers.get(runId) ?? []) fn(e);
   };
   return emit;
