@@ -165,7 +165,8 @@ registerTool({
       views: hits.length
         ? [{
             kind: "specResult" as const,
-            id: `spec-${Date.now()}`,
+            // 同检索词复用同一视图 id：再次检索原地刷新而不是堆叠重复标签页
+            id: `view:spec:${args.query}`,
             title: `定额说明：${args.query}`,
             query: args.query,
             hits,

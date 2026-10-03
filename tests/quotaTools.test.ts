@@ -46,6 +46,11 @@ vi.mock("@project/facts", async (importOriginal) => {
   };
 });
 
+const specRows = vi.hoisted(() => ({ rows: [] as { book: string; title: string; content: string }[] }));
+vi.mock("@database/client", () => ({
+  prisma: { specSection: { findMany: vi.fn(async () => specRows.rows) } },
+}));
+
 import "../agent/tools/quotaTools";
 import { getTool } from "../agent/tools/registry";
 
@@ -101,5 +106,32 @@ describe("quota.setItemQuota", () => {
   it("未知定额编号 → 返回错误观察", async () => {
     const r = await call({ itemId: "i1", quotaCode: "ZZZ" });
     expect(r.observation.error).toContain("ZZZ");
+  });
+});
+
+describe("spec.search 定额说明检索", () => {
+  const specCall = (args: { query: string }) =>
+    getTool("spec.search")!.handler!(ctx as never, args as never) as Promise<{
+      observation: { hits: { title: string }[] };
+      views?: { id: string }[];
+      message?: string;
+    }>;
+  it("关键词命中条文并出视图，同词检索复用同一视图 id", async () => {
+    specRows.rows = [
+      { book: "给排水", title: "管道安装说明", content: "管道安装定额已含沟槽连接管件，不含支吊架制作安装" },
+      { book: "消防", title: "消火栓说明", content: "消火栓箱安装按成套产品考虑" },
+    ];
+    const r = await specCall({ query: "沟槽连接" });
+    expect(r.observation.hits.length).toBeGreaterThan(0);
+    expect(r.observation.hits[0].title).toBe("管道安装说明");
+    expect(r.views?.[0].id).toBe("view:spec:沟槽连接");
+    const r2 = await specCall({ query: "沟槽连接" });
+    expect(r2.views?.[0].id).toBe(r.views?.[0].id);
+  });
+  it("无命中时不产出视图", async () => {
+    specRows.rows = [{ book: "电气", title: "电缆说明", content: "电缆敷设按延长米计算" }];
+    const r = await specCall({ query: "脚手架" });
+    expect(r.views).toEqual([]);
+    expect(r.message).toContain("未找到");
   });
 });
