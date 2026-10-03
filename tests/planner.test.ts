@@ -599,3 +599,18 @@ describe("文件查询路由", () => {
     expect(s?.tool).toBe("project.read");
   });
 });
+
+describe("file.search 路由", () => {
+  it("「找询价表/查中标文件」→ file.search（不被材料检索截胡）", async () => {
+    for (const m of ["找一下询价表", "查中标文件", "搜结算文件"]) {
+      const p = await plan(m);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("file.search");
+    }
+  });
+  it("「电缆价格多少」仍走 material.search", async () => {
+    const p = await plan("电缆价格多少");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("material.search");
+  });
+});
