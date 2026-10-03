@@ -217,7 +217,13 @@ export class RulePlanner implements Planner {
       return { steps: [{ tool: "excel.write", args: {}, activity: "正在写回源文件" }] };
     if (/导出|生成.*excel|下载/i.test(m))
       return {
-        steps: [{ tool: "report.exportExcel", args: {}, activity: "正在导出 Excel" }],
+        steps: [
+          // 「检查清单并导出」：先跑综合检查再导出，报告自带异常摘要页
+          ...(/检查|核查|清标|排查/.test(m)
+            ? [{ tool: "boq.compare", args: {}, activity: "正在综合检查清单" }]
+            : []),
+          { tool: "report.exportExcel", args: {}, activity: "正在导出 Excel" },
+        ],
       };
 
     // 措施费系数计取（脚手架/超高/高层增加费，川标官方费率表）

@@ -281,3 +281,17 @@ describe("甲供材核对路由", () => {
     }
   );
 });
+
+describe("检查并导出路由", () => {
+  it("「全面检查清单并导出清单Excel」→ 先检查再导出", async () => {
+    const p = await plan("全面检查清单并导出清单Excel");
+    expect(p.steps).toHaveLength(2);
+    expect((await resolve(p.steps[0]))?.tool).toBe("boq.compare");
+    expect((await resolve(p.steps[1]))?.tool).toBe("report.exportExcel");
+  });
+  it("纯「导出Excel」不前置检查", async () => {
+    const p = await plan("导出Excel");
+    expect(p.steps).toHaveLength(1);
+    expect((await resolve(p.steps[0]))?.tool).toBe("report.exportExcel");
+  });
+});
