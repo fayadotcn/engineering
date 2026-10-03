@@ -320,7 +320,8 @@ export class RulePlanner implements Planner {
     }
 
     // 费用汇总/取费（无目标金额时）：分部分项→措施→规费→税金→含税造价
-    if (/费用汇总|取费|造价汇总|汇总表|含税总价|总价是多少|总造价|费用构成|单方造价|单方指标|造价指标|每平(?:米|方)|元\s*[/／]\s*(?:㎡|平)/.test(m))
+    // 「各单位工程费用汇总」例外——那是按单位工程分组，不是全项目取费口径
+    if (!/单位工程|单项工程/.test(m) && /费用汇总|取费|造价汇总|汇总表|含税总价|总价是多少|总造价|费用构成|单方造价|单方指标|造价指标|每平(?:米|方)|元\s*[/／]\s*(?:㎡|平)/.test(m))
       return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用" }] };
 
     // 两版清单对审
@@ -513,6 +514,12 @@ export class RulePlanner implements Planner {
       };
     if (/检查|查一下|体检|全查|审核/.test(m))
       return { steps: [{ tool: "boq.compare", args: {}, activity: "正在全面检查清单" }] };
+
+    // 单位工程费用汇总（须在占比/总价通配之前拦截「各单位工程…占比/汇总」）
+    if (/单位工程|单项工程/.test(m) && /汇总|合计|多少|占比|费用|造价|金额/.test(m))
+      return {
+        steps: [{ tool: "cost.unitSummary", args: {}, activity: "正在按单位工程汇总金额" }],
+      };
 
     // 人材机成本构成/毛利分析（须在通配「分析」之前拦截）
     if (/人材机|工料机|成本构成|成本分析|成本占比|毛利|直接成本|直接费/.test(m))

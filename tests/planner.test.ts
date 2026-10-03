@@ -178,3 +178,14 @@ describe("类别词修饰造价/费用的范围化比例调整", () => {
     },
   );
 });
+
+describe("单位工程费用汇总路由", () => {
+  it.each(["各单位工程费用汇总", "各单位工程占比", "按单位工程汇总多少钱"])(
+    "「%s」→ cost.unitSummary",
+    async (text) => {
+      const p = await plan(text);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("cost.unitSummary");
+    },
+  );
+});

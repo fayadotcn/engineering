@@ -227,7 +227,7 @@ export type WorkspaceView =
       kind: "breakdown";
       id: string;
       title: string;
-      mode: "discipline" | "material";
+      mode: "discipline" | "material" | "unit";
       slices: BreakdownSlice[];
       total: string;
     }

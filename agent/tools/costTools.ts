@@ -264,6 +264,35 @@ registerTool({
 });
 
 registerTool({
+  name: "cost.unitSummary",
+  description: "单位工程费用汇总：按单位工程归属汇总清单合价与占比（多单位工程项目的标准交付口径；费率分摊不在此列）",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const { aggregateByUnitProject } = await import("@cost-engine/aggregate");
+    const { slices, total } = aggregateByUnitProject(items);
+    const untagged = slices.find((s) => s.key === "未注明单位工程");
+    return {
+      observation: { slices, total: total.toFixed(2) },
+      views: [
+        {
+          kind: "breakdown",
+          id: "view:breakdown:unit",
+          title: "单位工程费用汇总",
+          mode: "unit",
+          slices,
+          total: total.toFixed(2),
+        },
+      ],
+      message: `清单合价 ${fmtMoney(total)} 元按单位工程分 ${slices.length} 块：` +
+        slices.slice(0, 5).map((s) => `${s.label} ${fmtMoney(s.amount)} 元（${(s.share * 100).toFixed(1)}%）`).join("，") +
+        (untagged && untagged.count ? `；${untagged.count} 项未注明单位工程归属` : ""),
+    };
+  },
+});
+
+registerTool({
   name: "cost.materialBreakdown",
   description: "材料类别金额占比：电缆/桥架/管道/阀门等分别占总金额多少",
   implemented: true,

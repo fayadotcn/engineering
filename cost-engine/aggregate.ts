@@ -57,6 +57,32 @@ export function aggregateByCategory(
   return { slices, total };
 }
 
+/** 按单位工程聚合金额（单项/单位工程费用汇总表口径） */
+export function aggregateByUnitProject(
+  items: BoqItemDTO[]
+): { slices: BreakdownSlice[]; total: Decimal } {
+  const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+  const total = sum(leaf.map((i) => D(i.totalPrice)));
+  const map = new Map<string, { amount: Decimal; count: number }>();
+  for (const it of leaf) {
+    const key = it.unitProject?.trim() || "未注明单位工程";
+    const cur = map.get(key) ?? { amount: new Decimal(0), count: 0 };
+    cur.amount = cur.amount.plus(D(it.totalPrice));
+    cur.count += 1;
+    map.set(key, cur);
+  }
+  const slices: BreakdownSlice[] = [...map.entries()]
+    .map(([k, v]) => ({
+      key: k,
+      label: k,
+      amount: v.amount.toFixed(2),
+      share: total.isZero() ? 0 : v.amount.div(total).toNumber(),
+      count: v.count,
+    }))
+    .sort((a, b) => D(b.amount).cmp(D(a.amount)));
+  return { slices, total };
+}
+
 export function projectTotals(items: BoqItemDTO[]) {
   const leaf = items.filter((i) => !i.isHeader && i.name.trim());
   const pricable = leaf.filter(isPricableItem);
