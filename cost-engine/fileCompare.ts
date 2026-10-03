@@ -1,5 +1,5 @@
 import { D } from "./money";
-import { groupKey } from "./semantic";
+import { featureCompatible, groupKey, normUnit } from "./semantic";
 import type { BoqItemDTO } from "@shared/types";
 
 // 两版清单对审（招标 vs 中标 / 中标 vs 结算）：
@@ -23,6 +23,12 @@ export interface FileCompareRow {
   totalDelta?: string;
   /** 量差绝对值超基准量 15%（GB50500：工程量偏差超15%应重新组价/调整综合单价） */
   qtyOver15?: boolean;
+  /** 五统一符合性：对齐成功的两行名称原文不一致（去空白/全半角归一后） */
+  nameMismatch?: boolean;
+  /** 五统一符合性：归一后单位仍不一致（m vs km 量纲错；米≡m 归一不算） */
+  unitMismatch?: boolean;
+  /** 五统一符合性：项目特征语义冲突明细（空数组=无冲突，字段不出） */
+  featureConflict?: string[];
 }
 
 function alignKey(it: BoqItemDTO): string {
@@ -61,6 +67,11 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
       const qtyOver15 =
         qtyDiff && !D(ia.quantity).isZero() &&
         D(ib.quantity).minus(ia.quantity).abs().div(D(ia.quantity).abs()).gt(0.15);
+      // 五统一符合性：编码/语义能对齐但名称原文、单位、项目特征不响应招标口径
+      const nameMismatch =
+        ia.name.trim().replace(/\s+/g, "") !== ib.name.trim().replace(/\s+/g, "");
+      const unitMismatch = normUnit(ia.unit) !== normUnit(ib.unit);
+      const featureConflict = featureCompatible(ia.features, ib.features).conflicts;
       rows.push({
         key, code, name, status,
         aId: ia.id, bId: ib.id,
@@ -71,6 +82,9 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
         priceDelta: priceDiff ? D(ib.unitPrice).minus(ia.unitPrice).toString() : undefined,
         totalDelta: D(ib.totalPrice).minus(ia.totalPrice).toString(),
         qtyOver15: qtyOver15 || undefined,
+        nameMismatch: nameMismatch || undefined,
+        unitMismatch: unitMismatch || undefined,
+        featureConflict: featureConflict.length ? featureConflict : undefined,
       });
     } else {
       const it = ia ?? ib!;
@@ -114,6 +128,8 @@ export function compareSummary(rows: FileCompareRow[]) {
     priceDiff: count("PRICE_DIFF") + count("BOTH_DIFF"),
     qtyDiff: count("QTY_DIFF") + count("BOTH_DIFF"),
     qtyOver15: rows.filter((r) => r.qtyOver15).length,
+    /** 五统一符合性：名称/单位/特征任一不符的对齐行数 */
+    compliance: rows.filter((r) => r.nameMismatch || r.unitMismatch || r.featureConflict?.length).length,
     onlyA: count("ONLY_A"),
     onlyB: count("ONLY_B"),
     totalDelta: deltaSum.toFixed(2),

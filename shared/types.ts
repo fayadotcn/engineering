@@ -431,6 +431,12 @@ export interface FileCompareRow {
   totalDelta?: string;
   /** 量差超基准量15%（GB50500：应重新组价） */
   qtyOver15?: boolean;
+  /** 五统一：对齐行名称原文不一致 */
+  nameMismatch?: boolean;
+  /** 五统一：单位量纲不一致（归一后仍不同） */
+  unitMismatch?: boolean;
+  /** 五统一：项目特征语义冲突明细 */
+  featureConflict?: string[];
 }
 
 /** 人材机成本构成行：金额均为合价口径；null = 该分量未知（混入 other）。 */

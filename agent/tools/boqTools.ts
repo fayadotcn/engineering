@@ -319,6 +319,7 @@ registerTool({
         `价差 ${summary.priceDiff} 项，量差 ${summary.qtyDiff} 项` +
         (summary.qtyOver15 ? `（其中 ${summary.qtyOver15} 项量差>15%，按 GB50500 应重新组价）` : "") +
         `，仅A ${summary.onlyA} 项，仅B ${summary.onlyB} 项，清单合价差 ${fmtMoney(summary.totalDelta)} 元` +
+        (summary.compliance ? `；五统一符合性不符 ${summary.compliance} 项（名称/单位/特征）` : "") +
         (declaredTotal ? `；申报合计 ${fmtMoney(declaredTotal.a)} → ${fmtMoney(declaredTotal.b)}（差 ${fmtMoney(declaredTotal.diff)}）` : ""),
     };
   },

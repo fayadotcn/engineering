@@ -34,6 +34,11 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
             {(s as { qtyOver15?: number }).qtyOver15} 项量差&gt;15% 应调价
           </span>
         ) : null}
+        {(s as { compliance?: number }).compliance ? (
+          <span className="chip warn" title="能对齐的两版清单行中，名称/单位/项目特征不响应招标口径的条数（五统一符合性）">
+            {(s as { compliance?: number }).compliance} 项五统一不符
+          </span>
+        ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-1">
           {[
             ["DIFF", `差异 ${s.total - s.same}`],
@@ -128,6 +133,15 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
                       &gt;15%
                     </span>
                   )}
+                  {r.nameMismatch && (
+                    <span className="chip warn ml-1 !py-px !text-[9.5px]" title="两版名称原文不一致（五统一）">名称异</span>
+                  )}
+                  {r.unitMismatch && (
+                    <span className="chip danger ml-1 !py-px !text-[9.5px]" title="两版单位量纲不一致（五统一）">单位异</span>
+                  )}
+                  {r.featureConflict?.length ? (
+                    <span className="chip warn ml-1 !py-px !text-[9.5px]" title={r.featureConflict.join("；")}>特征异</span>
+                  ) : null}
                 </td>
                 <td className="mono text-right">{r.aQty ?? "—"}</td>
                 <td className={cn("mono text-right", r.qtyDelta && "font-medium text-blue-700")}>{r.bQty ?? "—"}</td>

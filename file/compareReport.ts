@@ -88,6 +88,7 @@ export async function buildCompareReport(
     ["价差项", summary.priceDiff],
     ["量差项", summary.qtyDiff],
     ["量差>15%（应调价）", summary.qtyOver15],
+    ["五统一不符（名称/单位/特征）", summary.compliance],
     ["仅 A 版有", summary.onlyA],
     ["仅 B 版有", summary.onlyB],
   ] as [string, number][])
@@ -114,10 +115,16 @@ export async function buildCompareReport(
     s1.columns = [{ width: 34 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 10 }];
   }
 
-  // 差异明细（全量非一致行）
+  // 差异明细（全量非一致行 + 量价一致但五统一不符的行）
   const s2 = wb.addWorksheet("差异明细");
-  s2.addRow(["项目编码", "项目名称", "状态", "A量", "B量", "量差", "A单价", "B单价", "价差", "A合价", "B合价", "合价差", "调价提示"]).font = bold;
-  const diffRows = rows.filter((r) => r.status !== "SAME");
+  s2.addRow(["项目编码", "项目名称", "状态", "A量", "B量", "量差", "A单价", "B单价", "价差", "A合价", "B合价", "合价差", "调价提示", "五统一符合性"]).font = bold;
+  const complianceNote = (r: (typeof rows)[number]) =>
+    [
+      r.nameMismatch ? "名称异" : "",
+      r.unitMismatch ? "单位异" : "",
+      r.featureConflict?.length ? `特征异(${r.featureConflict.join("；")})` : "",
+    ].filter(Boolean).join("、");
+  const diffRows = rows.filter((r) => r.status !== "SAME" || complianceNote(r));
   for (const r of diffRows) {
     const row = s2.addRow([
       r.code,
@@ -133,16 +140,18 @@ export async function buildCompareReport(
       r.bTotal ? Number(r.bTotal) : "",
       r.totalDelta ? Number(r.totalDelta) : "",
       r.qtyOver15 ? "量差>15%，应重新组价" : "",
+      complianceNote(r),
     ]);
     for (const c of [10, 11, 12]) {
       const cell = row.getCell(c);
       if (typeof cell.value === "number") cell.numFmt = moneyFmt;
     }
     if (r.qtyOver15) row.getCell(13).font = { bold: true, color: { argb: "FFC00000" } };
+    if (complianceNote(r)) row.getCell(14).font = { color: { argb: "FFB45300" } };
   }
   s2.columns = [
     { width: 16 }, { width: 32 }, { width: 8 }, { width: 10 }, { width: 10 }, { width: 10 },
-    { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 22 },
+    { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 22 }, { width: 30 },
   ];
 
   const out = Buffer.from(await wb.xlsx.writeBuffer());

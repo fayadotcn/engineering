@@ -152,3 +152,25 @@ describe("compareDeclaredFees（文件汇总事实两期对审）", () => {
     expect(r.labels[0].diff).toBe(0);
   });
 });
+
+describe("五统一符合性标记", () => {
+  it("同码对齐但单位量纲不同 → unitMismatch；名称不同 → nameMismatch", () => {
+    const a = [item("镀锌钢管", "DN100 沟槽", "m", "10", "85", "031001001001")];
+    const b = [item("热镀锌钢管", "DN100 沟槽", "km", "10", "85", "031001001001", "fB")];
+    const rows = compareBoqSets(a, b);
+    expect(rows[0].unitMismatch).toBe(true);
+    expect(rows[0].nameMismatch).toBe(true);
+    expect(rows[0].status).toBe("SAME"); // 量价一致但符合性不符
+    const s = compareSummary(rows);
+    expect(s.compliance).toBe(1);
+  });
+
+  it("米/m 归一不算单位异；特征冲突列出字段", () => {
+    const a = [item("镀锌钢管", "DN100 沟槽连接", "米", "10", "85", "031001001001")];
+    const b = [item("镀锌钢管", "DN100 螺纹连接", "m", "10", "85", "031001001001", "fB")];
+    const rows = compareBoqSets(a, b);
+    expect(rows[0].unitMismatch).toBeUndefined();
+    expect(rows[0].nameMismatch).toBeUndefined();
+    expect(rows[0].featureConflict?.length).toBeGreaterThan(0);
+  });
+});
