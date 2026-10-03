@@ -297,6 +297,7 @@ registerTool({
     let headers = 0;
     let nonNumericQty = 0;
     let derivedUnitPrice = 0;
+    let arithMismatch = 0;
     let laborPriceCol = false;
     let pdfPages: string[] | null = null;
     if (sheets) {
@@ -308,6 +309,7 @@ registerTool({
       headers += r.headers;
       nonNumericQty = r.nonNumericQty;
       derivedUnitPrice = r.derivedUnitPrice;
+      arithMismatch = r.arithMismatch;
       laborPriceCol = r.laborPriceCol;
       imported += await importQuotationsFromSheets(ctx.projectId, file.id, sheets);
     } else if (isPdf) {
@@ -498,7 +500,8 @@ registerTool({
           }${extractedKeys.length ? `，汇总表取数 ${extractedKeys.length} 项进台账${extractedKeys.includes("税率") ? "（含推导税率）" : ""}` : ""}${
             nonNumericQty ? `；${nonNumericQty} 行工程量非数值已保留原文` : ""}${
             derivedUnitPrice ? `；${derivedUnitPrice} 项综合单价由 合价÷工程量 推导` : ""
-          }${laborPriceCol ? "；检测到人工/机械单价列，已提取为成本分量（「成本构成分析」可直接使用）" : ""}${skippedNote}`
+          }${laborPriceCol ? "；检测到人工/机械单价列，已提取为成本分量（「成本构成分析」可直接使用）" : ""}${
+            arithMismatch ? `；${arithMismatch} 项「合价≠量×价」，疑似源表断链或改量忘改价，可「合价算术校验」逐条核对` : ""}${skippedNote}`
         : `已解析「${file.filename}」→ 识别为**${FILE_KIND_LABEL[kind]}**，${
             imported ? `登记 ${imported} 行价格数据，材料取价时会自动参考` : "已登记为项目资料，不参与清单组价"
           }${province ? `，提取事实：地区=${province}` : ""}${skippedNote}`,

@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import Decimal from "decimal.js";
 import { D, lineTotal, round2, round3 } from "@cost-engine/money";
 import { inferDiscipline, parseSemanticFeature } from "@cost-engine/semantic";
 import { toJson } from "@shared/json";
@@ -34,7 +35,7 @@ export function rowToBoqInput(
     unitProject?: string;
   }
 ): Prisma.BoqItemCreateManyInput & {
-  __flags: { nonNumericQty: boolean; derivedUnitPrice: boolean };
+  __flags: { nonNumericQty: boolean; derivedUnitPrice: boolean; arithMismatch: boolean };
 } {
   const name = row.cells.name ?? "";
   const rawFeature = row.cells.feature ?? "";
@@ -79,6 +80,14 @@ export function rowToBoqInput(
   if (nonNumeric.length) rawCells.__nonNumeric = nonNumeric;
   if (derived.length) rawCells.__derived = derived;
 
+  // 算术不符早期预警（与 findArithmeticMismatches 同容差）：源表合价是真值、
+  // 可计价行且量价均非零时，合价≠量×价 说明源表断链/改量忘改价
+  const pricable = ctx.feeType === "分部分项" || ctx.feeType === "单价措施";
+  const arithMismatch =
+    pricable && !qty.isZero() && !price.isZero() && totalCell !== "" && !isNonNumeric(totalCell)
+      ? total.minus(lineTotal(qty, price)).abs().gt(Decimal.max(D(0.02), lineTotal(qty, price).abs().mul(0.001)))
+      : false;
+
   return {
     projectId: ctx.projectId,
     fileId: ctx.fileId,
@@ -106,6 +115,7 @@ export function rowToBoqInput(
     __flags: {
       nonNumericQty: nonNumeric.includes("quantity"),
       derivedUnitPrice: derived.includes("unitPrice"),
+      arithMismatch,
     },
   };
 }

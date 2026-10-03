@@ -22,12 +22,15 @@ export async function importBoqFromSheets(
   headers: number;
   nonNumericQty: number;
   derivedUnitPrice: number;
+  /** 量×价≠合价的可计价行数（源表断链/抄写错的早期预警） */
+  arithMismatch: number;
   laborPriceCol: boolean;
 }> {
   let count = 0;
   let headers = 0;
   let nonNumericQty = 0;
   let derivedUnitPrice = 0;
+  let arithMismatch = 0;
   let sortOrder = 0;
   const data: Prisma.BoqItemCreateManyInput[] = [];
 
@@ -65,11 +68,12 @@ export async function importBoqFromSheets(
       data.push(input);
       if (__flags.nonNumericQty) nonNumericQty++;
       if (__flags.derivedUnitPrice) derivedUnitPrice++;
+      if (__flags.arithMismatch) arithMismatch++;
       if (row.isItem) count++;
     }
   }
   if (data.length) await prisma.boqItem.createMany({ data });
-  return { count, headers, nonNumericQty, derivedUnitPrice, laborPriceCol };
+  return { count, headers, nonNumericQty, derivedUnitPrice, arithMismatch, laborPriceCol };
 }
 
 export async function listBoq(
