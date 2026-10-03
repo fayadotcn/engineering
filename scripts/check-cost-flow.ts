@@ -80,7 +80,7 @@ async function main() {
     const items = await request(`/api/projects/${id}/boq`); assert.equal(items.filter((i: { isHeader: boolean }) => !i.isHeader).length, 2);
     const item = items.find((i: { isHeader: boolean }) => !i.isHeader);
     const edited = await request(`/api/boq-items/${item.id}`, "PATCH", { mainMaterialPrice: "12.50" });
-    assert.equal(edited.unitPrice, item.unitPrice); assert.equal(edited.totalPrice, item.totalPrice);
+    assert.equal(edited.item.unitPrice, item.unitPrice); assert.equal(edited.item.totalPrice, item.totalPrice); assert(edited.receiptId);
     const firstEdit = (await request(`/api/projects/${id}`)).receipts.find((r: { actionType: string }) => r.actionType === "USER_EDIT");
     await request(`/api/boq-items/${item.id}`, "PATCH", { name: "镀锌钢管核对后" });
     await request(`/api/receipts/${firstEdit.id}/revert`, "POST");
@@ -99,14 +99,16 @@ async function main() {
     assert.equal(download.status, 200);
     const exportedBook = new ExcelJS.Workbook();
     await exportedBook.xlsx.load(await download.arrayBuffer());
-    assert.equal(exportedBook.worksheets[0].rowCount, 3);
+    // 表头 + 2 行明细 + 表尾「合价合计」复核行
+    assert.equal(exportedBook.worksheets[0].rowCount, 4);
+    assert.equal(exportedBook.worksheets[0].lastRow?.getCell(3).value, "合价合计");
     const summary = await request(`/api/projects/${id}/summary`);
     assert.equal(summary.fees.preTax, "864.30"); assert.equal(summary.fees.grandTotal, "942.09");
 
     const feeFile = await prisma.projectFile.create({ data: { projectId: id, filename: "措施清单.xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", storageKey: "isolated-test", sizeBytes: 0, status: "PARSED", kind: "BOQ_TENDER" } });
     const feeItem = await prisma.boqItem.create({ data: { projectId: id, fileId: feeFile.id, sheetName: "数据", rowIndex: 2, name: "安全文明施工费", feeType: "总价措施", totalPrice: "1200.50", sortOrder: 100 } });
     const feeEdit = await request(`/api/boq-items/${feeItem.id}`, "PATCH", { totalPrice: "1500.555" });
-    assert.equal(feeEdit.totalPrice, "1500.56"); assert.equal(feeEdit.unitPrice, "0"); assert.equal(feeEdit.quantity, "0");
+    assert.equal(feeEdit.item.totalPrice, "1500.56"); assert.equal(feeEdit.item.unitPrice, "0"); assert.equal(feeEdit.item.quantity, "0");
     const feeReceipt = (await request(`/api/projects/${id}`)).receipts.find((r: { actionType: string; summary: string }) => r.actionType === "USER_EDIT" && r.summary.includes("安全文明施工费"));
     assert(feeReceipt);
     await request(`/api/boq-items/${feeItem.id}`, "PATCH", { unitPrice: "20" }, 400);
@@ -123,9 +125,10 @@ async function main() {
     const feeExportId = (await runTool("report.exportExcel", {})).artifactId as string;
     const feeExport = new ExcelJS.Workbook(); await feeExport.xlsx.load(await fetch(`${base}/api/artifacts/${feeExportId}/download`).then(r => r.arrayBuffer()));
     assert.deepEqual(feeExport.worksheets.map(s => s.name), ["数据", "数据 (2)"]);
-    assert.equal(feeExport.worksheets[1].getCell("H2").value, 1400);
-    assert.equal(feeExport.worksheets[1].getCell("I2").value, "总价措施");
-    assert.equal(feeExport.worksheets[1].getCell("J2").value, "措施清单.xlsx");
+    // 导出列序：…工程量(F) 计算式(G) 综合单价(H) 合价(I) 定价状态(J) 费用类别(K) 源文件(L)
+    assert.equal(feeExport.worksheets[1].getCell("I2").value, 1400);
+    assert.equal(feeExport.worksheets[1].getCell("K2").value, "总价措施");
+    assert.equal(feeExport.worksheets[1].getCell("L2").value, "措施清单.xlsx");
     console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、Agent 工具执行、总额编辑与撤销、同名源表 Excel 导出");
     console.log(`隔离验收工程：${checkDir}`);
   } finally { await prisma.$disconnect(); server.kill(); }
