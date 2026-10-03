@@ -928,6 +928,8 @@ export async function writeBackPrices(
   // 原值与新值不同才留痕批注（填空格也记「空→新值」）；同值覆写不打扰。
   // 已有批注（复核签名/上次写回记录）保留在前面——批注就是审计轨迹。
   const write = (cell: ExcelJS.Cell, val: number, extra?: string) => {
+    // 脏值纵深防御：NaN/Infinity 落进单元格会把源文件写成坏值且批注记「→ NaN」——宁可中止整个写回
+    if (!Number.isFinite(val)) throw new Error(`写回数值无效（${val}），已中止避免污染源文件`);
     const old = cellText(cell.value);
     const oldNum = Number(old.replace(/,/g, ""));
     const changed = old === "" || !Number.isFinite(oldNum) || oldNum !== val;

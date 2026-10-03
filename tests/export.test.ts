@@ -107,5 +107,6 @@ describe("可追溯的清单导出", () => {
     await expect(writeBackPrices(original, [{ sheetName: "不存在", rowIndex: 2, totalPrice: "1" }], {})).rejects.toThrow("找不到工作表");
     await expect(writeBackPrices(original, [{ sheetName: "安装", rowIndex: 2, totalPrice: "1" }], {})).rejects.toThrow("没有已确认");
     await expect(writeBackPrices(Buffer.from("损坏的文件"), [], {})).rejects.toThrow("无法保留原格式");
+    await expect(writeBackPrices(original, [{ sheetName: "安装", rowIndex: 2, totalPrice: "abc" }], { 安装: { totalPrice: 3 } })).rejects.toThrow("写回数值无效");
   });
 });
