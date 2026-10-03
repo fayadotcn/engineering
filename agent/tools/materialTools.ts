@@ -288,23 +288,27 @@ registerTool({
     const allowed = args.onlyItemIds ? new Set(args.onlyItemIds) : null;
 
     const itemById = new Map(items.map((i) => [i.id, i]));
-    const patches: { id: string; mainMaterialPrice: string }[] = [];
+    // 同一清单项可能被多条命中询价覆盖——按候选集取置信度最高者，
+    // 同分维持后到覆盖先到（询价列表按上传序，后到=更新的报价），并记多源冲突数
+    const candidates = new Map<string, { price: string; conf: number }[]>();
     for (const r of rows) {
       if (r.status !== "MATCHED") continue;
       for (const id of r.matchedBoqItemIds) {
         if (allowed && !allowed.has(id)) continue;
         const it = itemById.get(id);
         if (!it || Number(it.quantity) === 0) continue; // 工程量为0的不用管
-        patches.push({ id, mainMaterialPrice: r.price });
+        const list = candidates.get(id) ?? [];
+        list.push({ price: r.price, conf: r.confidence });
+        candidates.set(id, list);
       }
     }
-    // dedupe: last write wins (same item may match multiple quotes)
-    const byId = new Map<string, string>();
-    patches.forEach((p) => byId.set(p.id, p.mainMaterialPrice));
-    const finalPatches = [...byId.entries()].map(([id, mainMaterialPrice]) => ({
-      id,
-      patch: { mainMaterialPrice },
-    }));
+    let multiSource = 0;
+    const finalPatches: { id: string; patch: { mainMaterialPrice: string } }[] = [];
+    for (const [id, list] of candidates) {
+      if (list.length > 1) multiSource++;
+      const best = list.reduce((a, b) => (b.conf > a.conf ? b : a));
+      finalPatches.push({ id, patch: { mainMaterialPrice: best.price } });
+    }
 
     const { before, after } = await updateBoqItems(ctx.projectId, finalPatches);
     const diffRows: DiffRow[] = [];
@@ -320,6 +324,7 @@ registerTool({
     return {
       observation: {
         applied: finalPatches.length,
+        multiSource,
         skippedQuotes: skipped.map((s) => s.materialName),
       },
       views: [
@@ -340,7 +345,9 @@ registerTool({
           after: after.map((a) => ({ id: a.id, name: a.name, mainMaterialPrice: a.mainMaterialPrice })),
         },
       ],
-      message: `已将询价写入 ${finalPatches.length} 个清单项的主材暂估价（组价输入，未动综合单价）；${skipped.length} 条未匹配的询价已在匹配表中标出`,
+      message: `已将询价写入 ${finalPatches.length} 个清单项的主材暂估价（组价输入，未动综合单价）` +
+        (multiSource ? `；${multiSource} 项有多条命中询价，已取置信度最高者` : "") +
+        `；${skipped.length} 条未匹配的询价已在匹配表中标出`,
     };
   },
 });
