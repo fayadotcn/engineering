@@ -35,13 +35,18 @@ async function resolveMainPrices(
     const hit = quotes.find((q) => {
       const qf = q.features ?? {};
       const qSpec = qf.diameter ?? qf.specification ?? q.spec;
-      const sameSpec =
-        spec && qSpec && spec.replace(/X/gi, "x") === qSpec.replace(/X/gi, "x");
-      const nameHit =
+      const sameSpec = !!(
+        spec && qSpec &&
+        spec.toLowerCase().replace(/x/gi, "x") === qSpec.toLowerCase().replace(/x/gi, "x")
+      );
+      const nameHit = !!(
         q.materialName &&
         (it.name.includes(q.materialName) ||
-          (f.material && q.materialName.includes(f.material)));
-      return sameSpec || (nameHit && sameSpec !== false && !qSpec);
+          (f.material && q.materialName.includes(f.material)))
+      );
+      // 名称必须命中——同规格不同材料（DN100 钢管 vs DN100 塑料管）只差规格不能取价；
+      // 询价有规格时再加严：规格也得一致，防错价比缺价更糟
+      return nameHit && (sameSpec || !qSpec);
     });
     if (hit && !D(hit.price).isZero()) {
       mainPrices[mainPriceKey(it)] = Number(hit.price);
