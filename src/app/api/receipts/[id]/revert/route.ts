@@ -43,12 +43,22 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     removeIds.push(a.id);
   }
   if (!patches.length && !recreate.length && !removeIds.length) return NextResponse.json({ error: "此记录没有可还原的清单修改" }, { status: 400 });
+  // 重建行的源文件可能已被删除——fileId 指过去会 FK 报错；置空 fileId 并在摘要里注明，
+  // 行本身仍能恢复（fileId 可空，清单数据不丢）
+  const recreateFileIds = [...new Set(recreate.map((r) => r.fileId).filter((x): x is string => typeof x === "string" && x.length > 0))];
+  const liveFileIds = new Set(
+    recreateFileIds.length
+      ? (await prisma.projectFile.findMany({ where: { id: { in: recreateFileIds } }, select: { id: true } })).map((f) => f.id)
+      : []
+  );
+  const orphanCount = recreate.filter((r) => r.fileId && !liveFileIds.has(r.fileId as string)).length;
   const result = patches.length ? await updateBoqItems(receipt.projectId, patches) : { before: [] as never[], after: [] as never[] };
   const txResult = await prisma.$transaction([
     ...(recreate.length
       ? [prisma.boqItem.createMany({
           data: recreate.map((r) => {
             const { createdAt: _c, updatedAt: _u, ...row } = r as Record<string, unknown> & { createdAt?: unknown; updatedAt?: unknown };
+            if (typeof row.fileId === "string" && row.fileId && !liveFileIds.has(row.fileId)) row.fileId = null;
             return row as Prisma.BoqItemCreateManyInput;
           }),
         })]
@@ -56,7 +66,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     ...(removeIds.length ? [prisma.boqItem.deleteMany({ where: { projectId: receipt.projectId, id: { in: removeIds } } })] : []),
     // toolCallId 复用为「指向被撤销回执」的链接，面板据此把原记录标为已撤销；
     // after 并入重建的行：该回执的 affectedIds 也能指到撤销恢复出来的行
-    prisma.actionReceipt.create({ data: { projectId: receipt.projectId, actionType: "REVERT", summary: `撤销：${receipt.summary}`, before: toJson(result.before), after: toJson([...result.after, ...recreate]), reversible: false, createdBy: "user", toolCallId: id } }),
+    prisma.actionReceipt.create({ data: { projectId: receipt.projectId, actionType: "REVERT", summary: `撤销：${receipt.summary}${orphanCount ? `（${orphanCount} 行源文件已删，恢复为无源文件行）` : ""}`, before: toJson(result.before), after: toJson([...result.after, ...recreate]), reversible: false, createdBy: "user", toolCallId: id } }),
     prisma.actionReceipt.update({ where: { id }, data: { reversible: false } }),
   ]);
   const revert = txResult[txResult.length - 2] as { id: string };
