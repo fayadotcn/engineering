@@ -21,7 +21,9 @@ const safePath = (storageKey: string) => {
 
 export class LocalStorage implements StorageProvider {
   async put(buffer: Buffer, ext: string): Promise<string> {
-    const key = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}${ext}`;
+    // 扩展名来自上传文件名——只允许 .alnum 形态，防脏字符拼进存储键
+    const safeExt = /^\.[a-zA-Z0-9]{1,10}$/.test(ext) ? ext.toLowerCase() : ".bin";
+    const key = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}${safeExt}`;
     const full = safePath(key);
     await mkdir(path.dirname(full), { recursive: true });
     await writeFile(full, buffer);
