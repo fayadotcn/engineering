@@ -71,12 +71,15 @@ registerTool({
   handler: async (_ctx, args: { query: string }) => {
     const q = args.query.toLowerCase();
     const lib = await getQuotaLibrary();
-    const hits = lib.filter(
-      (e) =>
-        e.name.toLowerCase().includes(q) ||
-        e.code.toLowerCase().includes(q) ||
-        (e.match.category ?? "").includes(args.query)
-    );
+    const hits = lib
+      .filter(
+        (e) =>
+          e.name.toLowerCase().includes(q) ||
+          e.code.toLowerCase().includes(q) ||
+          (e.match.category ?? "").includes(args.query)
+      )
+      // 编号定序——多数据集/内置混排时结果可复现
+      .sort((a, b) => a.code.localeCompare(b.code) || a.name.localeCompare(b.name, "zh"));
     return {
       observation: hits.map((e) => ({
         code: e.code, name: e.name, unit: e.unit,
@@ -145,7 +148,8 @@ registerTool({
         return { s, sc };
       })
       .filter((x) => x.sc > 0)
-      .sort((a, b) => b.sc - a.sc)
+      // 同分按册/标题定序——同一检索词多次命中结果可复现
+      .sort((a, b) => b.sc - a.sc || a.s.book.localeCompare(b.s.book, "zh") || a.s.title.localeCompare(b.s.title, "zh"))
       .slice(0, 3);
     const hits = scored.map(({ s }) => {
       // 截取首个关键词附近的条文片段
