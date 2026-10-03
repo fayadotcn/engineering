@@ -72,3 +72,38 @@ describe("updateBoqItems feeType/unitProject", () => {
     expect(mocks.update.mock.calls[0][0].data.unitProject).toBe("2号楼");
   });
 });
+
+describe("updateBoqItems quantityExpr 单独编辑", () => {
+  it("只给计算式 → 求值联动工程量并留痕原文", async () => {
+    const cur = row();
+    setup(cur, { ...cur, quantity: "45", quantityExpr: "3×12+9" });
+    await updateBoqItems("p1", [{ id: "i1", patch: { quantityExpr: "3×12+9" } }]);
+    const data = mocks.update.mock.calls[0][0].data as Record<string, { toString(): string } | string>;
+    expect(data.quantity.toString()).toBe("45");
+    expect(data.quantityExpr).toBe("3×12+9");
+    expect(data.totalPrice.toString()).toBe("2250"); // 45×50
+  });
+
+  it("非法计算式 → 报错而不是静默丢字段", async () => {
+    const cur = row();
+    setup(cur, cur);
+    await expect(updateBoqItems("p1", [{ id: "i1", patch: { quantityExpr: "3×" } }]))
+      .rejects.toThrow("计算式无效");
+  });
+
+  it("空串 → 只清留痕不动量", async () => {
+    const cur = row({ quantityExpr: "3×12" });
+    setup(cur, { ...cur, quantityExpr: "" });
+    await updateBoqItems("p1", [{ id: "i1", patch: { quantityExpr: "" } }]);
+    const data = mocks.update.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data.quantityExpr).toBe("");
+    expect(data.quantity.toString()).toBe("10"); // 量不变
+  });
+
+  it("总价措施行给计算式 → 求值出量后被总额守卫拒绝", async () => {
+    const cur = row({ feeType: "总价措施", totalPrice: new Decimal("1200") });
+    setup(cur, cur);
+    await expect(updateBoqItems("p1", [{ id: "i1", patch: { quantityExpr: "3×12" } }]))
+      .rejects.toThrow("总额计价");
+  });
+});

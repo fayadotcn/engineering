@@ -145,11 +145,18 @@ export async function updateBoqItems(
     // 总价措施→分部分项后合价回到 量×价 口径（patch.totalPrice 被重算覆盖）
     const newFeeType = patch.feeType ?? cur.feeType;
     const lumpSum = newFeeType === "总价措施" || newFeeType === "其他项目";
-    if (lumpSum && (patch.quantity !== undefined || patch.unitPrice !== undefined))
+    // 单独改计算式（不带 quantity）：先求值联动工程量，保持式与值对应；
+    // 空串=清除留痕（量不变），非法式报错而不是静默丢字段
+    let qtyPatch = patch.quantity;
+    if (patch.quantityExpr !== undefined && qtyPatch === undefined && patch.quantityExpr.trim()) {
+      try { qtyPatch = String(evalExpr(patch.quantityExpr)); }
+      catch { throw new Error(`工程量计算式无效：${patch.quantityExpr}`); }
+    }
+    if (lumpSum && (qtyPatch !== undefined || patch.unitPrice !== undefined))
       throw new Error("总价措施和其他项目按总额计价，请直接修改合价");
     if (!lumpSum && patch.totalPrice !== undefined)
       throw new Error("分部分项和单价措施的合价由工程量×综合单价自动计算");
-    const qty = patch.quantity !== undefined ? round3(D(patch.quantity)) : cur.quantity;
+    const qty = qtyPatch !== undefined ? round3(D(qtyPatch)) : cur.quantity;
     const price =
       patch.unitPrice !== undefined ? round2(D(patch.unitPrice)) : cur.unitPrice;
     if (!qty.isFinite() || qty.lt(0) || !price.isFinite() || price.lt(0)) throw new Error("工程量和综合单价必须为有效数字，不能为负数");
@@ -187,13 +194,16 @@ export async function updateBoqItems(
           : {}),
         quantity: qty,
         // 工程量一旦有改动就同步留痕：计算式编辑写原文，纯数字编辑清空旧式（式与值不再对应）
-        ...(patch.quantity !== undefined ? { quantityExpr: patch.quantityExpr ?? "" } : {}),
+        // 单独给空串 = 只清留痕不动量
+        ...(qtyPatch !== undefined
+          ? { quantityExpr: patch.quantityExpr ?? "" }
+          : patch.quantityExpr !== undefined ? { quantityExpr: "" } : {}),
         unitPrice: price,
         // Imported lump-sum/other-fee totals survive material and text edits.
         // 分层改回可计价类（分部分项/单价措施）时，合价回到 量×价 口径重算。
         totalPrice: patch.totalPrice !== undefined && lumpSum
           ? round2(D(patch.totalPrice))
-          : patch.quantity !== undefined || patch.unitPrice !== undefined || (patch.feeType !== undefined && !lumpSum)
+          : qtyPatch !== undefined || patch.unitPrice !== undefined || (patch.feeType !== undefined && !lumpSum)
             ? lineTotal(qty, price)
             : cur.totalPrice,
         ...(patch.feeType !== undefined ? { feeType: newFeeType } : {}),
