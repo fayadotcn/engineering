@@ -409,6 +409,7 @@ const patchSchema = z.object({
   machineUnitPrice: z.string().optional(),
   totalPrice: z.string().optional().describe("仅总价措施/其他项目可直接修改合价，其他项请改工程量或综合单价"),
   name: z.string().optional(),
+  code: z.string().optional().describe("项目编码修正（缺/错编码的处置通道）"),
   rawFeature: z.string().optional(),
 });
 
@@ -439,7 +440,7 @@ registerTool({
     for (const b of before) {
       const a = after.find((x) => x.id === b.id);
       if (!a) continue;
-      for (const field of ["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "rawFeature"] as const) {
+      for (const field of ["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "code", "rawFeature"] as const) {
         if (b[field] !== a[field])
           diffRows.push({
             itemId: b.id,

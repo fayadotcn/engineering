@@ -566,6 +566,27 @@ export class RulePlanner implements Planner {
       return {
         steps: [{ tool: "boq.findUnitInconsistencies", args: {}, activity: "正在查单位不一致" }],
       };
+    // 编码修正：「把配电箱的编码改为 031001006001」「给X补编码 Y」——缺/错编码检查的处置通道
+    const codeSetM =
+      m.match(/([一-龥A-Za-z]{1,20}?)(?:的)?(?:项目)?编码.{0,3}(?:改|设|补)(?:为|成|上|到)?\s*([A-Za-z0-9]{4,24})/) ??
+      // 「给电缆补编码031…」「把X改编码为Y」——动词在编码前
+      m.match(/([一-龥A-Za-z]{1,20}?)(?:的)?(?:项目)?(?:补|改|设)(?:上|为|成|到)?编码\s*([A-Za-z0-9]{4,24})/);
+    if (codeSetM) {
+      const scope = codeSetM[1].replace(/^(把|将|对|请|所有|全部|整个|清单项?|各项|项目)+/, "");
+      const codeVal = codeSetM[2];
+      const compute = async (): Promise<PlanStep | null> => {
+        const { listBoq } = await import("@boq/service");
+        const items = (await listBoq(ctx.projectId)).filter((i) => !i.isHeader && i.name.trim());
+        const pool = scopeFilter(items, scope);
+        if (!pool.length) return null;
+        return {
+          tool: "boq.update",
+          args: { patches: pool.map((i) => ({ id: i.id, code: codeVal })), reason: `编码修正为 ${codeVal}${scope ? `（范围：${scope}）` : ""}` },
+          activity: "正在写回编码",
+        };
+      };
+      return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的清单项` : "没有可修正编码的清单项" };
+    }
     if (/编码.{0,4}(格式|规范|非[标国]|缺位|位数)|非标编码|自编(码|编码)|编码.{0,8}\d+位|编码.{0,4}(是|有)(几|多少)位/.test(m))
       return {
         steps: [{ tool: "boq.findInvalidCodes", args: {}, activity: "正在查非标编码" }],

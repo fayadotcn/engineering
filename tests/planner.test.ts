@@ -305,3 +305,25 @@ describe("甲供材扣减路由", () => {
     }
   );
 });
+
+describe("编码修正路由", () => {
+  it("「把配电箱的编码改为030404017001」→ boq.update 只改命中的项", async () => {
+    const p = await plan("把镀锌钢管的编码改为031001001001");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    expect(s?.args.patches).toEqual([{ id: "i2", code: "031001001001" }]);
+  });
+
+  it("「给电缆补编码031202001001」→ boq.update 编码补丁", async () => {
+    const p = await plan("给电力电缆补编码031202001001");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    expect(s?.args.patches).toEqual([{ id: "i1", code: "031202001001" }]);
+  });
+
+  it("「查非标编码」走检查路由不被修正路由截胡", async () => {
+    const p = await plan("查一下有没有非标编码");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.findInvalidCodes");
+  });
+});

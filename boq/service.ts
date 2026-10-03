@@ -111,6 +111,8 @@ export interface BoqPatch {
   /** 工程量计算式原文；随 quantity 一起写入留痕，纯数字修改传 "" 清掉旧式 */
   quantityExpr?: string;
   name?: string;
+  /** 项目编码修正（缺/错编码检查后的处置通道） */
+  code?: string;
   rawFeature?: string;
   /** Receipt restoration and lump-sum amounts; never a material quotation price. */
   totalPrice?: string;
@@ -155,6 +157,7 @@ export async function updateBoqItems(
       where: { id },
       data: {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.code !== undefined ? { code: patch.code.trim() } : {}),
         ...(patch.rawFeature !== undefined ? { rawFeature: patch.rawFeature } : {}),
         ...(patch.mainMaterialPrice !== undefined
           ? { mainMaterialPrice: round2(D(patch.mainMaterialPrice)) }

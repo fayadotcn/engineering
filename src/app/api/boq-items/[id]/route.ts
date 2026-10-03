@@ -10,13 +10,14 @@ const edit = z.object({
   laborUnitPrice: z.string().optional(), machineUnitPrice: z.string().optional(),
   totalPrice: z.string().optional(),
   name: z.string().trim().min(1).max(500).optional(), rawFeature: z.string().max(10000).optional(),
+  code: z.string().max(100).optional(),
 }).strict().refine(value => Object.keys(value).length > 0);
 
 // 变更记录与 toast 共用中文字段名：操作记录是给老板看的账，不是给程序看的日志
 const FIELD_LABEL: Record<string, string> = {
   unitPrice: "综合单价", quantity: "工程量", quantityExpr: "工程量计算式",
   mainMaterialPrice: "主材暂估价", laborUnitPrice: "人工单价", machineUnitPrice: "机械单价",
-  totalPrice: "合价", name: "项目名称", rawFeature: "项目特征",
+  totalPrice: "合价", name: "项目名称", rawFeature: "项目特征", code: "项目编码",
 };
 const disp = (v: string | null) => (v === null || v === "" ? "空" : v);
 
@@ -45,6 +46,7 @@ export async function PATCH(
   if (body.machineUnitPrice !== undefined) patch.machineUnitPrice = String(body.machineUnitPrice);
   if (body.totalPrice !== undefined) patch.totalPrice = body.totalPrice;
   if (body.name !== undefined) patch.name = String(body.name);
+  if (body.code !== undefined) patch.code = String(body.code);
   if (body.rawFeature !== undefined) patch.rawFeature = String(body.rawFeature);
 
   let result;
@@ -57,7 +59,7 @@ export async function PATCH(
   if (after.length) {
     const b = before[0];
     const a = after[0];
-    changes = (["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "rawFeature"] as const)
+    changes = (["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "code", "rawFeature"] as const)
       .filter((f) => b[f] !== a[f])
       .map((f) => ({ field: f, label: FIELD_LABEL[f] ?? f, from: b[f] ?? null, to: a[f] ?? null }));
     if (changes.length) {
