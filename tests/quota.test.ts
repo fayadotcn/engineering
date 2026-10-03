@@ -58,6 +58,14 @@ describe("calcQuota 组价语义", () => {
     });
     expect(r.mainMaterial).toBe("100.98"); // 99×1.02，而非 1×1.02
   });
+
+  it("询价命中价为 0（作废/占位列）按缺主材价处理", () => {
+    const [r] = calcQuota([item()], {
+      lib, threshold: 0, mainPrices: { "镀锌钢管|": 0 },
+    });
+    expect(r.needsMainPrice).toBe(true);
+    expect(r.deviation).toBeNull();
+  });
 });
 
 describe("组价方案：工作内容缺口的配套子目建议", () => {

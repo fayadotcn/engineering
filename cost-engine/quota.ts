@@ -256,8 +256,10 @@ export function calcQuota(
     // SC2020 导入行（detail 有值）只有写明主材名的子目才另计主材——
     // 无主材的子目其材料费已在基价里，再加就是重复计
     const expectsMain = q.detail === undefined || !!q.detail.mainMaterial;
+    // 价格为 0 的命中等同缺价（作废/占位列）——按缺主材价处理，不误判为已取价
+    const lookedUp = opts.mainPrices?.[mainKey];
     const mainPrice = expectsMain
-      ? (ownMain.gt(0) ? Number(ownMain) : opts.mainPrices?.[mainKey])
+      ? (ownMain.gt(0) ? Number(ownMain) : lookedUp && D(lookedUp).gt(0) ? Number(lookedUp) : undefined)
       : undefined;
     const needsMain = expectsMain && mainPrice === undefined;
     const main = needsMain ? D(0) : D(mainPrice!).mul(q.mainQtyPerUnit);
