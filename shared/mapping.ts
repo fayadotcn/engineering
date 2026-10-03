@@ -29,6 +29,12 @@ export function reconcilePriceRole(
       return { columns: next, moved: "price→unitPrice" };
     }
   } else if (type === "QUOTATION" || type === "MATERIAL_PRICE") {
+    // 反向守卫：询价/价格表里「综合单价」列不是材料价（人材机管利组价结果），
+    // 升格成 price 会污染价格库——脱映射落到原文区，由用户重新指认
+    if (next.unitPrice !== undefined && /综合单价|综合价/.test(hd(next.unitPrice))) {
+      delete next.unitPrice;
+      return { columns: next, moved: null };
+    }
     if (next.unitPrice !== undefined && next.price === undefined) {
       next.price = next.unitPrice;
       delete next.unitPrice;

@@ -312,6 +312,19 @@ describe("通用清单列映射", () => {
     expect(r3.columns.unitPrice).toBeUndefined();
   });
 
+  it("reconcilePriceRole：询价表里的「综合单价」列不升格为材料价", () => {
+    // 分包报价表标了「综合单价」的列不是材料价——升格会污染价格库
+    const r = reconcilePriceRole("QUOTATION", { unitPrice: 5, quantity: 4 },
+      ["序号", "名称", "规格型号", "单位", "数量", "综合单价", "合价"]);
+    expect(r.moved).toBeNull();
+    expect(r.columns.unitPrice).toBeUndefined();
+    expect(r.columns.price).toBeUndefined();
+    // 相邻的裸「单价」列不受影响，照常升格
+    const r2 = reconcilePriceRole("QUOTATION", { unitPrice: 5, quantity: 4 },
+      ["序号", "名称", "规格型号", "单位", "数量", "单价", "合价"]);
+    expect(r2.moved).toBe("unitPrice→price");
+  });
+
   it("rowToBoqInput：工程量「暂估」→ quantity 0 且标记 nonNumeric", async () => {
     const buf = await wb([
       ["序号", "名称", "规格", "单位", "数量", "单价", "合价"],
