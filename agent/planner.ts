@@ -191,6 +191,31 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 清单筛选：「只看电缆项」「筛选给排水的清单」「显示消防专业」→ boq.filter 切视图筛选
+    const filterM = m.match(/(?:只看|仅看|筛选|过滤|显示|列出)(?:一下|下)?(?:所有|全部)?([一-龥A-Za-z0-9]{1,15}?)(?:的)?(?:清单|项|条目|行|项目)?\s*$/);
+    if (filterM && !/价格|单价|价|费用|汇总|合计|定额|编码|特征|名称|异常|问题|报告|差异|文件/.test(filterM[1])) {
+      const scope = filterM[1].trim();
+      const DISC_WORDS: [string, string][] = [
+        ["电气|配电|桥架|电缆|照明|电线", "ELECTRICAL"],
+        ["给排水|给水|排水|管道|卫生器具|水泵", "PLUMBING"],
+        ["消防|喷淋|消火栓|火灾报警|灭火", "FIRE"],
+        ["暖通|通风|空调|防排烟|风管|风机", "HVAC"],
+        ["弱电|智能化|安防|监控|综合布线|网络", "WEAK_CURRENT"],
+      ];
+      const disc = DISC_WORDS.find(([re]) => new RegExp(re).test(scope))?.[1];
+      const reset = /^全部|所有|完整|原始/.test(scope);
+      const compute = async (): Promise<PlanStep | null> => {
+        // 「显示全部」= 清筛选复位；专业词走 discipline；其他按名称/编码模糊筛选
+        const filter = reset ? { onlyItems: false } : disc ? { discipline: disc, onlyItems: true } : { query: scope, onlyItems: true };
+        if (!reset && !disc) {
+          const { listBoq } = await import("@boq/service");
+          if (!scopeFilter(await listBoq(ctx.projectId), scope).length) return null;
+        }
+        return { tool: "boq.filter", args: filter, activity: reset ? "正在恢复完整清单" : `正在筛选「${scope}」` };
+      };
+      return { steps: [compute], fallbackMessage: `清单中没有匹配「${scope}」的项` };
+    }
+
     // 删除清单项：先按名称/编码关键词定位，确认门后删除（回执全字段快照可撤销）。
     // 「删掉重复项/删除文件」不交这条路——删谁有歧义，留给人工或显式清单项关键词。
     const delM = m.match(/(?:删除|删掉|去除|去掉)(?:把|将|一下)?([一-龥A-Za-z0-9]{2,12}?)(?:的)?(?:清单|项目|条目|行|项)?\s*(?:清单项|项|行|条目)?\s*$/);

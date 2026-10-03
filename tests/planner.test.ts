@@ -456,3 +456,41 @@ describe("材料/询价检索路由（material.search）", () => {
     expect(s?.tool).toBe("boq.update");
   });
 });
+
+describe("清单筛选路由（boq.filter）", () => {
+  it("「只看电缆项」→ discipline=ELECTRICAL", async () => {
+    const p = await plan("只看电缆项");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
+    expect(s?.args.discipline).toBe("ELECTRICAL");
+  });
+  it("「筛选镀锌钢管的清单」→ query 模糊筛选", async () => {
+    const p = await plan("筛选镀锌钢管的清单");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
+    expect(s?.args.query).toBe("镀锌钢管");
+  });
+  it("「筛选配电箱的清单」→ 配电命中电气专业词，走 discipline 直通", async () => {
+    const p = await plan("筛选配电箱的清单");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
+    expect(s?.args.discipline).toBe("ELECTRICAL");
+  });
+  it("「筛选压力表的清单」无命中 → 不出步骤（避免空筛选误导）", async () => {
+    const p = await plan("筛选压力表的清单");
+    const s = p.steps.length ? await resolve(p.steps[0]) : null;
+    expect(s).toBeNull();
+    expect(p.fallbackMessage).toContain("压力表");
+  });
+  it("「显示全部」→ 复位筛选", async () => {
+    const p = await plan("显示全部");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
+    expect(s?.args.onlyItems).toBe(false);
+  });
+  it("「显示费用汇总」不落筛选（费用走汇总路由）", async () => {
+    const p = await plan("显示费用汇总");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).not.toBe("boq.filter");
+  });
+});
