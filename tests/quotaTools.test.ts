@@ -111,6 +111,23 @@ describe("quota.setItemQuota", () => {
   });
 });
 
+describe("quota.search 结果序确定性", () => {
+  const qCall = (query: string) =>
+    getTool("quota.search")!.handler!(ctx as never, { query } as never) as Promise<{
+      observation: { code: string; name: string }[];
+    }>;
+  it("命中按编号定序，与库内原始顺序无关", async () => {
+    const { getQuotaLibrary } = await import("@quota/service");
+    // 乱序库：编号小的在后面——输出必须仍按编号升序
+    vi.mocked(getQuotaLibrary).mockResolvedValueOnce([
+      { code: "5H0999", name: "管道冲洗消毒", unit: "100m", unitScale: 100, labor: 30, material: 5, machine: 0, mainQtyPerUnit: 0, detail: {}, match: {} },
+      { code: "5H0332", name: "管道镀锌钢管 DN100", unit: "10m", unitScale: 10, labor: 100, material: 20, machine: 5, mainQtyPerUnit: 1.02, detail: {}, match: {} },
+    ] as never);
+    const r = await qCall("管道");
+    expect(r.observation.map((h) => h.code)).toEqual(["5H0332", "5H0999"]);
+  });
+});
+
 describe("spec.search 定额说明检索", () => {
   const specCall = (args: { query: string }) =>
     getTool("spec.search")!.handler!(ctx as never, args as never) as Promise<{
@@ -135,5 +152,13 @@ describe("spec.search 定额说明检索", () => {
     const r = await specCall({ query: "脚手架" });
     expect(r.views).toEqual([]);
     expect(r.message).toContain("未找到");
+  });
+  it("同分按册名定序——DB 返回乱序时输出仍稳定", async () => {
+    specRows.rows = [
+      { book: "消防", title: "章二", content: "沟槽连接件按设计计算" },
+      { book: "给排水", title: "章一", content: "沟槽连接件按设计计算" },
+    ];
+    const r = await specCall({ query: "沟槽" });
+    expect(r.observation.hits.map((h) => h.book)).toEqual(["给排水", "消防"]);
   });
 });
