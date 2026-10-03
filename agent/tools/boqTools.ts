@@ -401,11 +401,16 @@ registerTool({
     name: z.string().min(1).describe("项目名称"),
     code: z.string().optional().describe("项目编码"),
     unit: z.string().optional().describe("计量单位"),
-    quantity: z.string().optional().describe("工程量"),
+    quantity: z.string().optional().describe("工程量（支持计算式结果数值）"),
+    quantityExpr: z.string().optional().describe("工程量计算式原文，如 3层×12个+15"),
     unitPrice: z.string().optional().describe("综合单价"),
+    mainMaterialPrice: z.string().optional().describe("主材暂估价"),
+    laborUnitPrice: z.string().optional().describe("人工单价"),
+    machineUnitPrice: z.string().optional().describe("机械单价"),
     totalPrice: z.string().optional().describe("合价（仅总价措施/其他项目直填）"),
     feeType: z.enum(["分部分项", "单价措施", "总价措施", "其他项目"]).optional(),
     rawFeature: z.string().optional().describe("项目特征"),
+    insertAfter: z.string().optional().describe("插入锚点行 id：新行紧随该行并沿用其文件/分部/专业"),
   }),
   confirm: (a: { name: string }) => `将补录清单项「${a.name}」（操作可撤销）`,
   handler: async (ctx, args) => {
@@ -416,16 +421,20 @@ registerTool({
     } catch (e) {
       return { observation: { error: e instanceof Error ? e.message : "补录失败" } };
     }
+    const lumpSum = item.feeType === "总价措施" || item.feeType === "其他项目";
+    const priceDesc = lumpSum
+      ? `合价 ${item.totalPrice}`
+      : `${item.quantity}${item.unit} × 综合单价 ${item.unitPrice} = 合价 ${item.totalPrice}`;
     return {
       observation: { itemId: item.id, name: item.name, totalPrice: item.totalPrice },
       views: [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }],
       receipts: [{
         actionType: "BOQ_UPDATE",
-        summary: `补录清单项「${item.name}」（${item.unit || "—"} ${item.quantity} × ${item.unitPrice} = ${item.totalPrice}）`,
+        summary: `补录清单项「${item.name}」（${priceDesc}）`,
         before: [],
         after: [item],
       }],
-      message: `已补录「${item.name}」：${item.quantity}${item.unit} × 综合单价 ${item.unitPrice} = 合价 ${item.totalPrice}，可在操作记录撤销`,
+      message: `已补录「${item.name}」：${priceDesc}，可在操作记录撤销`,
     };
   },
 });

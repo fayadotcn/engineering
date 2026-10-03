@@ -4,6 +4,7 @@ import { toBoqDTO } from "@database/serialize";
 import { toJson } from "@shared/json";
 import { D, lineTotal, round2, round3 } from "@cost-engine/money";
 import { inferDiscipline, parseSemanticFeature } from "@cost-engine/semantic";
+import { evalExpr } from "@cost-engine/calcExpr";
 import { rowToBoqInput } from "./mapRow";
 import { decideRows } from "./ingestRules";
 import type { ParsedSheet } from "@file/excel";
@@ -222,7 +223,12 @@ export async function createBoqItem(
 ): Promise<BoqItemDTO> {
   if (!body.name?.trim()) throw new Error("项目名称不能为空");
   const lumpSum = body.feeType === "总价措施" || body.feeType === "其他项目";
-  const qty = lumpSum ? D(0) : round3(D(body.quantity ?? "0"));
+  // 只给计算式没给数值时按式求值（补录面板/agent 都可能这样提交）；式子无效再落 0
+  let qtyRaw = body.quantity;
+  if (!lumpSum && (qtyRaw === undefined || qtyRaw === "") && body.quantityExpr?.trim()) {
+    try { qtyRaw = String(evalExpr(body.quantityExpr)); } catch { /* fallthrough */ }
+  }
+  const qty = lumpSum ? D(0) : round3(D(qtyRaw ?? "0"));
   const price = lumpSum ? D(0) : round2(D(body.unitPrice ?? "0"));
   const mainMat = round2(D(body.mainMaterialPrice ?? "0"));
   const labor = round2(D(body.laborUnitPrice ?? "0"));
