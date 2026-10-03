@@ -214,24 +214,26 @@ export async function ingestDataset(
         meta.defaults ?? {},
         ds.filename
       );
-      // 整表替换：重导幂等
-      await prisma.materialPrice.deleteMany({ where: { datasetId: id } });
-      if (rows.length)
-        await prisma.materialPrice.createMany({
-          data: rows.map((r) => ({
-            datasetId: id,
-            name: r.name,
-            spec: r.spec,
-            unit: r.unit,
-            brand: r.brand,
-            price: r.price,
-            priceType: r.priceType,
-            region: r.region,
-            period: r.period,
-            features: r.features,
-            raw: r.raw,
-          })),
-        });
+      // 整表替换：重导幂等——删旧写新同事务，写失败不丢旧数据
+      await prisma.$transaction(async (tx) => {
+        await tx.materialPrice.deleteMany({ where: { datasetId: id } });
+        if (rows.length)
+          await tx.materialPrice.createMany({
+            data: rows.map((r) => ({
+              datasetId: id,
+              name: r.name,
+              spec: r.spec,
+              unit: r.unit,
+              brand: r.brand,
+              price: r.price,
+              priceType: r.priceType,
+              region: r.region,
+              period: r.period,
+              features: r.features,
+              raw: r.raw,
+            })),
+          });
+      });
       meta.sheets = sheets.map((s) => ({
         name: s.sheetName,
         type: s.type,
@@ -291,9 +293,11 @@ export async function ingestDataset(
 
     if (ds.kind === "QUOTA") {
       const rows = parseQuotaWorkbook(buffer);
-      await prisma.quotaRow.deleteMany({ where: { datasetId: id } });
-      if (rows.length)
-        await prisma.quotaRow.createMany({ data: quotaRowsData(rows, id) });
+      await prisma.$transaction(async (tx) => {
+        await tx.quotaRow.deleteMany({ where: { datasetId: id } });
+        if (rows.length)
+          await tx.quotaRow.createMany({ data: quotaRowsData(rows, id) });
+      });
       meta.note = quotaNote(rows.length);
       await prisma.dataset.update({
         where: { id },
@@ -690,9 +694,11 @@ export async function getMeasureFeeRates() {
 export async function deleteDataset(id: string) {
   const ds = await prisma.dataset.findUnique({ where: { id } });
   if (!ds) return false;
-  await prisma.materialPrice.deleteMany({ where: { datasetId: id } });
-  await prisma.quotaRow.deleteMany({ where: { datasetId: id } });
-  await prisma.dataset.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    await tx.materialPrice.deleteMany({ where: { datasetId: id } });
+    await tx.quotaRow.deleteMany({ where: { datasetId: id } });
+    await tx.dataset.delete({ where: { id } });
+  });
   await storage.delete(ds.storageKey).catch(() => {});
   return true;
 }
