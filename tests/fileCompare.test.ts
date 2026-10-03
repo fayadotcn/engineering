@@ -117,6 +117,36 @@ describe("compareBoqSets", () => {
     // A 第一条 3500→3600 差价（2台×100=+200）；B 多出 1×5000
     expect(s.totalDelta).toBe("5200.00");
   });
+
+  it("同码重复行按单位工程配对——两版文件单位工程排序不同不错配", () => {
+    const up = (i: BoqItemDTO, u: string) => ({ ...i, unitProject: u });
+    // A：1#楼在前；B：2#楼在前——纯出现序配对会把 1#楼的行拿去和 2#楼比
+    const a = [
+      up(item("配电箱", "AL1", "台", "2", "3500", "C001"), "1#楼"),
+      up(item("配电箱", "AL1", "台", "3", "4200", "C001"), "2#楼"),
+    ];
+    const b = [
+      up(item("配电箱", "AL1", "台", "3", "4200", "C001", "fB"), "2#楼"),
+      up(item("配电箱", "AL1", "台", "2", "3500", "C001", "fB"), "1#楼"),
+    ];
+    const rows = compareBoqSets(a, b);
+    // 正确口径：两对都 SAME（同归属同量价）；若按出现序错配会报 2 条 BOTH_DIFF
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === "SAME")).toBe(true);
+  });
+
+  it("某单位工程独有的同码行标 ONLY_* 而非跨归属错配", () => {
+    const up = (i: BoqItemDTO, u: string) => ({ ...i, unitProject: u });
+    const a = [
+      up(item("配电箱", "AL1", "台", "2", "3500", "C001"), "1#楼"),
+      up(item("配电箱", "AL1", "台", "3", "4200", "C001"), "2#楼"), // B 无 2#楼
+    ];
+    const b = [up(item("配电箱", "AL1", "台", "2", "3500", "C001", "fB"), "1#楼")];
+    const rows = compareBoqSets(a, b);
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((r) => r.status === "SAME")).toHaveLength(1);
+    expect(rows.filter((r) => r.status === "ONLY_A")).toHaveLength(1);
+  });
 });
 
 describe("compareDeclaredFees（文件汇总事实两期对审）", () => {

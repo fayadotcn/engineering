@@ -36,30 +36,56 @@ function alignKey(it: BoqItemDTO): string {
   return `S:${groupKey(it.name, it.unit, it.features)}`;
 }
 
+const upKey = (it: BoqItemDTO) => (it.unitProject ?? "").trim().replace(/\s+/g, "");
+
 export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow[] {
   const leaf = (xs: BoqItemDTO[]) => xs.filter((i) => !i.isHeader && i.name.trim());
-  // 同一文件里编码会重复（多单位工程各自含同一条清单）——按出现序号补键，
-  // 顺序保留对齐语义；否则后写的覆盖先写的，整行静默丢失。
-  const putKeyed = (map: Map<string, BoqItemDTO>, it: BoqItemDTO) => {
-    const base = alignKey(it);
-    if (!map.has(base)) { map.set(base, it); return; }
-    let n = 2;
-    while (map.has(`${base}#${n}`)) n++;
-    map.set(`${base}#${n}`, it);
+  // 同一文件里编码会重复（多单位工程各自含同一条清单）——先按对齐键分组，
+  // 组内按单位工程名定序后按下标配对：两版文件单位工程排列顺序不同
+  // （A 先 1#楼后 2#楼、B 反过来）时不会出现跨楼栋错配；同名单位工程
+  // 内部仍靠出现序对齐同码重复行。单位工程空的行排在最前。
+  const grouped = (xs: BoqItemDTO[]) => {
+    const map = new Map<string, BoqItemDTO[]>();
+    for (const it of xs) {
+      const k = alignKey(it);
+      const arr = map.get(k) ?? [];
+      arr.push(it);
+      map.set(k, arr);
+    }
+    for (const arr of map.values())
+      arr.sort((x, y) => upKey(x).localeCompare(upKey(y), "zh"));
+    return map;
   };
-  const mapA = new Map<string, BoqItemDTO>();
-  const mapB = new Map<string, BoqItemDTO>();
-  for (const it of leaf(a)) putKeyed(mapA, it);
-  for (const it of leaf(b)) putKeyed(mapB, it);
+  const mapA = grouped(leaf(a));
+  const mapB = grouped(leaf(b));
+
+  // 组内配对：有单位工程归属时严格同归属配对——A 的 1#楼行绝不该和
+  // B 的 2#楼行比量价差，同归属数量不等时剩余进 ONLY_*（那才是真差异）；
+  // 两边都没有单位工程时退回顺序配对（老数据兼容）。
+  const pairUp = (listA: BoqItemDTO[], listB: BoqItemDTO[]) => {
+    const pairs: [BoqItemDTO | undefined, BoqItemDTO | undefined][] = [];
+    const usedB = new Set<number>();
+    const anyUp = [...listA, ...listB].some((i) => upKey(i));
+    for (const ia of listA) {
+      const j = anyUp
+        ? listB.findIndex((ib, idx) => !usedB.has(idx) && upKey(ib) === upKey(ia))
+        : listB.findIndex((_, idx) => !usedB.has(idx));
+      if (j < 0) { pairs.push([ia, undefined]); continue; }
+      usedB.add(j);
+      pairs.push([ia, listB[j]]);
+    }
+    for (let idx = 0; idx < listB.length; idx++)
+      if (!usedB.has(idx)) pairs.push([undefined, listB[idx]]);
+    return pairs;
+  };
 
   const keys = new Set([...mapA.keys(), ...mapB.keys()]);
   const rows: FileCompareRow[] = [];
   for (const key of keys) {
-    const ia = mapA.get(key);
-    const ib = mapB.get(key);
-    const name = ia?.name ?? ib?.name ?? "";
-    const code = ia?.code ?? ib?.code ?? "";
-    if (ia && ib) {
+    for (const [ia, ib] of pairUp(mapA.get(key) ?? [], mapB.get(key) ?? [])) {
+      const name = ia?.name ?? ib?.name ?? "";
+      const code = ia?.code ?? ib?.code ?? "";
+      if (ia && ib) {
       const qtyDiff = !D(ia.quantity).eq(D(ib.quantity));
       const priceDiff = !D(ia.unitPrice).eq(D(ib.unitPrice));
       const status = qtyDiff && priceDiff ? "BOTH_DIFF" : qtyDiff ? "QTY_DIFF" : priceDiff ? "PRICE_DIFF" : "SAME";
@@ -97,6 +123,7 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
         aTotal: ia?.totalPrice, bTotal: ib?.totalPrice,
         totalDelta: ia ? D(ia.totalPrice).neg().toString() : D(ib!.totalPrice).toString(),
       });
+      }
     }
   }
   const order = { ONLY_B: 0, ONLY_A: 1, BOTH_DIFF: 2, PRICE_DIFF: 3, QTY_DIFF: 4, SAME: 5 };
