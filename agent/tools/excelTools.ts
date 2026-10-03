@@ -86,6 +86,8 @@ registerTool({
 
     const items = await listBoq(ctx.projectId);
     const mine = items.filter((i) => i.fileId === file.id && !i.isHeader);
+    // 手工补录/跨文件行没有源表坐标，写回不到该文件——显式报数，别静默丢失
+    const outside = items.filter((i) => !i.isHeader && i.fileId !== file.id).length;
     if (!mine.length) throw new Error("该源文件没有已导入的清单项，请先完成导入");
     const meta = fromJson<{
       sheets?: { name: string; columns: string[] }[];
@@ -123,7 +125,7 @@ registerTool({
           title: "已写回源文件",
           artifactId: artifact.id,
           filename: artifact.label,
-          summary: `已将 ${patches.length} 行单价/工程量/合价写回「${file.filename}」`,
+          summary: `已将 ${patches.length} 行单价/工程量/合价写回「${file.filename}」${outside ? `；另有 ${outside} 行来自其他文件或手工补录，不在该源文件内` : ""}`,
         },
       ],
       receipts: [
@@ -135,7 +137,8 @@ registerTool({
           reversible: false,
         },
       ],
-      message: `已把最新价格写回源文件，生成「${artifact.label}」`,
+      message: `已把最新价格写回源文件，生成「${artifact.label}」` +
+        (outside ? `；另有 ${outside} 行（手工补录/其他源文件）不在该文件内，请用「导出清单」取全量` : ""),
     };
   },
 });

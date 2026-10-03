@@ -184,7 +184,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
     if (discipline && i.discipline !== discipline) return false;
     if (boqOnlyUnpriced && (!isPricableItem(i) || Number(i.unitPrice) !== 0)) return false;
     const q = query.trim();
-    if (q && !(i.name.includes(q) || i.code.includes(q) || i.rawFeature.includes(q))) return false;
+    if (q && !(i.name.includes(q) || i.code.includes(q) || i.rawFeature.includes(q) || i.sectionPath.includes(q) || (i.unitProject ?? "").includes(q))) return false;
     if (colText.code && !i.code.includes(colText.code)) return false;
     if (colText.name && !i.name.includes(colText.name)) return false;
     if (colText.feature && !i.rawFeature.includes(colText.feature)) return false;
