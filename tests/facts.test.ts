@@ -33,5 +33,10 @@ describe("台账事实数值归一化", () => {
     expect(() => validatePricingFact("价格期", "下期")).toThrow();
     expect(() => validatePricingFact("暂列金额", "50万")).not.toThrow();
     expect(() => validatePricingFact("暂列金额", "-5")).toThrow();
+    // 高度类事实允许 m/米 后缀（消费端剥单位取数），拒绝非数字
+    expect(() => validatePricingFact("檐口高度", "25米")).not.toThrow();
+    expect(() => validatePricingFact("檐口高度", "25m")).not.toThrow();
+    expect(() => validatePricingFact("操作物高度", "三层")).toThrow();
+    expect(() => validatePricingFact("檐口高度", "-5")).toThrow();
   });
 });

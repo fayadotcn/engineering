@@ -72,8 +72,10 @@ export function validatePricingFact(key: string, value: string): void {
   } else if (key === "暂列金额") {
     const amount = parseAmountValue(value);
     if (amount === null || amount < 0) throw new Error("暂列金额应为非负金额");
-  } else if (["檐口高度", "操作物高度"].includes(key) && (!Number.isFinite(Number(value)) || Number(value) < 0)) {
-    throw new Error(`${key}应为非负米数`);
+  } else if (["檐口高度", "操作物高度"].includes(key)) {
+    // 允许「25m」「25 米」写法——消费端统一剥单位再取数
+    const h = Number(String(value).replace(/[m米\s]/gi, ""));
+    if (!Number.isFinite(h) || h < 0) throw new Error(`${key}应为非负米数`);
   } else if (/面积/.test(key)) {
     const area = parseAreaValue(value);
     if (area === null || area < 0) throw new Error(`${key}应为非负平方米数`);
