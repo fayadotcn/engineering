@@ -1,21 +1,31 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RulePlanner, type PlanStep } from "../agent/planner";
 import type { RunContext } from "../agent/context";
 import type { ToolResult } from "../agent/tools/registry";
 
+// applyCalc 门槛步在运行时重查台账：测试用 hoisted 表模拟（含本条消息内联写入的费率）
+const dbFacts = vi.hoisted(() => ({ current: [] as { key: string; value: string }[] }));
+vi.mock("@project/facts", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@project/facts")>();
+  return { ...orig, getFacts: vi.fn(async () => dbFacts.current.map((f) => ({ ...f, source: "USER_PROVIDED" }))) };
+});
+
 // 一键报价（autopilot）：确定性管线计划的形状与动态跳步逻辑。
 // 不跑真实工具，只断言产出的步骤序列和动态函数对观测的反应。
 
-const ctx = (facts: { key: string; value: string }[], itemCount = 12): RunContext => ({
-  projectId: "p1",
-  projectName: "测试工程",
-  files: [],
-  facts: facts.map((f) => ({ ...f, source: "USER_PROVIDED" })),
-  boq: { itemCount, pricedCount: 0, totalAmount: "0.00" },
-  quotationCount: 0,
-  recentChanges: [],
-  history: [],
-});
+const ctx = (facts: { key: string; value: string }[], itemCount = 12): RunContext => {
+  dbFacts.current = facts; // 台账与上下文一致（含 prefSteps 已写入的场景由测试显式设置）
+  return {
+    projectId: "p1",
+    projectName: "测试工程",
+    files: [],
+    facts: facts.map((f) => ({ ...f, source: "USER_PROVIDED" })),
+    boq: { itemCount, pricedCount: 0, totalAmount: "0.00" },
+    quotationCount: 0,
+    recentChanges: [],
+    history: [],
+  };
+};
 
 const rates = [
   { key: "管理费率", value: "30%" },
@@ -105,6 +115,28 @@ describe("autopilot 一键报价管线", () => {
     const tools = plan.steps.filter((s): s is PlanStep => typeof s !== "function").map((s) => s.tool);
     expect(tools).toContain("quota.calculate");
     expect(tools).toContain("cost.feeSummary");
+  });
+
+  it("内联费率 + 一键报价：先写台账再跑管线，运行时已齐 → 照常写回", async () => {
+    const plan = await new RulePlanner().plan(
+      ctx([]),
+      "管理费率设为30%，利润率设为10%，一键智能报价"
+    );
+    const staticTools = plan.steps.filter((s): s is PlanStep => typeof s !== "function").map((s) => s.tool);
+    expect(staticTools.slice(0, 2)).toEqual(["project.setFact", "project.setFact"]);
+    // 模拟 prefSteps 落库后的运行时台账
+    dbFacts.current = rates;
+    const seq = await toolSeq(plan.steps);
+    expect(seq).toContain("quota.applyCalc");
+    expect(plan.fallbackMessage).toBeUndefined();
+  });
+
+  it("内联费率只写一项：仍提示补另一项，不写回", async () => {
+    const plan = await new RulePlanner().plan(ctx([]), "管理费率设为30%，一键智能报价");
+    dbFacts.current = [{ key: "管理费率", value: "30%" }];
+    const seq = await toolSeq(plan.steps);
+    expect(seq).not.toContain("quota.applyCalc");
+    expect(plan.fallbackMessage).toContain("利润率");
   });
 
   it("空清单：不排步骤，直接引导上传", async () => {

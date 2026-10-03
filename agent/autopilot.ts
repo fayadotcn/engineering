@@ -42,16 +42,18 @@ export function autopilotPlan(ctx: RunContext): Plan {
         : null,
     { tool: "quota.match", args: {}, activity: "匹配定额子目" },
     { tool: "quota.calculate", args: {}, activity: "按定额测算综合单价" },
-    // 费率未确认时跳过写回：测算结果已在视图里，提示用户补设置后再写回
-    ...(missing.length
-      ? []
-      : [
-          {
-            tool: "quota.applyCalc",
-            args: {},
-            activity: "写回综合单价（需确认）",
-          } satisfies PlanStep,
-        ]),
+    // 费率未确认时跳过写回：测算结果已在视图里，提示用户补设置后再写回。
+    // 动态步在执行时重查台账——同一条消息里先用 prefSteps 写入的费率（如「管理费率设为5%，一键报价」）能即时生效。
+    async (): Promise<PlanStep | null> => {
+      const { getFacts } = await import("@project/facts");
+      const facts = await getFacts(ctx.projectId);
+      const now = ["管理费率", "利润率"].filter(
+        (k) => !facts.some((f) => f.key === k && f.value.trim() !== "")
+      );
+      return now.length
+        ? null
+        : { tool: "quota.applyCalc", args: {}, activity: "写回综合单价（需确认）" };
+    },
     // 系数措施费依赖本次测算写出的「定额人工费明细」；测算 0 匹配就跳过
     (results): PlanStep | null =>
       Number(calcObservation(results)?.matched ?? 0) > 0

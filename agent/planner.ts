@@ -98,11 +98,34 @@ export class RulePlanner implements Planner {
     if (periodM && !(periodM.index! + periodM[0].length < m.length && /\d/.test(m[periodM.index! + periodM[0].length])))
       prefSteps.push({ tool: "project.setFact", args: { key: "价格期", value: `${periodM[1]}-${periodM[2].padStart(2, "0")}` }, activity: `记录价格期偏好` });
 
+    // 内联台账写入（「管理费率设为5%」类）——一条消息可同时带台账写入与任务指令
+    const factMatches = [...m.matchAll(
+      /(税率|地区|电缆品牌|电线品牌|品牌|管理费率|利润率|价格日期|人工费调整系数|措施费率|规费费率|暂列金额率|暂列金额|建筑面积|檐口高度|操作物高度)\s*(?:设为|设置为|是|为|=|:|：)\s*([^\s，。,；;]+)/g
+    )];
+
     // 一键报价：UI 按钮走 extra.autopilot（绕过 LLM，确定性管线）；
     // 纯文本「一键报价/自动报价」同样落到这条管线。
     if (extra?.autopilot || /一键|全自动|智能报价|自动.{0,4}(报价|组价|测算)|帮我.{0,4}报价/.test(m)) {
       const p = autopilotPlan(ctx);
-      return { steps: [...prefSteps, ...p.steps], fallbackMessage: p.fallbackMessage };
+      // autopilot 消息里的费率/台账赋值一并先写入——autopilot 的 applyCalc 门会重查台账
+      const covered = new Set(prefSteps.map((s) => String(s.args.key)));
+      const factSteps: PlanStep[] = factMatches
+        .filter((fm) => !covered.has(fm[1]))
+        .map((fm) => ({
+          tool: "project.setFact",
+          args: { key: fm[1], value: fm[2] },
+          activity: `正在写入台账：${fm[1]} = ${fm[2]}`,
+        }));
+      // fallbackMessage 只讲「缺费率跳过写回」——内联写入了的费率视同已齐，不再误导
+      const inlineKeys = new Set(factSteps.map((s) => String(s.args.key)));
+      const stillMissing = ["管理费率", "利润率"].some(
+        (k) => !ctx.facts.some((f) => f.key === k && f.value.trim() !== "") && !inlineKeys.has(k)
+      );
+      return {
+        steps: [...prefSteps, ...factSteps, ...p.steps],
+        // 空清单提示永远保留；费率缺失提示在内联写入已补齐时撤下
+        fallbackMessage: !ctx.boq.itemCount || stillMissing ? p.fallbackMessage : undefined,
+      };
     }
 
     // 组价写回（必须在「写回源文件」「定额测算」「定额|组价」之前拦截：
@@ -128,9 +151,6 @@ export class RulePlanner implements Planner {
     }
 
     // 写事实: "税率设为9%" / "电缆品牌是上上" / "措施费率=3%，规费费率2%"（一条消息可写多项）
-    const factMatches = [...m.matchAll(
-      /(税率|地区|电缆品牌|电线品牌|品牌|管理费率|利润率|价格日期|人工费调整系数|措施费率|规费费率|暂列金额率|暂列金额|建筑面积|檐口高度|操作物高度)\s*(?:设为|设置为|是|为|=|:|：)\s*([^\s，。,；;]+)/g
-    )];
     if (factMatches.length) {
       return {
         steps: factMatches.map((fm) => ({
