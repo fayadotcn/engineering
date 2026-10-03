@@ -31,9 +31,11 @@ export async function extractPdfText(buffer: Buffer): Promise<string[]> {
   return pages;
 }
 
-// BOQ-ish line: 9-15位编码 + 名称 + ... + 单位 + 数量 + 单价 + 合价
+// BOQ-ish line: 9-15位编码 + 名称 + (可选特征) + 单位 + 数量 + 单价 + 合价
+// 特征组必须可选：招标 PDF 的特征列常为空（「配电箱 台 2 8500.00 17000.00」），
+// 必填会把整行静默漏掉。内层懒惰匹配让有特征的行照常归入特征组。
 const BOQ_LINE =
-  /(\d{9,15})\s+([^\s\d][^\d]{1,40}?)\s+(\S.{0,50}?)\s+(m2|m3|m²|m³|㎡|m|米|个|套|台|根|块|组|处|点|只|条|盏|座|宗|项|件|箱|卷|樘|面|付|pcs|kg|km|t|吨|系统|回路)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d{0,2})\s+([\d,]+\.?\d{0,2})(?:\s|$)/;
+  /(\d{9,15})\s+([^\s\d][^\d]{1,40}?)\s+(?:(\S.{0,50}?)\s+)?(m2|m3|m²|m³|㎡|m|米|个|套|台|根|块|组|处|点|只|条|盏|座|宗|项|件|箱|卷|樘|面|付|pcs|kg|km|t|吨|系统|回路|工日|台班|延米|次)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d{0,2})\s+([\d,]+\.?\d{0,2})(?:\s|$)/;
 
 export interface PdfBoqLine {
   line: number; // global line index
@@ -58,7 +60,7 @@ export function detectBoqLines(pages: string[]): PdfBoqLine[] {
         line: lineNo,
         code: m[1],
         name: m[2].trim(),
-        feature: m[3].trim(),
+        feature: (m[3] ?? "").trim(),
         unit: m[4],
         quantity: m[5].replace(/,/g, ""),
         unitPrice: m[6].replace(/,/g, ""),
