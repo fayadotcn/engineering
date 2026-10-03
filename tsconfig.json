@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -13,23 +17,54 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@agent/*": ["./agent/*"],
-      "@cost-engine/*": ["./cost-engine/*"],
-      "@boq/*": ["./boq/*"],
-      "@material/*": ["./material/*"],
-      "@quota/*": ["./quota/*"],
-      "@project/*": ["./project/*"],
-      "@file/*": ["./file/*"],
-      "@report/*": ["./report/*"],
-      "@workspace/*": ["./workspace/*"],
-      "@database/*": ["./database/*"],
-      "@dataset/*": ["./dataset/*"],
-      "@shared/*": ["./shared/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@agent/*": [
+        "./agent/*"
+      ],
+      "@cost-engine/*": [
+        "./cost-engine/*"
+      ],
+      "@boq/*": [
+        "./boq/*"
+      ],
+      "@material/*": [
+        "./material/*"
+      ],
+      "@quota/*": [
+        "./quota/*"
+      ],
+      "@project/*": [
+        "./project/*"
+      ],
+      "@file/*": [
+        "./file/*"
+      ],
+      "@database/*": [
+        "./database/*"
+      ],
+      "@dataset/*": [
+        "./dataset/*"
+      ],
+      "@shared/*": [
+        "./shared/*"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "harness/plugin/client.tsx"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "next-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

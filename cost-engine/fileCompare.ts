@@ -80,6 +80,22 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
   return rows.sort((x, y) => order[x.status] - order[y.status]);
 }
 
+/** 造价流转顺序：招标→投标→清标→进度→变更→报审→结算→财评；对审默认「最早阶段 ↔ 最晚阶段」。
+ *  stage 为空视为最靠前——文件名不带阶段词的通常就是原始清单/招标版（如「X工程清单.xls」）。 */
+export const COMPARE_STAGE_ORDER = ["招标", "投标", "清标", "进度", "变更", "报审", "结算", "财评"];
+const stageRank = (s: string) => (!s ? -1 : Math.max(0, COMPARE_STAGE_ORDER.indexOf(s)));
+
+/** 缺省对审对：按（阶段序 → 期次 → 上传时间）排序取首末——招标vs结算、上期vs本期都能落到正确方向 */
+export function pickComparePair<T extends { stage: string; period: string; createdAt: Date }>(files: T[]): [T, T] {
+  const sorted = [...files].sort(
+    (x, y) =>
+      stageRank(x.stage) - stageRank(y.stage) ||
+      (x.period || "").localeCompare(y.period || "") ||
+      x.createdAt.getTime() - y.createdAt.getTime()
+  );
+  return [sorted[0], sorted[sorted.length - 1]];
+}
+
 export function compareSummary(rows: FileCompareRow[]) {
   const count = (s: FileCompareRow["status"]) => rows.filter((r) => r.status === s).length;
   const deltaSum = rows.reduce((a, r) => a.plus(D(r.totalDelta ?? 0)), D(0));
@@ -93,4 +109,67 @@ export function compareSummary(rows: FileCompareRow[]) {
     onlyB: count("ONLY_B"),
     totalDelta: deltaSum.toFixed(2),
   };
+}
+
+/* ---------------- 申报口径对审（文件汇总事实两两配对） ---------------- */
+
+export interface DeclaredFeeDiff {
+  label: string;
+  a: number;
+  b: number;
+  diff: number;
+}
+
+export interface DeclaredUnitDiff {
+  name: string;
+  a: number;
+  b: number;
+  diff: number;
+  /** both=两版都有该单位工程；a/b=独有 */
+  side: "both" | "a" | "b";
+}
+
+export interface DeclaredCompare {
+  labels: DeclaredFeeDiff[];
+  units: DeclaredUnitDiff[];
+}
+
+const DECLARED_LABELS = ["分部分项工程费", "措施项目费", "其他项目费", "规费", "税金", "合计"];
+
+/**
+ * 「本期 vs 上期」申报口径对比：输入两份「文件汇总:{filename}」事实的 JSON
+ * （每行一个单位工程：{unit, 分部分项工程费, …, 合计}），输出费用口径差
+ * + 按单位工程名对齐的合计差（找出是哪个单位工程在动）。
+ */
+export function compareDeclaredFees(
+  unitsA: Record<string, unknown>[],
+  unitsB: Record<string, unknown>[]
+): DeclaredCompare {
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const sum = (units: Record<string, unknown>[], k: string) => units.reduce((a, u) => a + num(u[k]), 0);
+  const labels = DECLARED_LABELS.map((label) => {
+    const a = sum(unitsA, label);
+    const b = sum(unitsB, label);
+    return { label, a, b, diff: b - a };
+  }).filter((r) => r.a !== 0 || r.b !== 0);
+
+  const byName = new Map<string, { a?: number; b?: number }>();
+  const put = (u: Record<string, unknown>, side: "a" | "b") => {
+    const name = String(u.unit ?? u.name ?? "").trim();
+    if (!name) return;
+    const cur = byName.get(name) ?? {};
+    cur[side] = (cur[side] ?? 0) + num(u["合计"]);
+    byName.set(name, cur);
+  };
+  for (const u of unitsA) put(u, "a");
+  for (const u of unitsB) put(u, "b");
+  const units = [...byName.entries()].map(([name, v]) => {
+    const a = v.a ?? 0;
+    const b = v.b ?? 0;
+    return {
+      name, a, b, diff: b - a,
+      side: v.a !== undefined && v.b !== undefined ? ("both" as const) : v.a !== undefined ? ("a" as const) : ("b" as const),
+    };
+  });
+  return { labels, units };
 }

@@ -1,6 +1,7 @@
 import type { RunContext } from "./context";
 import type { ToolResult } from "./tools/registry";
 import { REGION_RE } from "@dataset/priceParse";
+import { autopilotPlan } from "./autopilot";
 
 // Planner produces steps. A step is either a static {tool,args} or a
 // dynamic function that can inspect previous observations — this is the
@@ -38,6 +39,7 @@ const CAPABILITIES = `我可以直接执行这些造价任务：
 • 检查清单：相同项不同单价、综合单价异常、项目特征不一致、重复项
 • 询价处理：把询价文件价格匹配并写回清单，未询到的自动标记
 • 金额分析：各专业占比、电缆/桥架/管道/阀门等材料类别占比
+• 成本构成：人材机费用占比、毛利与成本倒挂项（报价低于成本）
 • 工程量反算：总价控制到目标值（含税可指定税率），只调工程量
 • 定额测算：匹配定额子目并组价，与清单价对比偏差
 • 两版清单对审：招标/中标/结算的价差、量差、独有项与总额差
@@ -70,6 +72,24 @@ export class RulePlanner implements Planner {
     const periodM = m.match(/(20\d{2})\s*年?\s*(\d{1,2})\s*月?(?:的)?(?=价|信息价|测|算|组|补)/);
     if (periodM && !(periodM.index! + periodM[0].length < m.length && /\d/.test(m[periodM.index! + periodM[0].length])))
       prefSteps.push({ tool: "project.setFact", args: { key: "价格期", value: `${periodM[1]}-${periodM[2].padStart(2, "0")}` }, activity: `记录价格期偏好` });
+
+    // 一键报价：UI 按钮走 extra.autopilot（绕过 LLM，确定性管线）；
+    // 纯文本「一键报价/自动报价」同样落到这条管线。
+    if (extra?.autopilot || /一键|全自动|智能报价|自动.{0,4}(报价|组价|测算)|帮我.{0,4}报价/.test(m)) {
+      const p = autopilotPlan(ctx);
+      return { steps: [...prefSteps, ...p.steps], fallbackMessage: p.fallbackMessage };
+    }
+
+    // 组价写回（必须在「写回源文件」「定额测算」「定额|组价」之前拦截：
+    // 只说「写回组价/把测算写回」时意图是 applyCalc，不是预览也不是写回 Excel）
+    if (!/源文件|excel|原表/i.test(m) && /(组价|测算|定额|综合单价).{0,4}(写回|写入|写进|套用|落)|(写回|写入|写进|套用).{0,4}(组价|测算|定额|综合单价)|套用定额价/.test(m)) {
+      return {
+        steps: [
+          { tool: "quota.calculate", args: {}, activity: "正在按定额测算综合单价" },
+          { tool: "quota.applyCalc", args: {}, activity: "正在把组价写回清单" },
+        ],
+      };
+    }
 
     // file ingest (triggered by upload)
     if (extra?.ingestFileId) {
@@ -181,15 +201,7 @@ export class RulePlanner implements Planner {
       };
     }
 
-    // 定额组价写回：测算价 → 综合单价（缺主材项自动跳过）
-    if (/组价|测算.*写回|写回.*测算|套用定额价/.test(m)) {
-      return {
-        steps: [
-          { tool: "quota.calculate", args: {}, activity: "正在按定额测算综合单价" },
-          { tool: "quota.applyCalc", args: {}, activity: "正在把组价写回清单" },
-        ],
-      };
-    }
+    // （组价写回已在上方优先拦截——保留此注释防止误以为遗漏）
 
     // 缺价补价（专业闭环）：材料库补主材暂估价 → 定额测算 → 组价写回综合单价
     if (/补价|补齐|缺价|未定价|没价|套价/.test(m)) {
@@ -292,6 +304,12 @@ export class RulePlanner implements Planner {
       };
     if (/检查|查一下|体检|全查|审核/.test(m))
       return { steps: [{ tool: "boq.compare", args: {}, activity: "正在全面检查清单" }] };
+
+    // 人材机成本构成/毛利分析（须在通配「分析」之前拦截）
+    if (/人材机|工料机|成本构成|成本分析|成本占比|毛利|直接成本|直接费/.test(m))
+      return {
+        steps: [{ tool: "cost.composition", args: {}, activity: "正在分析人材机成本构成" }],
+      };
 
     // 占比分析
     if (/占比|分布|分别占|分析/.test(m)) {

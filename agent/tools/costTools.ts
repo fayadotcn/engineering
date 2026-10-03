@@ -3,9 +3,10 @@ import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import { aggregateByCategory, aggregateByDiscipline, projectTotals } from "@cost-engine/aggregate";
 import { adjustToTarget } from "@cost-engine/adjust";
-import { D, decStr, round3, sum, withTax } from "@cost-engine/money";
-import { feeSummary } from "@cost-engine/fees";
-import { getFact, setFact, parseRateValue, loadFeeParams } from "@project/facts";
+import { analyzeCostComposition } from "@cost-engine/costComposition";
+import { D, decStr, fmtMoney, round3, sum, withTax } from "@cost-engine/money";
+import { feeSummary, compareDeclared } from "@cost-engine/fees";
+import { getFact, getFacts, setFact, parseRateValue, loadFeeParams } from "@project/facts";
 import type { DiffRow } from "@shared/types";
 
 registerTool({
@@ -28,7 +29,7 @@ registerTool({
         exclTax: excl.toFixed(2),
         inclTax: tax ? withTax(excl, tax).toString() : null,
       },
-      message: `不含税合价 ${excl.toFixed(2)} 元${tax ? `，含税 ${withTax(excl, tax).toFixed(2)} 元（税率 ${D(tax).mul(100)}%）` : ""}`,
+      message: `不含税合价 ${fmtMoney(excl)} 元${tax ? `，含税 ${fmtMoney(withTax(excl, tax))} 元（税率 ${D(tax).mul(100)}%）` : ""}`,
     };
   },
 });
@@ -57,11 +58,40 @@ registerTool({
   schema: z.object({}),
   handler: async (ctx) => {
     const items = await listBoq(ctx.projectId);
-    const r = feeSummary(items, await loadFeeParams(ctx.projectId));
+    const fees = await loadFeeParams(ctx.projectId);
+    const r = feeSummary(items, fees);
+
+    // 申报核对按文件配对：「文件汇总:{filename}」事实只代表那份文件的申报口径，
+    // 用同一文件的清单行算 feeSummary 再对——多文件时逐文件核对，不混池比较。
+    const { prisma } = await import("@database/client");
+    const [facts, files] = await Promise.all([
+      getFacts(ctx.projectId),
+      prisma.projectFile.findMany({ where: { projectId: ctx.projectId }, select: { id: true, filename: true } }),
+    ]);
+    const declaredCheck: { file: string; checks: { label: string; declared: number; computed: number; diff: number; pct: number; note?: string }[] }[] = [];
+    for (const f of facts.filter((x) => x.key.startsWith("文件汇总:"))) {
+      const filename = f.key.slice("文件汇总:".length);
+      const fileId = files.find((x) => x.filename === filename)?.id;
+      const fileItems = fileId ? items.filter((i) => i.fileId === fileId) : [];
+      if (!fileItems.length) continue;
+      try {
+        const checks = compareDeclared(feeSummary(fileItems, fees).rows, JSON.parse(f.value));
+        if (checks.length) declaredCheck.push({ file: filename, checks });
+      } catch { /* 事实 JSON 异常就跳过核对 */ }
+    }
+    const driftNotes = declaredCheck
+      .map((d) => {
+        const drift = d.checks.filter((c) => Math.abs(c.pct) > 0.01);
+        if (!drift.length) return `「${d.file}」与申报口径一致（差≤1%）`;
+        return `「${d.file}」口径差异：${drift.map((c) => `${c.label}${c.diff > 0 ? "+" : ""}${fmtMoney(c.diff)}（${(c.pct * 100).toFixed(1)}%）`).join("、")}`;
+      })
+      .filter(Boolean);
+
     return {
       observation: {
         grandTotal: r.grandTotal, preTax: r.preTax, unpricedCount: r.unpricedCount,
         rows: r.rows.map((x) => ({ name: x.name, rate: x.rate, amount: x.amount })),
+        declaredCheck: declaredCheck.length ? declaredCheck : undefined,
       },
       views: [
         {
@@ -69,7 +99,7 @@ registerTool({
           rows: r.rows, grandTotal: r.grandTotal, unpricedCount: r.unpricedCount,
         },
       ],
-      message: `含税工程造价 ${r.grandTotal} 元（税前 ${r.preTax} 元）${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}`,
+      message: `含税工程造价 ${fmtMoney(r.grandTotal)} 元（税前 ${fmtMoney(r.preTax)} 元）${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}${driftNotes.length ? `；${driftNotes.join("；")}` : ""}`,
     };
   },
 });
@@ -143,8 +173,45 @@ registerTool({
         rows: r.lines, total: r.total, skipped: r.skipped,
       }],
       message:
-        `措施费计取：${r.lines.length} 项合计 ${r.total} 元（已写入台账「系数措施费」，费用汇总表自动采用）` +
+        `措施费计取：${r.lines.length} 项合计 ${fmtMoney(r.total)} 元（已写入台账「系数措施费」，费用汇总表自动采用）` +
         (r.skipped.length ? `；${r.skipped.length} 项未计取（檐口/操作高度或系统调整费未设置）` : ""),
+    };
+  },
+});
+
+registerTool({
+  name: "cost.composition",
+  description:
+    "人材机成本构成分析：把清单合价拆成人工费/材料费/机械费/管利及其他，算直接成本、毛利与成本倒挂项。分量来源：定额组价方案 > 源表人材机分解列 > 主材暂估价",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    // 需要 rawCells：分解列字段为 0 的旧数据靠整行原文兜底找回人工/机械单价
+    const items = await listBoq(ctx.projectId);
+    const r = analyzeCostComposition(items);
+    const { totals: t, coverage: c } = r;
+    const share = (v: string) =>
+      D(t.revenue).isZero() ? "0.0" : D(v).div(D(t.revenue)).mul(100).toFixed(1);
+    return {
+      observation: { totals: t, coverage: c, rowCount: r.rows.length },
+      views: [
+        {
+          kind: "costComposition",
+          id: "view:costComposition",
+          title: "人材机成本构成",
+          rows: r.rows,
+          totals: t,
+          coverage: c,
+        },
+      ],
+      message:
+        `分部分项合价 ${fmtMoney(t.revenue)} 元：` +
+        `人工 ${share(t.labor)}%｜材料 ${share(t.material)}%｜机械 ${share(t.machine)}%｜管利及未分解 ${share(t.other)}%。` +
+        `成本口径覆盖 ${c.plan + c.imported + c.partial}/${r.rows.length} 项` +
+        `（组价方案 ${c.plan}、源表分解列 ${c.imported}、仅主材价 ${c.partial}）` +
+        (t.marginRate !== null ? `；可算口径毛利 ${fmtMoney(t.margin)} 元（${t.marginRate}%）` : "") +
+        (c.inverted ? `；⚠ ${c.inverted} 项人材机成本高于合价（倒挂）` : "") +
+        (c.none ? `；${c.none} 项无成本数据，可先定额测算补充` : ""),
     };
   },
 });
@@ -169,7 +236,7 @@ registerTool({
           total: total.toFixed(2),
         },
       ],
-      message: `总金额 ${total.toFixed(2)} 元：` +
+      message: `总金额 ${fmtMoney(total)} 元：` +
         slices.slice(0, 5).map((s) => `${s.label} ${(s.share * 100).toFixed(1)}%`).join("，"),
     };
   },
@@ -198,7 +265,7 @@ registerTool({
         },
       ],
       message:
-        `总金额 ${total.toFixed(2)} 元：` +
+        `总金额 ${fmtMoney(total)} 元：` +
         slices.slice(0, 6).map((s) => `${s.label} ${(s.share * 100).toFixed(1)}%`).join("，"),
     };
   },
@@ -234,7 +301,7 @@ registerTool({
     }
 
     const { before, after } = await updateBoqItems(ctx.projectId, [
-      { id: args.itemId, patch: { quantity: qty.toString() } },
+      { id: args.itemId, patch: { quantity: qty.toString(), quantityExpr: args.expression } },
     ]);
     const b = before[0];
     const a = after[0];
@@ -325,7 +392,7 @@ registerTool({
             rows: diffRows,
           },
         ],
-        message: `试算完成：${fieldLabel}整体${Number(scalePct) >= 0 ? "上浮" : "下浮"} ${Math.abs(Number(scalePct))}%，调整 ${r.adjustments.length} 项，总价 ${r.beforeTotal.toFixed(2)} → ${r.afterTotal.toFixed(2)} 元（不含税口径），残差 ${r.residual.toFixed(4)}。确认后可写回`,
+        message: `试算完成：${fieldLabel}整体${Number(scalePct) >= 0 ? "上浮" : "下浮"} ${Math.abs(Number(scalePct))}%，调整 ${r.adjustments.length} 项，总价 ${fmtMoney(r.beforeTotal)} → ${fmtMoney(r.afterTotal)} 元（不含税口径），残差 ${r.residual.toFixed(4)}。确认后可写回`,
       };
     }
 
@@ -349,7 +416,7 @@ registerTool({
       receipts: [
         {
           actionType: "PRICE_ADJUST",
-          summary: `总价反算：${r.adjustments.length} 项调${fieldLabel}（${Number(scalePct) >= 0 ? "+" : ""}${scalePct}%），总价 ${r.beforeTotal.toFixed(2)} → ${r.afterTotal.toFixed(2)}（目标 ${args.targetTotal}${tax ? " 含税" : ""}）`,
+          summary: `总价反算：${r.adjustments.length} 项调${fieldLabel}（${Number(scalePct) >= 0 ? "+" : ""}${scalePct}%），总价 ${fmtMoney(r.beforeTotal)} → ${fmtMoney(r.afterTotal)}（目标 ${args.targetTotal}${tax ? " 含税" : ""}）`,
           before: r.adjustments.map((a) => ({
             id: a.itemId,
             name: beforeMap.get(a.itemId)?.name,
@@ -362,7 +429,7 @@ registerTool({
           })),
         },
       ],
-      message: `已写回 ${r.adjustments.length} 项${fieldLabel}（${Number(scalePct) >= 0 ? "上浮" : "下浮"} ${Math.abs(Number(scalePct))}%），调整后总价 ${r.afterTotal.toFixed(2)} 元（不含税），残差 ${r.residual.toFixed(4)} 元`,
+      message: `已写回 ${r.adjustments.length} 项${fieldLabel}（${Number(scalePct) >= 0 ? "上浮" : "下浮"} ${Math.abs(Number(scalePct))}%），调整后总价 ${fmtMoney(r.afterTotal)} 元（不含税），残差 ${r.residual.toFixed(4)} 元`,
     };
   },
 });

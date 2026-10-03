@@ -1,18 +1,15 @@
-// Real API + official Harness tool-runtime regression on an isolated SQLite DB.
+// 端到端回归：隔离 SQLite + 生产构建（next start）上走真实 API，并在同库内直接调用 Agent 工具执行器。
+// 前置：npm run build。
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
-import { Context } from "@deepseek-ai/cordis";
 import { createServer } from "node:net";
-import ToolRuntime from "@deepseek-ai/dsh-tools";
-import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
 
 async function main() {
   const root = process.cwd();
-  const checkDir = path.join(root, ".harness", `verification-${Date.now()}`);
+  const checkDir = path.join(root, ".verify", `e2e-${Date.now()}`);
   await mkdir(checkDir, { recursive: true });
   await writeFile(path.join(checkDir, "check.db"), "");
   process.env.DATABASE_URL = `file:${path.relative(path.join(root, "prisma"), path.join(checkDir, "check.db")).replaceAll("\\", "/")}`;
@@ -32,7 +29,8 @@ async function main() {
     const data = await res.json(); assert.equal(res.status, status, JSON.stringify(data)); return data;
   };
   const { prisma } = await import("../database/client");
-  const cordis = new Context();
+  const { executeTool } = await import("../agent/executor");
+  const { makeEmitter } = await import("../agent/events");
   try {
     let ready = false;
     for (let i = 0; i < 60; i++) { try { ready = (await fetch(base + "/api/projects")).ok; if (ready) break; } catch {} await sleep(200); }
@@ -40,10 +38,15 @@ async function main() {
     const project = await request("/api/projects", "POST", { name: "安装造价接口验收" });
     await request("/api/projects", "POST", { name: 23 }, 400);
     const id = project.id as string;
-    const sessionId = "session-36d1b1c7-2505-45f3-b31e-2c7bfc052c21";
-    await request(`/api/projects/${id}`, "PATCH", { harnessSessionId: sessionId });
-    assert.equal((await request(`/api/projects/${id}`)).harnessSessionId, sessionId);
-    await request(`/api/projects/${id}`, "PATCH", { harnessSessionId: "invalid-session" }, 400);
+    await request(`/api/projects/${id}`, "PATCH", { name: "安装造价接口验收（改名）" });
+    assert.equal((await request(`/api/projects/${id}`)).name, "安装造价接口验收（改名）");
+    await request(`/api/projects/${id}`, "PATCH", { name: "  " }, 400);
+    const runTool = async (tool: string, args: Record<string, unknown>) => {
+      const run = await prisma.agentRun.create({ data: { projectId: id, userMessage: `验收：${tool}` } });
+      const result = await executeTool({ projectId: id, runId: run.id, userId: "e2e", emit: makeEmitter(run.id) }, tool, args);
+      assert(!(result.observation as { error?: string } | null)?.error, JSON.stringify(result.observation));
+      return result.observation as Record<string, unknown>;
+    };
     await request(`/api/projects/${id}/settings`, "PUT", { 地区: "四川", 价格期: "2026-09", 品牌: "上上", 管理费率: "0%", 利润率: "0%", 税率: "9%", 暂列金额率: "0.5%" });
     await request(`/api/projects/${id}/settings`, "PUT", { 税率: "101%" }, 400);
     const { getPricePrefs } = await import("../dataset/service");
@@ -90,20 +93,8 @@ async function main() {
     await request(`/api/projects/${id}/settings`, "PUT", { 地区: "", 品牌: "" });
     const cleared = await getPricePrefs(id); assert.equal(cleared.region, undefined); assert.deepEqual(cleared.brands, []);
 
-    await cordis.plugin(SystemPrompt); await cordis.plugin(ToolRuntime, { mode: "native" });
-    // Synthetic approval is confined to this isolated verification context.
-    let approvalCount = 0;
-    cordis.provide("approval", { request: async () => { approvalCount++; return "allowed-once"; } });
-    const { apply } = await import(pathToFileURL(path.join(root, "harness/plugin/dist/host.mjs")).href) as { apply(ctx: Context, config: { businessUrl: string }): void };
-    apply(cordis, { businessUrl: base });
-    const result = await cordis.tools.execute({ name: "installation__project__read", arguments: { projectId: id }, callId: "cost-verification" as never, signal: new AbortController().signal });
-    assert.equal(result.isError, false, JSON.stringify(result.content));
-    assert(result.content.some(c => c.type === "text" && c.text.includes("recentChanges")));
-    const exported = await cordis.tools.execute({ name: "installation__report__exportExcel", arguments: { projectId: id }, callId: "cost-export" as never, signal: new AbortController().signal });
-    assert.equal(exported.isError, false, JSON.stringify(exported.content));
-    const exportText = exported.content.find(c => c.type === "text");
-    assert(exportText?.type === "text");
-    const artifactId = JSON.parse(exportText.text).observation.artifactId;
+    assert("recentChanges" in await runTool("project.read", {}));
+    const artifactId = (await runTool("report.exportExcel", {})).artifactId as string;
     const download = await fetch(`${base}/api/artifacts/${artifactId}/download`);
     assert.equal(download.status, 200);
     const exportedBook = new ExcelJS.Workbook();
@@ -127,21 +118,16 @@ async function main() {
     await request(`/api/receipts/${feeReceipt.id}/revert`, "POST");
     assert.equal((await request(`/api/projects/${id}/boq`)).find((i: { id: string }) => i.id === feeItem.id).totalPrice, "1200.5");
 
-    const updatedByAgent = await cordis.tools.execute({ name: "installation__boq__update", arguments: { projectId: id, patches: [{ id: feeItem.id, totalPrice: "1400" }] }, agent: { id: sessionId } as never, callId: "cost-fee" as never, signal: new AbortController().signal });
-    assert.equal(updatedByAgent.isError, false, JSON.stringify(updatedByAgent.content));
-    assert.equal(approvalCount, 1);
+    await runTool("boq.update", { patches: [{ id: feeItem.id, totalPrice: "1400" }] });
     assert.equal((await request(`/api/projects/${id}/boq`)).find((i: { id: string }) => i.id === feeItem.id).totalPrice, "1400");
-    const exportWithFee = await cordis.tools.execute({ name: "installation__report__exportExcel", arguments: { projectId: id }, callId: "cost-fee-export" as never, signal: new AbortController().signal });
-    assert.equal(exportWithFee.isError, false, JSON.stringify(exportWithFee.content));
-    const feeExportText = exportWithFee.content.find(c => c.type === "text"); assert(feeExportText?.type === "text");
-    const feeExportId = JSON.parse(feeExportText.text).observation.artifactId;
+    const feeExportId = (await runTool("report.exportExcel", {})).artifactId as string;
     const feeExport = new ExcelJS.Workbook(); await feeExport.xlsx.load(await fetch(`${base}/api/artifacts/${feeExportId}/download`).then(r => r.arrayBuffer()));
     assert.deepEqual(feeExport.worksheets.map(s => s.name), ["数据", "数据 (2)"]);
     assert.equal(feeExport.worksheets[1].getCell("H2").value, 1400);
     assert.equal(feeExport.worksheets[1].getCell("I2").value, "总价措施");
     assert.equal(feeExport.worksheets[1].getCell("J2").value, "措施清单.xlsx");
-    console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、官方 Harness 工具执行、总额编辑与撤销、同名源表 Excel 导出");
+    console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、Agent 工具执行、总额编辑与撤销、同名源表 Excel 导出");
     console.log(`隔离验收工程：${checkDir}`);
-  } finally { await cordis.fiber.dispose(); await prisma.$disconnect(); server.kill(); }
+  } finally { await prisma.$disconnect(); server.kill(); }
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { applySheetPatch, ensureInspection, mappingToView } from "@file/inspection";
+import type { SheetType } from "@file/excel";
 import { fromJson, toJson } from "@shared/json";
 
 // 用户在「列映射」视图手工调整后的保存：一列只能一个角色，null = 取消该角色。
@@ -12,7 +13,7 @@ export async function PATCH(
   const body = (await req.json()) as {
     sheetName?: string;
     columns?: Record<string, number | null>;
-    type?: "BOQ" | "QUOTATION" | "GENERIC";
+    type?: SheetType;
   };
   if (!body.sheetName)
     return NextResponse.json({ error: "sheetName required" }, { status: 400 });

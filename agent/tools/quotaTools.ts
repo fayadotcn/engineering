@@ -6,7 +6,7 @@ import { calcQuota, matchQuota, top2Quota, mainPriceKey, lineFromQuota, planPric
 import { getQuotaLibrary } from "@quota/service";
 import { findLibraryPrice, getPricePrefs } from "@dataset/service";
 import { getFact, setFact, parseRateValue } from "@project/facts";
-import { D } from "@cost-engine/money";
+import { D, fmtMoney } from "@cost-engine/money";
 import { isPricableItem } from "@shared/types";
 import type { BoqItemDTO, DiffRow } from "@shared/types";
 
@@ -263,7 +263,7 @@ registerTool({
 // 默认跳过（必须先补主材暂估价或另行询价），includeIncomplete 时才强写。
 registerTool({
   name: "quota.applyCalc",
-  description: "把定额测算综合单价写回清单项（需确认；缺主材价的不完整测算默认跳过，生成 Diff 与回执）",
+  description: "把定额测算综合单价写回清单项（需确认；缺主材价的不完整测算默认跳过，生成 Diff 与回执）。前置条件：台账须有「管理费率」「利润率」事实——用户报出数值时先用 project.setFact 写入（确实不计写 0%），缺失会直接报错",
   implemented: true,
   schema: z.object({
     includeIncomplete: z.boolean().optional().describe("true=连缺主材价的不完整测算也写回（不推荐）"),
@@ -344,7 +344,7 @@ registerTool({
 // 综合单价 = 组价方案合计，写回 pricingPlan + unitPrice（确认门）。
 registerTool({
   name: "quota.setItemQuota",
-  description: "人工为清单项指定定额子目：replace 替换主项（处置存疑匹配），append 增列配套子目（冲洗/支吊架/试压等）。综合单价按组价方案合计重算",
+  description: "人工为清单项指定定额子目：replace 替换主项（处置存疑匹配），append 增列配套子目（冲洗/支吊架/试压等）。综合单价按组价方案合计重算。前置条件同 quota.applyCalc（需管理费率/利润率事实），且定额主材缺价时会报错",
   implemented: true,
   schema: z.object({
     itemId: z.string().describe("清单项 id"),
@@ -368,10 +368,10 @@ registerTool({
         observation: { cleared: true },
         receipts: [{
           actionType: "BOQ_UPDATE",
-          summary: `清除组价方案：${it.name}（综合单价保留 ${it.unitPrice}）`,
+          summary: `清除组价方案：${it.name}（综合单价保留 ${fmtMoney(it.unitPrice)}）`,
           before, after,
         }],
-        message: `已清除「${it.name}」的组价方案，综合单价保留现值 ${it.unitPrice}`,
+        message: `已清除「${it.name}」的组价方案，综合单价保留现值 ${fmtMoney(it.unitPrice)}`,
       };
     }
 
@@ -422,10 +422,10 @@ registerTool({
       ],
       receipts: [{
         actionType: "PRICE_APPLY",
-        summary: `人工组价：${it.name} ${args.mode === "append" ? "增列" : "套用"} ${q.code} ${q.name}，综合单价 ${it.unitPrice} → ${price.toFixed(2)}（方案 ${plan.length} 条）`,
+        summary: `人工组价：${it.name} ${args.mode === "append" ? "增列" : "套用"} ${q.code} ${q.name}，综合单价 ${fmtMoney(it.unitPrice)} → ${fmtMoney(price)}（方案 ${plan.length} 条）`,
         before, after,
       }],
-      message: `「${it.name}」组价方案已更新（${plan.length} 条子目），综合单价 ${it.unitPrice} → ${price.toFixed(2)}` +
+      message: `「${it.name}」组价方案已更新（${plan.length} 条子目），综合单价 ${fmtMoney(it.unitPrice)} → ${fmtMoney(price)}` +
         (ownMain <= 0 && q.detail?.mainMaterial ? `；注意该子目主材「${q.detail.mainMaterial}」暂无暂估价` : ""),
     };
   },

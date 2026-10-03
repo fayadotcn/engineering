@@ -22,6 +22,8 @@ export interface FeeParams {
   provisionalAmount: Decimal;
   /** 增值税率；未确认税率时为 0，汇总明确提示 */
   taxRate: Decimal;
+  /** 附加税率（城建+教育附加等，基数：增值税额）；未设置计 0，不产生行 */
+  addonRate: Decimal;
   /** 定额人工费合计（定额测算写入台账）；null = 未测算，规费退回简化口径 */
   laborBase: Decimal | null;
   /** 官方系数措施费合计（cost.measureFees 计取写入台账）：脚手架/超高/高层增加费等 */
@@ -60,7 +62,12 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
   const priced = byType("分部分项").concat(byType("单价措施"));
   const unpricedCount = priced.filter((i) => D(i.unitPrice).isZero()).length;
 
-  const boqTotal = sum(byType("分部分项").map((i) => i.totalPrice));
+  // 含税价清单（源表「含税单价」列）：单价已含增值税，不进税前基数、不再叠税。
+  // 它们的合价在税金之后直接并入含税造价，行内注明口径。
+  const taxableParts = byType("分部分项").filter((i) => !i.taxIncluded);
+  const taxInclParts = byType("分部分项").filter((i) => i.taxIncluded);
+  const taxInclTotal = sum(taxInclParts.map((i) => i.totalPrice));
+  const boqTotal = sum(taxableParts.map((i) => i.totalPrice));
   const measureItems = byType("单价措施").concat(byType("总价措施"));
   const otherItems = byType("其他项目");
   const importedMeasure = sum(measureItems.map((i) => i.totalPrice));
@@ -87,14 +94,19 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
     : boqTotal.mul(params.regulationRate));
   const preTax = boqTotal.plus(measure).plus(other).plus(regulation);
   const tax = round2(preTax.mul(params.taxRate));
-  const grandTotal = preTax.plus(tax);
+  // 附加税（城建税+教育费附加+地方教育附加）：基数是增值税额，表-13 明示费率时计取
+  const addon = round2(tax.mul(params.addonRate));
+  const grandTotal = preTax.plus(tax).plus(addon).plus(taxInclTotal);
 
   const unset = (flag: boolean, hint: string) => (flag ? undefined : `未设置，按 0 计（可用「${hint}」写入台账）`);
   const rows: FeeRow[] = [
     {
       seq: "一", name: "分部分项工程费", basis: `Σ 分部分项合价（${byType("分部分项").length} 项）`,
       rate: null, amount: boqTotal.toFixed(2), level: "leaf",
-      note: unpricedCount ? `含 ${unpricedCount} 项未定价` : undefined,
+      note: [
+        unpricedCount ? `含 ${unpricedCount} 项未定价` : "",
+        taxInclParts.length ? `另 ${taxInclParts.length} 项含税单价（合价 ${taxInclTotal.toFixed(2)} 元）不计入税前基数，见下方含税价清单行` : "",
+      ].filter(Boolean).join("；") || undefined,
     },
     {
       seq: "二", name: "措施项目费",
@@ -143,10 +155,93 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
       rate: pct(params.taxRate), amount: tax.toFixed(2), level: "leaf",
       note: params.set.tax ? undefined : "税率未确认，暂按 0 计；请在计价设置中填写适用税率",
     },
+    ...(params.addonRate.gt(0) && addon.gt(0)
+      ? [{
+          seq: "六·附", name: "附加税", basis: "增值税 × 附加税率",
+          rate: pct(params.addonRate), amount: addon.toFixed(2), level: "leaf" as const,
+          note: "城建税/教育费附加/地方教育附加（表-13 口径）",
+        }]
+      : []),
+    ...(taxInclParts.length
+      ? [{
+          seq: "六·补", name: "含税价清单（单价已含税，不重复计税）",
+          basis: `Σ 含税价清单合价（${taxInclParts.length} 项）`,
+          rate: null, amount: taxInclTotal.toFixed(2), level: "leaf" as const,
+          note: "源表单价为含税价，税金已在单价内",
+        }]
+      : []),
     {
-      seq: "七", name: "含税工程造价", basis: "五 + 六",
+      seq: "七", name: "含税工程造价", basis: taxInclParts.length ? "五 + 六 + 含税价清单" : addon.gt(0) ? "五 + 六 + 附加税" : "五 + 六",
       rate: null, amount: grandTotal.toFixed(2), level: "total",
     },
   ];
   return { rows, grandTotal: grandTotal.toFixed(2), preTax: preTax.toFixed(2), unpricedCount };
+}
+
+/** 申报核对行：源表（表-04 汇总）申报值与本次计算的差异 */
+export interface DeclaredCheck {
+  label: string;
+  declared: number;
+  computed: number;
+  diff: number;
+  pct: number;
+  /** 差异含未计取分量（费率未设置）时的说明 */
+  note?: string;
+}
+
+/**
+ * 表-04 汇总真值 vs 本次取费结果。
+ * units 是台账「文件汇总:*」事实的 JSON 数组（每单位工程一行，
+ * 字段：分部分项工程费/措施项目费/其他项目费/规费/税金/合计）。
+ * 比对在「分部分项+措施」合并层与规费/税金/合计层做——
+ * 表-08 合并表的 feeType 归属与表-04 不一定同口径，总价核对是造价师的对账层。
+ * 只产出 declared>0 的行（源表没有的口径不判差）。
+ */
+export function compareDeclared(
+  rows: FeeRow[],
+  units: Record<string, unknown>[]
+): DeclaredCheck[] {
+  const sum = (k: string) =>
+    units.reduce((a, u) => a + (typeof u[k] === "number" ? (u[k] as number) : 0), 0);
+  const bySeq = new Map(rows.map((x) => [x.seq, Number(x.amount)]));
+  const rowBySeq = new Map(rows.map((x) => [x.seq, x]));
+  // 费率未设置的行无法重算——申报 vs 0 不是口径差异，是配置缺口；跳过该行
+  // 并在税金/合计上注明差异含未计取分量
+  const uncomputable = (seqs: string[]) =>
+    seqs.some((s) => /未设置|未确认/.test(rowBySeq.get(s)?.note ?? ""));
+  const hasAddonRow = rowBySeq.has("六·附");
+  const pairs: { label: string; declared: number; computed: number; skip?: boolean; note?: string }[] = [
+    {
+      label: "分部分项+措施项目费",
+      declared: sum("分部分项工程费") + sum("措施项目费"),
+      computed: (bySeq.get("一") ?? 0) + (bySeq.get("二") ?? 0),
+    },
+    {
+      label: "规费", declared: sum("规费"), computed: bySeq.get("四") ?? 0,
+      skip: uncomputable(["四"]),
+    },
+    // 表-04 的「税金」口径含附加税（部分文件另列附加税行）；计算侧 六=增值税、六·附=附加税。
+    // 附加税率未设置时不产出六·附行——该分量无法计算，从申报侧剔除同口径比较
+    {
+      label: "税金",
+      declared: sum("税金") + (hasAddonRow ? sum("附加税") : 0),
+      computed: (bySeq.get("六") ?? 0) + (bySeq.get("六·附") ?? 0),
+      skip: uncomputable(["六"]),
+      note: uncomputable(["四"]) ? "基数不含规费（规费费率未设置），差异含该部分" : undefined,
+    },
+    {
+      label: "合计", declared: sum("合计"), computed: bySeq.get("七") ?? 0,
+      note: uncomputable(["四", "六"]) ? "差异含未计取的规费/税金（费率未设置）" : undefined,
+    },
+  ];
+  return pairs
+    .filter((p) => p.declared > 0 && !p.skip)
+    .map((p) => {
+      const diff = p.computed - p.declared;
+      return {
+        label: p.label, declared: p.declared, computed: p.computed,
+        diff, pct: diff / p.declared,
+        ...(p.note ? { note: p.note } : {}),
+      };
+    });
 }

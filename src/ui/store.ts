@@ -1,42 +1,21 @@
 "use client";
 import { create } from "zustand";
-import type {
-  AgentEventDTO,
-  BoqItemDTO,
-  CostFactDTO,
-  ReceiptDTO,
-  WorkspaceView,
-} from "@shared/types";
+import type { AgentEventDTO, BoqItemDTO, CostFactDTO, ReceiptDTO, WorkspaceView } from "@shared/types";
 import { toast } from "./primitives";
+import { api, type AdjustSpec, type FileMeta, type NewItemPayload, type PastePatch, type ProjectSummary } from "./api";
+import { reduceEvent, replayRuns, type ConvBlock } from "./runEvents";
+import { FIXED_VIEWS, seedViews } from "./sections";
+import { isBusy, isDirty } from "./busy";
 
-export type ConvBlock =
-  | { type: "user"; text: string }
-  | { type: "agent"; text: string; runId: string }
-  | { type: "activity"; text: string; runId: string; live: boolean }
-  | { type: "thought"; text: string; runId: string; streamId?: string; live?: boolean }
-  | { type: "tool"; tool: string; status: string; ms?: number; runId: string; args?: string; resultMsg?: string }
-  | { type: "receipt"; receiptId: string; summary: string; actionType: string; runId: string }
-  | { type: "confirm"; confirmId: string; runId: string; tool: string; description: string; fileId?: string; decided?: "approved" | "rejected" }
-  | { type: "upload"; filename: string; uploading?: boolean }
-  | { type: "error"; text: string; runId?: string };
-
-/** 流程中间的视图：会随任务推送，但不该替用户把面板切过去（映射页绝大多数时候不该被看到）。 */
-const WORKING_VIEWS = new Set<WorkspaceView["kind"]>(["columnMapping", "document"]);
-const FIXED_VIEWS = new Set(["view:overview", "view:files", "view:boq", "view:facts", "view:receipts"]);
-let loadVersion = 0;
-
-interface FileMeta {
-  id: string;
-  filename: string;
-  kindLabel: string;
-  status: string;
-}
+export type { ConvBlock } from "./runEvents";
+export { FIXED_VIEWS } from "./sections";
+/** 发起任务时展开对话面板的事件名（Workbench 监听；任务进度在对话里看） */
+export const OPEN_CONV_EVENT = "cost:open-conv";
 
 interface State {
   projectId: string | null;
   projectName: string;
-  harnessSessionId: string;
-  summary: { itemCount: number; pricedCount: number; pricableCount: number; totalAmount: string; fees: { grandTotal: string; preTax: string; unpricedCount: number; rows: { seq: string; name: string; amount: string; note?: string }[] }; disciplines: { key: string; label: string; amount: string; share: number; count: number }[]; missingSettings: string[] } | null;
+  summary: ProjectSummary | null;
   loadingError: string | null;
   files: FileMeta[];
   facts: CostFactDTO[];
@@ -46,7 +25,9 @@ interface State {
   views: WorkspaceView[];
   activeViewId: string | null;
   lastViewEvent: string | null;
+  /** 有请求在途（上传、确认、事件流） */
   running: boolean;
+  /** 助手正在执行一条指令 */
   agentRunning: boolean;
   importRunning: boolean;
   mappingDirty: boolean;
@@ -61,17 +42,37 @@ interface State {
   boqQuery: string;
   boqOnlyUnpriced: boolean;
   boqFocusVersion: number;
+  /** 需要短暂高亮的清单行 id（补录/撤销/修改落点提示） */
+  flashIds: string[];
+  flashSeq: number;
+  /** 最近一轮降级到规则引擎的失败原因；null=模型正常或未配置 */
+  modelDown: string | null;
 
   init(projectId: string, refresh?: boolean): Promise<void>;
-  send(text: string): Promise<void>;
+  renameProject(name: string): Promise<boolean>;
+  send(text: string, extra?: Record<string, unknown>): Promise<void>;
   upload(file: File): Promise<void>;
   patchItem(id: string, patch: Partial<BoqItemDTO>): Promise<boolean>;
+  /** 删除清单行；成功返回回执 id（供「撤销」直接撤销），失败返回 null */
+  deleteItem(id: string): Promise<string | null>;
+  /** 批量删除清单行；一条回执原子撤销，成功返回回执 id */
+  deleteItems(ids: string[]): Promise<string | null>;
+  /** 多选行批量调价/调量（percent=增减百分比，value=统一设为）。 */
+  adjustItems(ids: string[], spec: AdjustSpec): Promise<{ receiptId: string | null; updated: number; desc: string } | null>;
+  /** Excel 粘回：把每行的工程量/综合单价/主材暂估价写回对应清单行，一条回执原子撤销。 */
+  pasteItems(patches: PastePatch[]): Promise<string | null>;
+  revertReceipt(receiptId: string): Promise<boolean>;
+  /** Ctrl+Z：撤销最近一条可撤销的修改 */
+  undoLast(): Promise<void>;
+  /** 从操作记录等定位清单行：切到清单视图并闪烁高亮目标行 */
+  focusBoqRows(ids: string[]): void;
+  createItem(payload: NewItemPayload): Promise<string | null>;
   reloadBoq(): Promise<void>;
   refreshMeta(): Promise<void>;
   streamRun(runId: string): Promise<void>;
   confirmImport(runId: string, approve: boolean): Promise<void>;
   setActiveView(id: string): void;
-  closeView(id: string): void;
+  closeView(id: string, fallbackId?: string): void;
   /** 同 id 视图替换（列映射保存后服务端回传的最新视图） */
   replaceView(view: WorkspaceView): void;
   setBoqQuery(q: string): void;
@@ -80,183 +81,154 @@ interface State {
   handleEvent(e: AgentEventDTO, runId: string): void;
 }
 
+type Get = () => State;
+
+let loadVersion = 0;
+/** 后台刷新竞态护栏：只允许最后发出的响应落地，否则先发的旧快照晚到会把刚撤销/删除的行"复活"。 */
+let boqSeq = 0;
+let metaSeq = 0;
+/** 撤销串行：快速连按 Ctrl+Z 时等前一次落地再挑下一条 */
+let undoing = false;
+
+const dispV = (v: string | null | undefined) => (v === null || v === undefined || v === "" ? "空" : v);
+const errText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+
+/** 让清单表里指定行短暂高亮：补录/撤销/修改落地后用户能看清数据回到了哪里 */
+function flashRows(ids: string[]) {
+  if (!ids.length) return;
+  useStore.setState((s) => ({ flashIds: ids, flashSeq: s.flashSeq + 1 }));
+  const seq = useStore.getState().flashSeq;
+  setTimeout(() => { if (useStore.getState().flashSeq === seq) useStore.setState({ flashIds: [] }); }, 2600);
+}
+
+/** 本地写入成功后把回执预塞进列表：Ctrl+Z 不必等 refreshMeta 一圈才有撤销目标。 */
+function noteReceipt(id: string | null | undefined, summary: string, affectedIds?: string[]) {
+  if (!id) return;
+  useStore.setState((s) => s.receipts.some((r) => r.id === id) ? s : {
+    receipts: [{ id, actionType: "USER_EDIT", summary, reversible: true, reverted: false, affectedIds, createdBy: "user", createdAt: new Date().toISOString() }, ...s.receipts],
+  });
+}
+
+/** 写入落地后后台刷新清单、汇总与操作记录；刷新失败单独提示，不影响已保存的结果。 */
+function refreshAfterWrite(get: Get, projectId: string, what: string) {
+  void (async () => {
+    await get().reloadBoq();
+    if (get().projectId !== projectId) return;
+    await get().refreshMeta();
+  })().catch(() => {
+    if (get().projectId !== projectId) return;
+    // 常驻提示真实状态：已经写进去了，只是界面没跟上——避免用户以为没保存而重复操作
+    useStore.setState({ loadingError: `${what}，刷新失败。请重新加载以查看最新数据。` });
+    toast.error(`${what}，数据刷新失败`, { label: "重新加载", onClick: () => void get().init(projectId, true) });
+  });
+}
+
+/**
+ * 工作区写操作的统一外壳：忙碌互斥 → 请求 → 落地回调 → 后台刷新；失败给出可重试的提示。
+ * 返回 write 的结果，失败或被互斥挡住时返回 null。
+ */
+async function userWrite<T>(get: Get, opts: { write: () => Promise<T>; done: string; onSaved: (data: T) => void; retry: () => void; fallback: string }): Promise<T | null> {
+  const projectId = get().projectId;
+  if (!projectId || isBusy(get())) return null;
+  useStore.setState({ saving: true });
+  try {
+    const data = await opts.write();
+    if (get().projectId !== projectId) return data;
+    opts.onSaved(data);
+    refreshAfterWrite(get, projectId, opts.done);
+    return data;
+  } catch (error) {
+    if (get().projectId === projectId) toast.error(errText(error, opts.fallback), { label: "重试", onClick: opts.retry });
+    return null;
+  } finally {
+    if (get().projectId === projectId) useStore.setState({ saving: false });
+  }
+}
+
+const INITIAL = {
+  projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [],
+  activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, importRunning: false,
+  mappingDirty: false, settingsDirty: false, boqDirty: false, saving: false, pendingViewId: null, closedViewIds: [],
+  loadingError: null, boqQuery: "", boqOnlyUnpriced: false, boqFocusVersion: 0, flashIds: [], flashSeq: 0, modelDown: null,
+} satisfies Partial<State>;
+
 export const useStore = create<State>((set, get) => ({
   projectId: null,
-  projectName: "",
-  harnessSessionId: "",
-  summary: null,
-  loadingError: null,
-  files: [],
-  facts: [],
-  receipts: [],
-  items: [],
-  blocks: [],
-  views: [],
-  activeViewId: null,
-  lastViewEvent: null,
-  running: false,
-  agentRunning: false,
-  importRunning: false,
-  mappingDirty: false,
-  settingsDirty: false,
-  boqDirty: false,
-  saving: false,
-  pendingViewId: null,
-  closedViewIds: [],
-  ready: false,
+  ...INITIAL,
   boqVersion: 0,
-  boqQuery: "",
-  boqOnlyUnpriced: false,
-  boqFocusVersion: 0,
 
   async init(projectId, refresh = false) {
     const version = ++loadVersion;
-    if (!refresh) set({ projectId, projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [], activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, importRunning: false, mappingDirty: false, settingsDirty: false, boqDirty: false, saving: false, pendingViewId: null, closedViewIds: [], loadingError: null, boqQuery: "", boqOnlyUnpriced: false, boqFocusVersion: 0 });
+    if (!refresh) set({ projectId, ...INITIAL });
     try {
-    const [p, items, runs, summary] = await Promise.all([
-      fetch(`/api/projects/${projectId}`).then(async r => { if (!r.ok) throw new Error("项目不存在或暂时无法读取"); return r.json(); }),
-      fetch(`/api/projects/${projectId}/boq`).then(async r => { if (!r.ok) throw new Error("清单读取失败"); return r.json(); }),
-      fetch(`/api/projects/${projectId}/runs`).then(async r => { if (!r.ok) throw new Error("任务记录读取失败"); return r.json(); }),
-      fetch(`/api/projects/${projectId}/summary`).then(async r => { if (!r.ok) throw new Error("汇总读取失败"); return r.json(); }),
-    ]);
-    if (get().projectId !== projectId || version !== loadVersion) return;
-
-    // replay persisted runs into conversation blocks + workspace views
-    const blocks: ConvBlock[] = [];
-    const views: WorkspaceView[] = [];
-    let lastViewEvent: string | null = null;
-    for (const run of runs ?? []) {
-      const ingest = run.userMessage.match(/(?:分析并|重新)导入文件「(.+)」/);
-      blocks.push(
-        ingest
-          ? { type: "upload", filename: ingest[1] }
-          : { type: "user", text: run.userMessage }
-      );
-      for (const e of run.events as AgentEventDTO[]) {
-        const pl = e.payload as Record<string, never>;
-        if (e.type === "activity")
-          blocks.push({ type: "activity", text: pl.text, runId: run.id, live: false });
-        else if (e.type === "thought")
-          blocks.push({ type: "thought", text: pl.text, runId: run.id });
-        else if (e.type === "tool_started")
-          blocks.push({ type: "tool", tool: pl.tool, status: "running", runId: run.id, args: pl.args });
-        else if (e.type === "tool_finished") {
-          const b = [...blocks].reverse().find(
-            (x) => x.type === "tool" && x.tool === pl.tool && x.status === "running"
-          );
-          if (b && b.type === "tool") { b.status = pl.status; b.ms = pl.ms; b.resultMsg = pl.message; }
-        } else if (e.type === "message")
-          blocks.push({ type: "agent", text: pl.text, runId: run.id });
-        else if (e.type === "receipt")
-          blocks.push({
-            type: "receipt", receiptId: pl.receiptId, summary: pl.summary,
-            actionType: pl.actionType, runId: run.id,
-          });
-        else if (e.type === "error") blocks.push({ type: "error", text: pl.text, runId: run.id });
-        else if (e.type === "confirm_request")
-          blocks.push({
-            type: "confirm", confirmId: pl.confirmId, runId: run.id,
-            tool: pl.tool, description: pl.description,
-            fileId: (pl.args as { fileId?: string } | undefined)?.fileId,
-          });
-        else if (e.type === "confirm_resolved") {
-          const b = [...blocks].reverse().find(
-            (x) => x.type === "confirm" && x.confirmId === pl.confirmId
-          );
-          if (b && b.type === "confirm")
-            b.decided = pl.approved ? "approved" : "rejected";
-        }
-        else if (e.type === "workspace_patch") {
-          const v = pl.view as WorkspaceView;
-          if (!v.kind) continue;
-          const idx = views.findIndex((x) => x.id === v.id);
-          if (idx >= 0) views[idx] = v; else views.push(v);
-          // 重放只把视图挂回所属对象，不决定用户当前看什么
-          lastViewEvent = `${run.id}:${e.seq}`;
-        }
-      }
-      // 超时或失败的任务不能再显示为可批准的导入。
-      if (run.status && run.status !== "AWAITING_CONFIRM" && run.status !== "RUNNING") {
-        for (const b of blocks) if (b.type === "confirm" && b.runId === run.id && !b.decided) b.decided = "rejected";
-      }
-    }
-
-    // 常驻对象视图与 Agent 推送的视图共用同一套 id（view:boq / view:files / view:facts），
-    // 因此重复时不会出现同一对象两个标签。
-    const seedViews: WorkspaceView[] = [
-      { kind: "overview", id: "view:overview", title: "项目总览" },
-      { kind: "fileList", id: "view:files", title: "项目资料" },
-      { kind: "boqTable", id: "view:boq", title: "工程清单" },
-      { kind: "factList", id: "view:facts", title: "计价条件", facts: p.facts ?? [] },
-      { kind: "receipts", id: "view:receipts", title: "变更记录" },
-    ];
-    const projectViews: WorkspaceView[] = [
-      ...seedViews.filter(v => !views.some(x => x.id === v.id)),
-      ...views,
-    ].filter(v => !get().closedViewIds.includes(v.id) || FIXED_VIEWS.has(v.id));
-    // 看什么是用户的选择：Agent 推来的视图只入列，不切换当前打开的结果
-    const opening = get().activeViewId ?? "view:boq";
-    set({
-      projectName: p.name,
-      harnessSessionId: p.harnessSessionId ?? "",
-      files: p.files ?? [],
-      facts: p.facts ?? [],
-      receipts: p.receipts ?? [],
-      items: items ?? [],
-      summary,
-      blocks,
-      views: projectViews,
-      activeViewId: opening.startsWith("empty:") || projectViews.some(v => v.id === opening) ? opening : "view:boq",
-      lastViewEvent,
-      ready: true,
-      loadingError: null,
-    });
-    } catch (error) {
-      if (get().projectId === projectId && version === loadVersion) set({ ready: true, loadingError: error instanceof Error ? error.message : "加载失败" });
-    }
-  },
-
-  async send(text) {
-    const { projectId, running, agentRunning, importRunning, saving, mappingDirty, settingsDirty, boqDirty } = get();
-    if (!projectId || running || agentRunning || importRunning || saving || !get().ready || !text.trim()) return;
-    if (mappingDirty || settingsDirty || boqDirty) { toast.info("请先保存或取消当前编辑，再发起任务"); return; }
-    if (window.parent === window) { toast.info("请在 Harness 的造价工作台中发起任务（主入口端口 3210）"); return; }
-    const harnessOrigin = sessionStorage.getItem("installation:harnessOrigin");
-    if (!harnessOrigin) { toast.error("Harness 会话连接未建立，请从主入口打开工作台"); return; }
-    set((s) => ({
-      running: true,
-      blocks: [...s.blocks, { type: "user", text }],
-    }));
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { window.removeEventListener("message", receive); reject(new Error("Harness 未响应，请检查主面板连接")); }, 30000);
-        const receive = async (event: MessageEvent) => {
-          if (event.origin !== harnessOrigin || event.source !== window.parent || event.data?.projectId !== projectId) return;
-          if (!["installation:taskFinished", "installation:taskError"].includes(event.data?.type)) return;
-          clearTimeout(timer); window.removeEventListener("message", receive);
-          if (event.data.type === "installation:taskError") { reject(new Error(event.data.text)); return; }
-          resolve();
-        };
-        window.addEventListener("message", receive);
-        window.parent.postMessage({ type: "installation:task", projectId, text }, harnessOrigin);
+      // 任何一路请求挂死都不能让工作台停在"正在读取"：20s 超时 → loadingError + 重试
+      const t = AbortSignal.timeout(20000);
+      const [p, items, runs, summary] = await Promise.all([api.project(projectId, t), api.boq(projectId, t), api.runs(projectId, t), api.summary(projectId, t)]);
+      if (get().projectId !== projectId || version !== loadVersion) return;
+      const replay = replayRuns(runs);
+      const previous = get().views;
+      const views = [...seedViews(p.facts ?? []).filter((v) => !replay.views.some((x) => x.id === v.id)), ...replay.views]
+        // 用户在清单视图上加的筛选是操作现场，后台刷新重建视图时带回来
+        .map((v) => {
+          const prev = previous.find((x) => x.id === v.id);
+          return v.kind === "boqTable" && prev?.kind === "boqTable" && prev.filter ? { ...v, filter: prev.filter } : v;
+        })
+        .filter((v) => !get().closedViewIds.includes(v.id) || FIXED_VIEWS.has(v.id));
+      const opening = get().activeViewId ?? "view:overview";
+      set({
+        projectName: p.name, files: p.files ?? [], facts: p.facts ?? [], receipts: p.receipts ?? [], items: items ?? [], summary,
+        // 后台刷新时保留进行中的实时块（流式预览、上传占位），否则正在跑的任务会闪回
+        blocks: refresh && get().agentRunning ? get().blocks : replay.blocks,
+        views, lastViewEvent: replay.lastViewEvent, modelDown: replay.modelDown, ready: true, loadingError: null,
+        activeViewId: opening.startsWith("empty:") || views.some((v) => v.id === opening) ? opening : "view:overview",
       });
     } catch (error) {
-      if (get().projectId !== projectId) return;
-      set((s) => ({
-        blocks: [...s.blocks, { type: "error", text: error instanceof Error ? error.message : "请求失败" }],
-      }));
-      toast.error(error instanceof Error ? error.message : "请求失败");
-    } finally { if (get().projectId === projectId) set({ running: false }); }
+      if (get().projectId === projectId && version === loadVersion) set({ ready: true, loadingError: errText(error, "加载失败") });
+    }
   },
 
-  async streamRun(runId: string) {
+  async renameProject(name) {
+    const projectId = get().projectId;
+    if (!projectId || !name.trim()) return false;
+    try {
+      await api.renameProject(projectId, name.trim());
+      if (get().projectId === projectId) set({ projectName: name.trim() });
+      return true;
+    } catch (error) {
+      toast.error(errText(error, "改名失败"));
+      return false;
+    }
+  },
+
+  async send(text, extra) {
+    const { projectId } = get();
+    if (!projectId || isBusy(get()) || !get().ready || !text.trim()) return;
+    if (isDirty(get())) { toast.info("请先保存或取消当前编辑，再发起任务"); return; }
+    set((s) => ({ running: true, agentRunning: true, blocks: [...s.blocks, { type: "user", text }] }));
+    // 任务进度在对话面板里——面板收起时先展开，用户不至于「点了没反应」
+    window.dispatchEvent(new Event(OPEN_CONV_EVENT));
+    try {
+      const { runId } = await api.startRun(projectId, text, extra);
+      if (get().projectId !== projectId) return;
+      set((s) => ({ blocks: s.blocks.map((b, i) => (i === s.blocks.length - 1 && b.type === "user" ? { ...b, runId } : b)) }));
+      await get().streamRun(runId);
+      if (get().projectId !== projectId) return;
+      await Promise.all([get().refreshMeta(), get().reloadBoq()]);
+    } catch (error) {
+      if (get().projectId !== projectId) return;
+      set((s) => ({ blocks: [...s.blocks, { type: "error", text: errText(error, "请求失败") }] }));
+    } finally {
+      if (get().projectId === projectId) set({ running: false, agentRunning: false });
+    }
+  },
+
+  async streamRun(runId) {
     const projectId = get().projectId;
     // 事件服务端已持久化并支持重放（seq 递增）——断线重连后按 seq 去重
     const seen = new Set<number>();
-    let attempts = 0;
-    for (;;) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await fetch(`/api/runs/${runId}/stream`);
+        const res = await fetch(api.streamUrl(runId));
         if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -276,7 +248,8 @@ export const useStore = create<State>((set, get) => ({
             if (e.seq !== undefined && seen.has(e.seq)) continue;
             if (e.seq !== undefined) seen.add(e.seq);
             get().handleEvent(e, runId);
-            const awaiting = e.type === "confirm_request" && get().blocks.some(b => b.type === "confirm" && b.confirmId === e.payload.confirmId && !b.decided);
+            // 停在确认门或任务结束：交还控制权，确认后由 confirmImport 重新接流
+            const awaiting = e.type === "confirm_request" && get().blocks.some((b) => b.type === "confirm" && b.confirmId === e.payload.confirmId && !b.decided);
             if (awaiting || e.type === "run_finished") {
               await reader.cancel();
               if (get().projectId === projectId) set({ running: false });
@@ -287,142 +260,230 @@ export const useStore = create<State>((set, get) => ({
         throw new Error("事件流提前结束");
       } catch {
         if (get().projectId !== projectId) return;
-        if (++attempts > 1) {
-          if (get().projectId === projectId) set((s) => ({
-            blocks: [...s.blocks, { type: "error", text: "导入进度连接中断，请检查项目资料状态", runId }],
-          }));
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 600)); // 静默重连一次
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 600)); // 静默重连一次
       }
     }
-    if (get().projectId === projectId) set({ running: false });
+    if (get().projectId === projectId)
+      set((s) => ({ running: false, blocks: [...s.blocks, { type: "error", text: "与任务的连接中断，刷新页面可查看最新进度", runId }] }));
   },
 
   async confirmImport(runId, approve) {
     const projectId = get().projectId;
-    if (!projectId || get().running || get().agentRunning || get().importRunning || get().saving || get().boqDirty || get().settingsDirty || get().mappingDirty) return;
-    set({ running: true });
+    if (!projectId || isBusy(get()) || isDirty(get())) return;
+    set({ running: true, agentRunning: true });
     try {
-      const res = await fetch(`/api/runs/${runId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approve }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "确认失败");
+      await api.confirmRun(runId, approve);
       if (get().projectId !== projectId) return;
-      set(s => ({ blocks: s.blocks.map(b => b.type === "confirm" && b.runId === runId ? { ...b, decided: approve ? "approved" : "rejected" } : b) }));
-      if (approve) await get().streamRun(runId);
+      set((s) => ({ blocks: s.blocks.map((b) => (b.type === "confirm" && b.runId === runId ? { ...b, decided: approve ? "approved" : "rejected" } : b)) }));
+      await get().streamRun(runId);
       if (get().projectId !== projectId) return;
       await Promise.all([get().refreshMeta(), get().reloadBoq()]);
-      if (get().projectId !== projectId) return;
-      if (!get().blocks.some(b => b.type === "error" && b.runId === runId)) toast.success(approve ? "导入完成，请查看工程清单与项目资料" : "已取消本次导入");
-    } catch (error) { if (get().projectId === projectId) toast.error(error instanceof Error ? error.message : "确认失败"); }
-    finally { if (get().projectId === projectId) set({ running: false }); }
+    } catch (error) {
+      if (get().projectId === projectId) toast.error(errText(error, "确认失败"));
+    } finally {
+      if (get().projectId === projectId) set({ running: false, agentRunning: false });
+    }
   },
 
   async upload(file) {
     const { projectId } = get();
-    if (!projectId || get().running || get().agentRunning || get().importRunning || get().saving || !get().ready) return;
-    if (get().mappingDirty || get().settingsDirty || get().boqDirty) { toast.info("请先保存或取消当前编辑，再导入资料"); return; }
-    set((s) => ({
-      running: true,
-      blocks: [...s.blocks, { type: "upload", filename: file.name, uploading: true }],
+    if (!projectId || isBusy(get()) || !get().ready) return;
+    if (isDirty(get())) { toast.info("请先保存或取消当前编辑，再导入资料"); return; }
+    const mark = (runId?: string) => set((s) => ({
+      blocks: s.blocks.map((b) => (b.type === "upload" && b.filename === file.name && b.uploading ? { ...b, uploading: false, runId } : b)),
     }));
+    set((s) => ({ running: true, importRunning: true, blocks: [...s.blocks, { type: "upload", filename: file.name, uploading: true }] }));
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("filename", file.name);
-      const res = await fetch(`/api/projects/${projectId}/files`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) throw new Error((await res.json()).error ?? `上传失败（${res.status}）`);
-      const { runId, duplicate, file: existed } = await res.json();
+      const { runId, duplicate, file: existed } = await api.upload(projectId, file);
       if (get().projectId !== projectId) return;
       if (duplicate) {
-        // 内容相同的文件已导入过：去掉上传占位块，不占用 run
-        set((s) => ({
-          running: false,
-          blocks: s.blocks.filter(
-            (b) => !(b.type === "upload" && b.filename === file.name && b.uploading)
-          ),
-        }));
+        set((s) => ({ blocks: s.blocks.filter((b) => !(b.type === "upload" && b.filename === file.name && b.uploading)) }));
         toast.success(`「${existed?.filename ?? file.name}」与已上传文件内容相同，已跳过`);
         return;
       }
-      // 上传完成，进入解析阶段（事件流接管反馈）
-      set((s) => ({
-        blocks: s.blocks.map((b) =>
-          b.type === "upload" && b.filename === file.name ? { ...b, uploading: false } : b
-        ),
-      }));
+      mark(runId ?? undefined);
       await get().refreshMeta();
       if (runId) await get().streamRun(runId);
-      else set({ running: false });
       if (get().projectId !== projectId) return;
       await Promise.all([get().refreshMeta(), get().reloadBoq()]);
     } catch (error) {
       if (get().projectId !== projectId) return;
-      set((s) => ({
-        running: false,
-        blocks: [
-          ...s.blocks.map((b) =>
-            b.type === "upload" && b.filename === file.name ? { ...b, uploading: false } : b
-          ),
-          { type: "error", text: `「${file.name}」：${error instanceof Error ? error.message : "上传失败，请重试"}` },
-        ],
-      }));
+      mark();
+      set((s) => ({ blocks: [...s.blocks, { type: "error", text: `「${file.name}」：${errText(error, "上传失败，请重试")}` }] }));
+    } finally {
+      if (get().projectId === projectId) set({ running: false, importRunning: false });
     }
   },
 
   async patchItem(id, patch) {
-    const projectId = get().projectId;
-    if (!projectId || get().saving || get().running || get().agentRunning || get().importRunning) return false;
-    set({ saving: true });
-    let saved = false;
-    try {
-    const res = await fetch(`/api/boq-items/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch),
+    const data = await userWrite(get, {
+      write: () => api.patchItem(id, patch),
+      done: "清单修改已保存",
+      fallback: "保存失败，请重试",
+      retry: () => void get().patchItem(id, patch),
+      onSaved: (data) => {
+        // 乐观合并服务端结果（含换算的合价等），后台刷新兜底
+        set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, ...patch, ...(data?.item ?? {}) } : i)) }));
+        flashRows([id]);
+        if (!data?.receiptId) return;
+        const rid = data.receiptId;
+        const name = data.item?.name ?? "清单行";
+        noteReceipt(rid, `用户在工作区修改清单行「${name}」`, [id]);
+        const [first, ...extras] = data.changes ?? [];
+        const detail = first
+          ? `：${first.label} ${dispV(first.from)} → ${dispV(first.to)}${extras.length ? (extras.every((c) => c.field === "totalPrice") ? "，合价已联动" : ` 等${extras.length + 1}处`) : ""}`
+          : "";
+        toast.success(`已修改「${name}」${detail}`, { label: "撤销", onClick: () => void get().revertReceipt(rid).then((ok) => { if (ok) toast.success("已撤销该修改"); }) });
+      },
     });
-    if (!res.ok) throw new Error((await res.json()).error ?? "保存失败，请重试");
-    saved = true;
-    if (get().projectId !== projectId) return true;
-    await get().reloadBoq();
-    if (get().projectId !== projectId) return true;
-    await get().refreshMeta();
-    return true;
+    return data !== null;
+  },
+
+  async deleteItem(id) {
+    const name = get().items.find((i) => i.id === id)?.name ?? "";
+    const data = await userWrite(get, {
+      write: () => api.deleteItem(id),
+      done: "已删除",
+      fallback: "删除失败，请重试",
+      retry: () => void get().deleteItem(id),
+      onSaved: ({ receiptId }) => {
+        noteReceipt(receiptId, `用户在工作区删除清单行「${name}」`, [id]);
+        set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
+      },
+    });
+    return data?.receiptId ?? null;
+  },
+
+  async deleteItems(ids) {
+    if (!ids.length) return null;
+    const data = await userWrite(get, {
+      write: () => api.deleteItems(ids),
+      done: "已删除",
+      fallback: "删除失败，请重试",
+      retry: () => void get().deleteItems(ids),
+      onSaved: ({ receiptId }) => {
+        noteReceipt(receiptId, `用户在工作区批量删除 ${ids.length} 行清单`, ids);
+        const gone = new Set(ids);
+        set((s) => ({ items: s.items.filter((i) => !gone.has(i.id)) }));
+      },
+    });
+    return data?.receiptId ?? null;
+  },
+
+  async adjustItems(ids, spec) {
+    if (!ids.length) return null;
+    const FL = { unitPrice: "综合单价", quantity: "工程量", mainMaterialPrice: "主材暂估价" } as const;
+    const desc = spec.mode === "percent"
+      ? `${FL[spec.field]}统一${Number(spec.value) < 0 ? "下浮" : "上浮"} ${Math.abs(Number(spec.value))}%`
+      : `${FL[spec.field]}统一设为 ${spec.value}`;
+    const data = await userWrite(get, {
+      write: () => api.adjustItems(ids, spec),
+      done: "已调整",
+      fallback: "调整失败，请重试",
+      retry: () => void get().adjustItems(ids, spec),
+      onSaved: (d) => {
+        noteReceipt(d.receiptId, `用户在工作区批量调整 ${d.updated ?? ids.length} 行清单：${desc}`, d.affectedIds);
+        flashRows(d.affectedIds ?? []);
+      },
+    });
+    return data ? { receiptId: data.receiptId ?? null, updated: data.updated ?? ids.length, desc } : null;
+  },
+
+  async pasteItems(patches) {
+    if (!patches.length) return null;
+    const data = await userWrite(get, {
+      write: () => api.pasteItems(patches),
+      done: "已粘贴",
+      fallback: "粘贴失败，请重试",
+      retry: () => void get().pasteItems(patches),
+      onSaved: (d) => {
+        noteReceipt(d.receiptId, `用户在工作区粘贴更新 ${d.updated ?? patches.length} 行清单（工程量/综合单价）`, d.affectedIds);
+        flashRows(d.affectedIds ?? []);
+      },
+    });
+    return data?.receiptId ?? null;
+  },
+
+  async createItem(payload) {
+    const projectId = get().projectId;
+    if (!projectId) return null;
+    const data = await userWrite(get, {
+      write: () => api.createItem(projectId, payload),
+      done: "已补录",
+      fallback: "添加失败，请重试",
+      retry: () => void get().createItem(payload),
+      onSaved: ({ item, receiptId }) => {
+        noteReceipt(receiptId, `用户在工作区${payload.insertAfter ? "复制" : "补录"}清单行「${payload.name}」`, item?.id ? [item.id] : undefined);
+        if (item?.id) flashRows([item.id]);
+      },
+    });
+    return data?.receiptId ?? null;
+  },
+
+  async revertReceipt(receiptId) {
+    const projectId = get().projectId;
+    if (!projectId) return false;
+    try {
+      const { affectedIds, restored, removedIds } = await api.revertReceipt(receiptId);
+      if (get().projectId !== projectId) return true;
+      // 立即合并撤销结果：改回的行原地恢复，补录行移除，被删行重挂（位置由后台刷新校正）
+      const rm = new Set(removedIds ?? []);
+      const byId = new Map((restored ?? []).map((r) => [r.id, r]));
+      if (rm.size || byId.size) set((s) => ({
+        items: [
+          ...s.items.filter((i) => !rm.has(i.id)).map((i) => byId.get(i.id) ?? i),
+          ...[...byId.values()].filter((r) => !s.items.some((i) => i.id === r.id)),
+        ],
+      }));
+      flashRows(affectedIds ?? []);
+      refreshAfterWrite(get, projectId, "已撤销");
+      return true;
     } catch (error) {
-      if (get().projectId === projectId) {
-        if (saved) set({ loadingError: "清单修改已保存，刷新失败。请重新加载以查看最新数据。" });
-        toast.error(saved ? "修改已保存，数据刷新失败，请重新加载" : error instanceof Error ? error.message : "保存失败，请重试");
-      }
-      return saved;
+      if (get().projectId === projectId) toast.error(errText(error, "撤销失败，请重试"));
+      return false;
     }
-    finally { if (get().projectId === projectId) set({ saving: false }); }
+  },
+
+  async undoLast() {
+    const projectId = get().projectId;
+    if (!projectId || undoing || isBusy(get())) return;
+    undoing = true;
+    try {
+      // 先按当前列表挑；后台 refreshMeta 最多等 300ms，可能同步到助手刚写的更新回执
+      const meta = get().refreshMeta().catch(() => {});
+      const pick = () => get().receipts.find((r) => r.reversible && !r.reverted && r.actionType !== "REVERT");
+      let target = pick();
+      if (!target) await meta;
+      else await Promise.race([meta, new Promise((r) => setTimeout(r, 300))]);
+      if (get().projectId !== projectId) return;
+      target = pick() ?? target;
+      if (!target) { toast.info("没有可以撤销的修改"); return; }
+      if (await get().revertReceipt(target.id)) toast.success(`已撤销：${target.summary.replace(/^用户在工作区/, "")}`);
+    } finally { undoing = false; }
+  },
+
+  focusBoqRows(ids) {
+    if (!ids.length) return;
+    if (get().saving || isDirty(get())) { toast.info("请先保存或取消当前编辑，再定位清单项"); return; }
+    get().setActiveView("view:boq");
+    flashRows(ids);
   },
 
   async reloadBoq() {
     const { projectId } = get();
     if (!projectId) return;
-    const [items, summary] = await Promise.all([
-      fetch(`/api/projects/${projectId}/boq`).then(async r => { if (!r.ok) throw new Error("清单读取失败"); return r.json(); }),
-      fetch(`/api/projects/${projectId}/summary`).then(async r => { if (!r.ok) throw new Error("汇总读取失败"); return r.json(); }),
-    ]);
-    if (get().projectId === projectId) set((s) => ({ items, summary, boqVersion: s.boqVersion + 1 }));
+    const seq = ++boqSeq;
+    const [items, summary] = await Promise.all([api.boq(projectId), api.summary(projectId)]);
+    if (get().projectId === projectId && seq === boqSeq) set((s) => ({ items, summary, boqVersion: s.boqVersion + 1 }));
   },
 
   async refreshMeta() {
     const { projectId } = get();
     if (!projectId) return;
-    const p = await fetch(`/api/projects/${projectId}`).then(async r => { if (!r.ok) throw new Error("项目资料读取失败"); return r.json(); });
-    if (get().projectId !== projectId) return;
-    set({
-      projectName: p.name,
-      harnessSessionId: p.harnessSessionId ?? "",
-      files: p.files ?? [],
-      facts: p.facts ?? [],
-      receipts: p.receipts ?? [],
-    });
+    const seq = ++metaSeq;
+    const p = await api.project(projectId);
+    if (get().projectId !== projectId || seq !== metaSeq) return;
+    set({ projectName: p.name, files: p.files ?? [], facts: p.facts ?? [], receipts: p.receipts ?? [] });
   },
 
   setBoqQuery(q) {
@@ -430,200 +491,45 @@ export const useStore = create<State>((set, get) => ({
   },
 
   gotoBoqItem(key) {
-    if (get().saving || get().boqDirty || get().mappingDirty || get().settingsDirty) { toast.info("请先保存或取消当前编辑，再定位清单项"); return; }
-    set((s) => {
-      const views = s.views.some((v) => v.id === "view:boq")
-        ? s.views.map(v => v.id === "view:boq" && v.kind === "boqTable" ? { ...v, filter: undefined } : v)
-        : [...s.views, { kind: "boqTable", id: "view:boq", title: "工程量清单" } as WorkspaceView];
-      return { views, boqQuery: key, boqOnlyUnpriced: false, boqFocusVersion: s.boqFocusVersion + 1 };
-    });
+    if (get().saving || isDirty(get())) { toast.info("请先保存或取消当前编辑，再定位清单项"); return; }
+    set((s) => ({
+      views: s.views.map((v) => (v.id === "view:boq" && v.kind === "boqTable" ? { ...v, filter: undefined } : v)),
+      boqQuery: key, boqOnlyUnpriced: false, boqFocusVersion: s.boqFocusVersion + 1,
+    }));
     get().setActiveView("view:boq");
   },
 
   setActiveView(id) {
-    if (id !== get().activeViewId && get().saving) { toast.info("正在保存，请稍候再切换页面"); return; }
-    if (id !== get().activeViewId && (get().mappingDirty || get().settingsDirty || get().boqDirty)) { set({ pendingViewId: id }); return; }
-    set(s => ({ activeViewId: id, closedViewIds: s.closedViewIds.filter(v => v !== id) }));
+    if (id === get().activeViewId) return;
+    if (get().saving) { toast.info("正在保存，请稍候再切换页面"); return; }
+    if (isDirty(get())) { set({ pendingViewId: id }); return; }
+    set((s) => ({ activeViewId: id, closedViewIds: s.closedViewIds.filter((v) => v !== id) }));
   },
 
   replaceView(view) {
-    set((s) => ({
-      views: s.views.some(v => v.id === view.id) ? s.views.map((v) => (v.id === view.id ? view : v)) : [...s.views, view],
-    }));
+    set((s) => ({ views: s.views.some((v) => v.id === view.id) ? s.views.map((v) => (v.id === view.id ? view : v)) : [...s.views, view] }));
   },
 
-  closeView(id) {
+  closeView(id, fallbackId) {
     if (FIXED_VIEWS.has(id)) return;
-    if (get().activeViewId === id && (get().mappingDirty || get().settingsDirty || get().boqDirty || get().saving)) return;
+    if (get().activeViewId === id && (isDirty(get()) || get().saving)) return;
     set((s) => {
-      const idx = s.views.findIndex((v) => v.id === id);
-      if (idx < 0) return {};
+      if (!s.views.some((v) => v.id === id)) return {};
       const views = s.views.filter((v) => v.id !== id);
-      const activeViewId =
-        s.activeViewId === id
-          ? "view:boq"
-          : s.activeViewId;
+      const activeViewId = s.activeViewId !== id
+        ? s.activeViewId
+        : fallbackId && (views.some((v) => v.id === fallbackId) || fallbackId.startsWith("empty:")) ? fallbackId : "view:overview";
       return { views, activeViewId, closedViewIds: [...s.closedViewIds, id] };
     });
   },
 
   handleEvent(e, runId) {
-    const p = e.payload as Record<string, never>;
-    set((s) => {
-      switch (e.type) {
-        case "activity": {
-          // replace last live activity if same run, else append
-          const blocks = [...s.blocks];
-          const last = blocks[blocks.length - 1];
-          if (last?.type === "activity" && last.runId === runId && last.live) {
-            blocks[blocks.length - 1] = { ...last, live: false };
-          }
-          blocks.push({ type: "activity", text: p.text, runId, live: true });
-          return { blocks };
-        }
-        case "activity_live": {
-          // 心跳：原地改写当前 live activity 的文案，不产生新时间线行
-          const blocks = [...s.blocks];
-          const last = blocks[blocks.length - 1];
-          if (last?.type === "activity" && last.runId === runId && last.live) {
-            blocks[blocks.length - 1] = { ...last, text: p.text };
-            return { blocks };
-          }
-          blocks.push({ type: "activity", text: p.text, runId, live: true });
-          return { blocks };
-        }
-        case "thought_delta": {
-          // 模型流式增量：同 streamId 原位更新，呈现打字机效果
-          const sid = (p.streamId as string) ?? "s0";
-          const blocks = [...s.blocks];
-          const i = blocks.findIndex(
-            (b) => b.type === "thought" && b.runId === runId && b.streamId === sid
-          );
-          const blk = { type: "thought" as const, text: p.text, runId, streamId: sid, live: true };
-          if (i >= 0) blocks[i] = blk; else blocks.push(blk);
-          return { blocks };
-        }
-        case "thought": {
-          // 持久化 thought：同 streamId 的流式预览块落定；否则追加
-          const sid = p.streamId as string | undefined;
-          if (sid) {
-            const blocks = [...s.blocks];
-            const i = blocks.findIndex(
-              (b) => b.type === "thought" && b.runId === runId && b.streamId === sid
-            );
-            if (i >= 0) {
-              blocks[i] = { type: "thought", text: p.text, runId, streamId: sid, live: false };
-              return { blocks };
-            }
-          }
-          return { blocks: [...s.blocks, { type: "thought", text: p.text, runId }] };
-        }
-        case "tool_started":
-          return {
-            blocks: [
-              ...s.blocks,
-              { type: "tool", tool: p.tool, status: "running", runId, args: p.args },
-            ],
-          };
-        case "tool_finished": {
-          const blocks = [...s.blocks];
-          for (let i = blocks.length - 1; i >= 0; i--) {
-            const b = blocks[i];
-            if (b.type === "tool" && b.tool === p.tool && b.status === "running") {
-              blocks[i] = { ...b, status: p.status, ms: p.ms, resultMsg: p.message };
-              break;
-            }
-          }
-          return { blocks };
-        }
-        case "message": {
-          // 最终答复到达：同文本的流式预览块（live thought）移除，避免与消息重复
-          const blocks = s.blocks
-            .filter((b) => !(b.type === "thought" && b.live))
-            .map((b) => (b.type === "activity" && b.live ? { ...b, live: false } : b));
-          return { blocks: [...blocks, { type: "agent", text: p.text, runId }] };
-        }
-        case "receipt":
-          return {
-            blocks: [
-              ...s.blocks,
-              {
-                type: "receipt",
-                receiptId: p.receiptId,
-                summary: p.summary,
-                actionType: p.actionType,
-                runId,
-              },
-            ],
-            receipts: [
-              {
-                id: p.receiptId,
-                actionType: p.actionType,
-                summary: p.summary,
-                reversible: true,
-                createdBy: "agent",
-                createdAt: new Date().toISOString(),
-              },
-              ...s.receipts,
-            ].slice(0, 50),
-          };
-        case "confirm_request": {
-          if (s.blocks.some(b => b.type === "confirm" && b.confirmId === p.confirmId)) return {};
-          const blocks = s.blocks.map((b) =>
-            b.type === "activity" && b.live ? { ...b, live: false } : b
-          );
-          return {
-            blocks: [
-              ...blocks,
-              {
-                type: "confirm",
-                confirmId: p.confirmId,
-                runId,
-                tool: p.tool,
-                description: p.description,
-                fileId: (p.args as { fileId?: string } | undefined)?.fileId,
-              } as ConvBlock,
-            ],
-          };
-        }
-        case "confirm_resolved": {
-          const blocks = [...s.blocks];
-          for (let i = blocks.length - 1; i >= 0; i--) {
-            const b = blocks[i];
-            if (b.type === "confirm" && b.confirmId === p.confirmId) {
-              blocks[i] = { ...b, decided: p.approved ? "approved" : "rejected" };
-              break;
-            }
-          }
-          return { blocks };
-        }
-        case "workspace_patch": {
-          const view = p.view as WorkspaceView;
-          if (!view?.kind) return {};
-          const idx = s.views.findIndex((v) => v.id === view.id);
-          const views = [...s.views];
-          if (idx >= 0) views[idx] = view;
-          else views.push(view);
-          // 不抢焦点：仅当当前没有任何打开的结果时补位，且工作视图（列映射/文档）永不自动弹出
-          const activeViewId = WORKING_VIEWS.has(view.kind) ? s.activeViewId : s.activeViewId ?? view.id;
-          return { views, activeViewId, lastViewEvent: `${runId}:${e.seq}` };
-        }
-        case "error":
-          return { blocks: [...s.blocks, { type: "error", text: p.text, runId }] };
-        case "run_finished": {
-          // run 结束：未落定的流式预览块转为普通块（若此前 message 已清理则无残留）
-          const blocks = s.blocks.map((b) =>
-            (b.type === "activity" || b.type === "thought") && b.live ? { ...b, live: false } : b
-          );
-          return { blocks, running: false };
-        }
-        default:
-          return {};
-      }
-    });
-    // refresh data after mutations
-    if (e.type === "receipt" || (e.type === "tool_finished" && e.payload.tool === "boq.update")) {
+    set((s) => ({ ...reduceEvent(s, e, runId), ...(e.type === "run_finished" ? { running: false } : {}) }));
+    // 助手改了数据：同步清单与汇总
+    if (e.type === "receipt" || (e.type === "tool_finished" && e.payload.tool === "boq.update"))
       void Promise.all([get().reloadBoq(), get().refreshMeta()]).catch(() => toast.error("变更已执行，数据刷新失败，请重新加载"));
-    }
   },
 }));
+
+// 调试钩子：浏览器里 `__cost.getState()` 直读工作台状态
+if (typeof window !== "undefined") (window as unknown as { __cost?: typeof useStore }).__cost = useStore;

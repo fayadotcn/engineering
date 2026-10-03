@@ -15,7 +15,8 @@ export async function importQuotationsFromSheets(
   let count = 0;
   const data: Prisma.QuotationItemCreateManyInput[] = [];
   for (const sheet of sheets) {
-    if (sheet.type !== "QUOTATION") continue;
+    // MATERIAL_PRICE（信息价/市场价表）与 QUOTATION 同管道进询价行
+    if (sheet.type !== "QUOTATION" && sheet.type !== "MATERIAL_PRICE") continue;
     for (const row of sheet.rows) {
       const name = (row.cells.materialName || row.cells.name || "").trim();
       if (!name || !row.isItem) continue;

@@ -39,6 +39,7 @@ function label(it: BoqItemDTO): string {
     f.category,
     f.material,
     f.diameter ?? f.specification,
+    f.power,
     f.connectionMethod,
     f.system,
   ].filter(Boolean);

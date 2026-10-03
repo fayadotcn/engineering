@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDatasetMapping, saveDatasetMapping } from "@dataset/service";
+import type { SheetType } from "@file/excel";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export async function PATCH(
   const body = (await req.json()) as {
     sheetName?: string;
     columns?: Record<string, number | null>;
-    type?: "BOQ" | "QUOTATION" | "GENERIC";
+    type?: SheetType;
   };
   if (!body.sheetName)
     return NextResponse.json({ error: "sheetName required" }, { status: 400 });

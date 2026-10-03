@@ -22,6 +22,10 @@ export const withTax = (amount: Decimal.Value, taxRate: Decimal.Value): Decimal 
 export const fmt = (v: Decimal.Value, places = 2): string =>
   D(v).toFixed(places);
 
+/** 对外展示用：千分位 + 两位小数（工具消息/视图摘要里的金额） */
+export const fmtMoney = (v: Decimal.Value): string =>
+  Number(round2(v).toFixed(2)).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 export const decStr = (v: Decimal.Value): string => D(v).toString();
 
 export const maxD = (vs: Decimal.Value[]): Decimal =>

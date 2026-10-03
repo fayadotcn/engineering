@@ -7,8 +7,15 @@ prisma/dev.db*
 next-env.d.ts
 fixtures/out/
 dev.log
-.harness/
-harness/plugin/dist/
 
 # local secrets
 .env
+.verify/
+.next-verify/
+*.png
+!fixtures/**/*.png
+/dev.db
+
+# stray artifacts
+nul
+.verify-dev.log

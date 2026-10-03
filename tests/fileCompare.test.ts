@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareBoqSets, compareSummary } from "@cost-engine/fileCompare";
+import { compareBoqSets, compareSummary, compareDeclaredFees } from "@cost-engine/fileCompare";
 import { parseSemanticFeature, inferDiscipline } from "@cost-engine/semantic";
 import type { BoqItemDTO } from "@shared/types";
 
@@ -24,7 +24,7 @@ const item = (
   unit,
   quantity: qty,
   unitPrice: price,
-  mainMaterialPrice: "0",
+  mainMaterialPrice: "0", laborUnitPrice: "0", machineUnitPrice: "0",
   pricingPlan: [],
   feeType: "分部分项",
   totalPrice: (parseFloat(qty) * parseFloat(price)).toFixed(2),
@@ -96,5 +96,39 @@ describe("compareBoqSets", () => {
     expect(by("C002").qtyOver15).toBeUndefined();
     expect(by("C003").qtyOver15).toBe(true);
     expect(compareSummary(rows).qtyOver15).toBe(2);
+  });
+});
+
+describe("compareDeclaredFees（文件汇总事实两期对审）", () => {
+  const unit = (name: string, total: number, extra: Record<string, number> = {}) =>
+    ({ sheet: "s", unit: name, 合计: total, ...extra });
+
+  it("费用口径差 + 单位工程按名对齐（含独有侧）", () => {
+    const a = [
+      unit("给排水", 500000, { 分部分项工程费: 400000, 规费: 20000, 税金: 45000 }),
+      unit("电气", 300000, { 分部分项工程费: 240000, 规费: 12000, 税金: 27000 }),
+    ];
+    const b = [
+      unit("给排水", 560000, { 分部分项工程费: 450000, 规费: 20000, 税金: 50400 }),
+      unit("电气", 300000, { 分部分项工程费: 240000, 规费: 12000, 税金: 27000 }),
+      unit("暖通", 120000, { 分部分项工程费: 100000, 税金: 10800 }), // B 独有单位工程
+    ];
+    const r = compareDeclaredFees(a, b);
+    const by = (k: string) => r.labels.find(l => l.label === k)!;
+    expect(by("分部分项工程费").diff).toBe(150000); // 给排水+5万，暖通独有+10万
+    expect(by("合计")).toEqual({ label: "合计", a: 800000, b: 980000, diff: 180000 });
+    const u = (n: string) => r.units.find(x => x.name === n)!;
+    expect(u("给排水")).toMatchObject({ a: 500000, b: 560000, diff: 60000, side: "both" });
+    expect(u("电气").diff).toBe(0);
+    expect(u("暖通")).toMatchObject({ side: "b", diff: 120000 });
+  });
+
+  it("缺字段与零值行不进入结果", () => {
+    const r = compareDeclaredFees(
+      [unit("给排水", 100, { 规费: 0 })],
+      [unit("给排水", 100)]
+    );
+    expect(r.labels.map(l => l.label)).toEqual(["合计"]);
+    expect(r.labels[0].diff).toBe(0);
   });
 });

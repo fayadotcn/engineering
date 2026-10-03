@@ -1,0 +1,74 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@database/client";
+import { toJson } from "@shared/json";
+import { updateBoqItems, type BoqPatch } from "@boq/service";
+import { D, round2, round3 } from "@cost-engine/money";
+import { z } from "zod";
+
+const adj = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+  field: z.enum(["unitPrice", "quantity", "mainMaterialPrice"]),
+  /** percent: value 是增减百分比（-5 = 下浮 5%）；value: 统一设为该值 */
+  mode: z.enum(["percent", "value"]),
+  value: z.string().max(40),
+}).strict();
+
+const FIELD_LABEL: Record<string, string> = {
+  unitPrice: "综合单价",
+  quantity: "工程量",
+  mainMaterialPrice: "主材暂估价",
+};
+
+// 多选行批量调价/调量（对审下浮、统一暂估价的日常操作）。一次事务 + 一条回执：
+// before/after 存整行快照，撤销走通用 revert 路径原子回滚全部行。
+export async function POST(req: Request) {
+  const parsed = adj.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "批量调整参数无效" }, { status: 400 });
+  const { ids, field, mode, value } = parsed.data;
+  const num = D(value);
+  if (!num.isFinite() || (mode === "value" && num.lt(0)))
+    return NextResponse.json({ error: "请输入有效数字（设为值不能为负）" }, { status: 400 });
+  if (mode === "percent" && num.lte(-100))
+    return NextResponse.json({ error: "下浮不能超过 100%" }, { status: 400 });
+
+  const rows = await prisma.boqItem.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, projectId: true, isHeader: true, feeType: true, unitPrice: true, quantity: true, mainMaterialPrice: true },
+  });
+  if (rows.length !== ids.length || new Set(rows.map((r) => r.projectId)).size !== 1)
+    return NextResponse.json({ error: "清单行不存在或不属于同一工程" }, { status: 404 });
+  if (rows.some((r) => r.isHeader))
+    return NextResponse.json({ error: "分部标题不能参与批量调整" }, { status: 400 });
+  // 总价措施/其他项目是总额计价行：没有单价×量的结构，按比例调量/调价没有意义
+  if (field !== "mainMaterialPrice" && rows.some((r) => r.feeType === "总价措施" || r.feeType === "其他项目"))
+    return NextResponse.json({ error: "所选行含总额计价行（总价措施/其他项目），请单独改合价" }, { status: 400 });
+
+  const patches = rows.map((r) => {
+    const cur = D(String(r[field]));
+    const next = mode === "percent" ? cur.mul(num.div(100).plus(1)) : num;
+    const str = field === "quantity" ? round3(next).toString() : round2(next).toString();
+    return { id: r.id, patch: { [field]: str } as BoqPatch };
+  });
+  const { before, after } = await updateBoqItems(rows[0].projectId, patches);
+  const changed = after.filter((a) => {
+    const b = before.find((x) => x.id === a.id);
+    return b && String(b[field]) !== String(a[field]);
+  });
+  if (!changed.length)
+    return NextResponse.json({ error: "所选行的值已是目标值，没有变化" }, { status: 400 });
+
+  const desc = mode === "percent"
+    ? `${FIELD_LABEL[field]}统一${num.lt(0) ? "下浮" : "上浮"} ${num.abs()}%`
+    : `${FIELD_LABEL[field]}统一设为 ${round2(num)}`;
+  const receipt = await prisma.actionReceipt.create({
+    data: {
+      projectId: rows[0].projectId,
+      actionType: "USER_EDIT",
+      summary: `用户在工作区批量调整 ${changed.length} 行清单：${desc}`,
+      before: toJson(before),
+      after: toJson(after),
+      createdBy: "user",
+    },
+  });
+  return NextResponse.json({ updated: changed.length, receiptId: receipt.id, affectedIds: changed.map((c) => c.id) });
+}

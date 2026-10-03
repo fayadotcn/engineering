@@ -23,7 +23,6 @@ model Project {
   workspace   Workspace     @relation(fields: [workspaceId], references: [id])
   name        String
   status      String        @default("ACTIVE") // ACTIVE | ARCHIVED
-  harnessSessionId String   @default("")
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   files       ProjectFile[]
@@ -48,6 +47,8 @@ model ProjectFile {
   status     String   @default("UPLOADED") // UPLOADED | PARSED | FAILED
   meta       String   @default("{}") // JSON: sheets, rowCounts, parseReport, mapping
   contentHash String  @default("") // sha1(buffer)，同项目重复上传去重
+  stage      String   @default("") // 文件阶段：招标|投标|报审|变更签证|进度计量|结算 等（inferFileStage）
+  period     String   @default("") // 计价期次 YYYY-MM（文件名提取），进度款「本期/上期」对审用
   createdAt  DateTime @default(now())
   boqItems   BoqItem[]
   quotations QuotationItem[]
@@ -68,12 +69,20 @@ model BoqItem {
   rawFeature    String   @default("")
   unit          String   @default("")
   quantity      Decimal  @default(0)
+  // 工程量计算式留痕：手填/助手用计算式（3层×12个+15）得出的工程量存原文，复核可查
+  quantityExpr  String   @default("")
   unitPrice     Decimal  @default(0)   // 综合单价（人材机管利五要素），不是材料价
   mainMaterialPrice Decimal @default(0) // 主材/设备暂估价（询价或信息价，组价输入）
+  // 来源表自带的人材机分解列（综合单价分析表口径，每清单单位）。
+  // 成本构成分析（cost.composition）的直接输入；0 = 源表无该列
+  laborUnitPrice   Decimal @default(0) // 人工费单价
+  machineUnitPrice Decimal @default(0) // 机械费单价
   pricingPlan   String   @default("[]") // JSON PricingPlanLine[]：组价方案（一清单项可挂多定额子目）
   totalPrice    Decimal  @default(0)
   feeType       String   @default("分部分项") // 分部分项 | 单价措施 | 总价措施 | 其他项目 | 规费税金
   sectionPath   String   @default("") // e.g. "电气设备安装工程/配电箱"
+  unitProject   String   @default("") // 单位工程（分部分项表【…】/「单位工程：X」行内字段提取）
+  taxIncluded   Boolean  @default(false) // 源表为含税单价（表头含「含税」），费用汇总不重复计税
   isHeader      Boolean  @default(false)
   sortOrder     Int      @default(0)
   discipline    String   @default("OTHER")
@@ -145,7 +154,7 @@ model AgentRun {
   project     Project  @relation(fields: [projectId], references: [id])
   userMessage String
   status      String   @default("RUNNING") // RUNNING | AWAITING_CONFIRM | DONE | FAILED
-  planner     String   @default("rule")    // rule | llm（早期）| import（确定性文件导入）| harness（Harness 会话工具调用）
+  planner     String   @default("rule")    // rule | llm | import（确定性文件导入）| harness（已下线的旧会话，仅历史数据）
   pendingAction String @default("{}")    // JSON {confirmId,tool,args,description} while AWAITING_CONFIRM
   summary     String   @default("")
   createdAt   DateTime @default(now())

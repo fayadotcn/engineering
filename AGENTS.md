@@ -13,27 +13,33 @@ npm run typecheck         # tsc --noEmit
 npm run fixtures          # 生成测试用 Excel 到 fixtures/out/
 ```
 
-## Harness 与模型配置
+## 模型配置
 
-底层面板使用 DeepSeek Harness 官方 Web 应用，`harness/plugin` 以 Cordis 插件接入安装造价工具与专业工作台。模型、会话及业务写入确认由 Harness 管理；文件导入保留独立的确定性流程。模型未配置时仍能导入、编辑与查看项目，但不能发起模型对话。
+单系统自有引擎（`agent/` runtime + llm + planner + executor + pending + SSE）。`POST /api/projects/[id]/agent/runs` 发起任务，事件经 `/api/runs/[runId]/stream` 回放至工作台左轨原生会话面板；确认门走 `/api/runs/[runId]/confirm`。模型请求失败时 runtime 发 `model_fallback` 事件（payload.reason=失败原因）并降规则引擎——前端据此显示常驻「固定任务模式」横幅，下一次模型产出 thought 事件自动解除。上下文含 `lastRun`（最近一轮的 tool_finished 摘要），供「刚才/那些/继续」类指代解析。
+
+**一键报价（autopilot）**：`agent/autopilot.ts` 把造价师标准动作链固化成确定性管线——`extra.autopilot=true`（或文本「一键报价/自动报价」）触发，**绕过 LLM** 走 `matchLibrary→(命中才)fillFromLibrary→quota.match→calculate→(费率齐才)applyCalc→(测算有匹配才)measureFees→feeSummary`；写操作仍过确认门，缺管理费率/利润率时跳过写回并在结尾说明补设置后回复「写回组价」续接（planner 对该词优先于预览/写回Excel 路由）。
 
 ```env
-# 或通过 Harness「设置 → 模型」配置
-DEEPSEEK_API_KEY=...
+# 任一方式配置模型；全不配时对话走内置规则引擎，其余功能照常
+MODEL_PROVIDER=openai-compatible   # 或 anthropic；=rule 强制规则引擎
+MODEL_BASE_URL=https://api.deepseek.com
+MODEL_API_KEY=sk-...               # 只给 DEEPSEEK_API_KEY 也行（自动按官方端点+deepseek-chat 兜底）
+MODEL_NAME=deepseek-chat
 ```
 
-`npm run dev` 同时启动官方主入口 3210 和专业数据服务 3211。打开启动时打印的 `dsh web` 认证地址（另存于 `.harness/web.url`）。旧 `MODEL_*` 环境项不再参与执行。正式构建使用 `npm run build`，运行使用 `npm start`。
+DeepSeek Harness 为可选遗留模式：`npm run harness`（3210 官方面板 + 3211 业务服务，工作台在 iframe 内仍可用——send() 打自己源）。正式构建 `npm run build`，运行 `npm start`。
 
 ## 架构红线
 
 - `cost-engine/` 纯函数、零 LLM、确定性可复算（decimal.js）。所有金额/工程量/汇总只能在这里算。
-- Harness 负责认知与会话；`agent/tools` 提供专业工具、回执与结果视图。`agent/runtime.ts` 仅负责确定性文件导入。造价业务规则禁止写进 prompt。
+- `agent/` 自有引擎负责认知与会话（llm 循环或规则引擎 → 确认门 → executor）；`agent/tools` 提供专业工具、回执与结果视图。造价业务规则禁止写进 prompt。
 - `file/excel.ts` 解析真实造价 Excel：双行表头、无表头数据表、续行合并、"1、名称：X" 内嵌字段、分页噪声。
-- **通用清单接入管道**（任意格式 Excel）：`file.inspect`（`inspectWorkbook` 识别 → 套 `ImportTemplate` 模板 → 存 `ProjectFile.meta.mapping` → 推 `columnMapping` 视图）→ `file.ingest`（async 确认门：模板命中/用户改过/minConfidence≥0.9 才自动放行，否则暂停等用户在视图改列/改类型后批准；先 `deleteByFile` 保证重导幂等；确认过的映射按表头指纹 sha1 沉淀为全局模板）。列角色最强证据是**数值一致性**（`lockByArithmetic`：数量×单价≈合价 锁定三列，0.97），不是表头字；类型判定顺序：措施表名 > 清单信号(项目编码/工程量/综合单价) > 强询价信号(材料名称/品牌/询价) > 有量有价→清单(裸「单价」=综合单价) ；「规格型号+量×价=合价」在简式清单与询价单间真实歧义（typeConfidence 0.6）→ 靠文件名 `applyTypeHint` 纠偏或让用户确认。改类型时 price↔unitPrice 角色必须用 `shared/mapping.ts reconcilePriceRole` 同步（客户端/服务端共用）。`BoqItem.rawCells` 保留整行原文 + `__nonNumeric/__derived`；无综合单价列时 unitPrice=合价÷量。`ProjectFile.contentHash` 同项目同内容不重复导入；`POST /api/files/[id]/reingest` 按当前映射重导。人工/机械单价列（laborPrice/machinePrice）目前只进 rawCells，等 P2 成本模型消费。
+- **通用清单接入管道**（任意格式 Excel）：`file.inspect`（`inspectWorkbook` 识别 → 套 `ImportTemplate` 模板 → 存 `ProjectFile.meta.mapping` → 推 `columnMapping` 视图）→ `file.ingest`（async 确认门：模板命中/用户改过/minConfidence≥0.9 才自动放行，否则暂停等用户在视图改列/改类型后批准；先 `deleteByFile` 保证重导幂等；确认过的映射按表头指纹 sha1 沉淀为全局模板）。列角色最强证据是**数值一致性**（`lockByArithmetic`：数量×单价≈合价 锁定三列，0.97），不是表头字；类型判定顺序：措施表名 > 清单信号(项目编码/工程量/综合单价) > 强询价信号(材料名称/品牌/询价) > 有量有价→清单(裸「单价」=综合单价) ；「规格型号+量×价=合价」在简式清单与询价单间真实歧义（typeConfidence 0.6）→ 靠文件名 `applyTypeHint` 纠偏或让用户确认。改类型时 price↔unitPrice 角色必须用 `shared/mapping.ts reconcilePriceRole` 同步（客户端/服务端共用）。`BoqItem.rawCells` 保留整行原文 + `__nonNumeric/__derived`；无综合单价列时 unitPrice=合价÷量。`ProjectFile.contentHash` 同项目同内容不重复导入；`POST /api/files/[id]/reingest` 按当前映射重导。人工/机械单价列（laborPrice/machinePrice）导入时升格为 `BoqItem.laborUnitPrice/machineUnitPrice`（rawCells 仍留原文），由 `cost.composition` 人材机成本构成分析直接消费。
 - `file/pdf.ts` PDF 文本层提取（pdfjs-dist，serverExternal）+ BOQ 行识别（编码+单位+量+价正则）；≥5 行自动导入清单，否则按文档展示（document 视图）。
 - `cost-engine/fileCompare.ts` 两版清单对审：编码优先对齐、无编码按语义组键；输出 价差/量差/独有项 + 总额差（fileCompare 视图）。
 - 确认门：Harness 对带 `confirm` 标记的专业工具调用原生 approval；批准后才执行。文件导入的映射确认使用 AWAITING_CONFIRM 与 POST /api/runs/[runId]/confirm。跨请求的导入待确认表和事件订阅必须存 globalThis（Next 每个 route 独立 module graph）。
 - `cost-engine/calcExpr.ts` 工程量计算式求值（递归下降，禁 eval；×÷（）全角与单位词自动处理）。
+- 前端样式：`src/ui/styles/` 分文件，`tokens.css` 管全部设计变量。明暗主题走 `<html data-theme>`：`layout.tsx` 内联脚本首帧前落定（localStorage `cost-theme`=auto|light|dark，auto 跟随系统+跨页签同步），`ui/ThemeToggle.tsx` 三态切换。**品牌蓝分两档**：填充背景/按钮底用 `--brand-accent`，作前景（文字、图标、细线、焦点描边）一律用 `--brand-ink`（深色下提亮、浅色下加深，保小字对比度）；`#fff` 文字配品牌底时用 `--brand-on-accent`。打印强制浅色口径（tokens.css 尾部 @media print 重置）。
 - 语义比较：BoqSemanticFeature 分组 → featureCompatible 冲突检查 → 价格比。禁止纯字符串匹配。
 - 每个修改动作产生 ActionReceipt；工作区用户编辑也产生（createdBy=user），Agent 上下文可见。
 - DB schema 用 SQLite 但保持 Postgres 可移植（Json/枚举→String + shared/json helpers）。
@@ -70,6 +76,7 @@ DEEPSEEK_API_KEY=...
   - 总价控制：`quantity.adjust` 默认调**综合单价**（下浮/上浮，合规手段），`mode=quantity` 才调工程量（改变图纸口径，慎用）。
 - 缺价补价闭环：`material.matchLibrary`（预览，只读，出 quotationMatch 视图）→ `material.fillFromLibrary`（确认门，写主材暂估价 + diff + 回执）→ `quota.calculate` → `quota.applyCalc`（确认门，写综合单价）；planner 区分「看看缺价」（仅预览）与「补齐/补价」（全链路）；总览页未定价卡片可一键触发。
 - 费用汇总：`cost.feeSummary`（cost-engine/fees.ts）分部分项→措施→其他项目→规费→税前→税金→含税造价；费率读台账事实（措施费率/规费费率/暂列金额率/暂列金额/税率/定额人工费），未设置计 0 并在行内注明。导入了措施表/其他项目表时用真值，否则费率估算并标注。
+- 成本构成：`cost.composition`（cost-engine/costComposition.ts）把可计价项合价拆成 人工/材料/机械/管利及其他 四分量——分量来源优先级 pricingPlan（定额组价）> 源表分解列（laborUnitPrice/machineUnitPrice）> 仅主材暂估价；`other = 合价 − 已知分量` 恒成立，未分解部分进 other 不猜拆；人材机三分量齐全才算 directCost/margin，margin<0 即**成本倒挂**（报价低于人材机成本）。组价方案行标了主材名但缺主材价 → 材料不完整、margin 置空。
 - 费率/金额事实归一化：`project/facts.ts` 的 `parseRateValue`（"9%"/"9"/"0.09"→0.09）和 `parseAmountValue`（"5万"→50000）；**禁止 `Number(fact.value)`/`D(fact.value)` 直接消费台账值**——"9%" 会得到 NaN 或抛 DecimalError。
 
 ## 测试

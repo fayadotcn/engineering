@@ -20,7 +20,7 @@ export async function createProject(name: string) {
 export async function listProjects() {
   return prisma.project.findMany({
     orderBy: { updatedAt: "desc" },
-    include: { _count: { select: { boqItems: true, files: true } } },
+    include: { _count: { select: { boqItems: { where: { isHeader: false } }, files: true } } },
   });
 }
 

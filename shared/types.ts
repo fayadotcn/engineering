@@ -40,6 +40,7 @@ export interface BoqSemanticFeature {
   location?: string; // 室内 | 室外 | 地下 ...
   height?: string;
   pressure?: string; // PN1.6 / 1.6MPa
+  power?: string; // 设备额定功率：Pe=60kW / 功率15kW / 315kVA → "60kW"/"15kW"/"315kVA"
   fireRating?: string;
   brand?: string;
   technicalRequirement?: string;
@@ -85,10 +86,16 @@ export interface BoqItemDTO {
   rawFeature: string;
   unit: string;
   quantity: string;
+  /** 工程量计算式原文（如 "3层×12个+15"）；空/缺 = 直接填数，非空 = 由计算式得出，复核可查 */
+  quantityExpr?: string;
   /** 综合单价（人材机管利五要素组价结果），材料价/询价绝不能直接写入 */
   unitPrice: string;
   /** 主材/设备暂估价（询价/信息价），是组价输入而非综合单价 */
   mainMaterialPrice: string;
+  /** 来源表分解列：人工费单价（每清单单位）；0 = 源表无此列 */
+  laborUnitPrice: string;
+  /** 来源表分解列：机械费单价（每清单单位）；0 = 源表无此列 */
+  machineUnitPrice: string;
   /** 组价方案（多定额子目组合）；空数组=未组价，综合单价是原清单价/手工价 */
   pricingPlan: PricingPlanLine[];
   totalPrice: string;
@@ -96,6 +103,10 @@ export interface BoqItemDTO {
   rawCells?: Record<string, unknown>;
   feeType: FeeType;
   sectionPath: string;
+  /** 单项/单位工程（多单位工程项目），空 = 未区分 */
+  unitProject?: string;
+  /** 单价为含税价（源表「含税单价」列），汇总时不再叠增值税 */
+  taxIncluded?: boolean;
   isHeader: boolean;
   sortOrder: number;
   discipline: Discipline;
@@ -139,6 +150,10 @@ export interface ReceiptDTO {
   actionType: string;
   summary: string;
   reversible: boolean;
+  /** 该记录已被撤销（存在指向它的 REVERT 回执） */
+  reverted?: boolean;
+  /** 该笔回执触及的清单行 id（before/after 快照并集），供行级改动痕迹用 */
+  affectedIds?: string[];
   createdBy: string;
   createdAt: string;
 }
@@ -230,10 +245,22 @@ export type WorkspaceView =
       title: string;
       labelA: string;
       labelB: string;
+      /** 两版文件 id——供导出对审报告等确定性操作复用同一配对 */
+      fileAId?: string;
+      fileBId?: string;
+      stageA?: string;
+      periodA?: string;
+      stageB?: string;
+      periodB?: string;
       rows: FileCompareRow[];
       summary: {
         total: number; same: number; priceDiff: number;
         qtyDiff: number; onlyA: number; onlyB: number; totalDelta: string;
+      };
+      /** 两版都带单位工程汇总表时的申报口径对比（费用行 + 单位工程行） */
+      declared?: {
+        labels: { label: string; a: number; b: number; diff: number }[];
+        units: { name: string; a: number; b: number; diff: number; side: "both" | "a" | "b" }[];
       };
     }
   | {
@@ -254,6 +281,19 @@ export type WorkspaceView =
       }[];
       grandTotal: string;
       unpricedCount: number;
+    }
+  | {
+      kind: "costComposition";
+      id: string;
+      title: string;
+      rows: CostCompositionRow[];
+      totals: {
+        revenue: string; coveredRevenue: string;
+        labor: string; material: string; machine: string; other: string;
+        /** 毛利可算口径（人材机三部分都已知的行）的收入/毛利/毛利率 */
+        marginRevenue: string; margin: string; marginRate: string | null;
+      };
+      coverage: { plan: number; imported: number; partial: number; none: number; inverted: number };
     }
   | {
       kind: "measureFee";
@@ -285,6 +325,7 @@ export type WorkspaceView =
       summary: string;
     }
   | { kind: "fileList"; id: string; title: string }
+  | { kind: "priceLibrary"; id: string; title: string }
   | {
       kind: "columnMapping";
       id: string;
@@ -294,7 +335,9 @@ export type WorkspaceView =
       fileStatus: string;
       sheets: {
         sheetName: string;
-        type: "BOQ" | "QUOTATION" | "GENERIC";
+        type:
+          | "BOQ" | "QUOTATION" | "GENERIC"
+          | "COMPARE" | "APPROVAL" | "PENDING_QUOTE" | "FACTS" | "MATERIAL_PRICE";
         headerRow: number;
         headerCells: string[];
         sample: string[][];
@@ -379,6 +422,29 @@ export interface FileCompareRow {
   qtyOver15?: boolean;
 }
 
+/** 人材机成本构成行：金额均为合价口径；null = 该分量未知（混入 other）。 */
+export interface CostCompositionRow {
+  itemId: string;
+  code: string;
+  name: string;
+  unit: string;
+  quantity: string;
+  revenue: string;
+  labor: string | null;
+  material: string | null;
+  machine: string | null;
+  /** 管利 + 未分解部分（= 合价 - 已知分量） */
+  other: string;
+  /** 人材机直接费（三部分均已知才可算） */
+  directCost: string | null;
+  /** 毛利 = 合价 - 人材机；marginRate 为百分比 */
+  margin: string | null;
+  marginRate: string | null;
+  source: "quotaPlan" | "imported" | "partial" | "none";
+  /** 直接费 > 合价：成本倒挂 */
+  inverted: boolean;
+}
+
 export interface QuotaResultRow {
   itemId: string;
   code: string;
@@ -421,6 +487,7 @@ export type AgentEventType =
   | "receipt"
   | "confirm_request"
   | "confirm_resolved"
+  | "model_fallback" // 模型不可用 → 降级规则引擎（前端据此显示模式横幅）
   | "run_finished"
   | "error";
 

@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Plus, Loader2 } from "lucide-react";
 import { toast } from "./primitives";
 
@@ -9,10 +9,6 @@ export function NewProject() {
   const [busy, setBusy] = useState(false);
   const router = useRouter();
   const lock = useRef(false);
-  useEffect(() => {
-    const origin = new URLSearchParams(location.search).get("harnessOrigin");
-    if (origin) sessionStorage.setItem("installation:harnessOrigin", origin);
-  }, []);
 
   const create = async () => {
     if (!name.trim() || lock.current) return;

@@ -5,7 +5,8 @@ import { toJson } from "@shared/json";
 import { D, lineTotal, round2, round3 } from "@cost-engine/money";
 import { inferDiscipline, parseSemanticFeature } from "@cost-engine/semantic";
 import { rowToBoqInput } from "./mapRow";
-import type { ParsedSheet, SheetFeeType } from "@file/excel";
+import { decideRows } from "./ingestRules";
+import type { ParsedSheet } from "@file/excel";
 import type { BoqItemDTO } from "@shared/types";
 
 // BOQ domain service: import from parsed sheets, query, update.
@@ -29,30 +30,27 @@ export async function importBoqFromSheets(
   let sortOrder = 0;
   const data: Prisma.BoqItemCreateManyInput[] = [];
 
-  /** 分部标题可能切换费用口径（同一 sheet 内先分部分项后单价措施段） */
-  const sectionFeeType = (s: string): SheetFeeType | null =>
-    /总价措施/.test(s) ? "总价措施"
-    : /单价措施/.test(s) ? "单价措施"
-    : /其他项目|暂列|计日工|总承包服务/.test(s) ? "其他项目"
-    : /分部分项/.test(s) ? "分部分项"
-    : null;
-
   const laborPriceCol = sheets.some(
     (s) =>
-      s.type === "BOQ" &&
+      (s.type === "BOQ" || s.type === "PENDING_QUOTE") &&
       (s.columns.laborPrice !== undefined || s.columns.machinePrice !== undefined)
   );
 
   for (const sheet of sheets) {
-    if (sheet.type !== "BOQ") continue;
+    if (sheet.type !== "BOQ" && sheet.type !== "PENDING_QUOTE") continue;
     let section = "";
-    let curFeeType: SheetFeeType = sheet.feeType ?? "分部分项";
-    for (const row of sheet.rows) {
+    let unitProject = sheet.unitProject ?? "";
+    // 行级决策（纯函数，见 ingestRules）：单价措施尾块识别 + 总价措施父子行去重
+    const decisions = decideRows(sheet);
+    for (let ri = 0; ri < sheet.rows.length; ri++) {
+      const row = sheet.rows[ri];
       const name = row.cells.name ?? "";
-      if (!name) continue;
+      // 表内「单位工程名称：X / 单项工程：X」标记行：切换后续行的单位工程归属
+      const upCell = (row.raw ?? []).map((c) => c.match(/(?:单项工程|单位工程)(?:名称)?\s*[:：]\s*(.+)/)?.[1]?.trim()).find(Boolean);
+      if (upCell) unitProject = upCell;
+      if (!name || decisions[ri].skip) continue;
       if (row.isHeader && !row.isItem) {
         section = name;
-        curFeeType = sectionFeeType(name) ?? curFeeType;
         headers++;
       }
       const { __flags, ...input } = rowToBoqInput(row, sheet, {
@@ -60,7 +58,8 @@ export async function importBoqFromSheets(
         fileId,
         sortOrder: sortOrder++,
         section,
-        feeType: curFeeType,
+        feeType: decisions[ri].feeType,
+        unitProject,
       });
       data.push(input);
       if (__flags.nonNumericQty) nonNumericQty++;
@@ -79,8 +78,21 @@ export async function listBoq(
   const items = await prisma.boqItem.findMany({
     where: { projectId },
     orderBy: { sortOrder: "asc" },
+    include: { file: { select: { createdAt: true } } },
     // 列表页不需要整行原文 JSON（大表翻倍 DB 读取量）；服务端工具默认仍带
     ...(opts?.rawCells === false ? { omit: { rawCells: true } } : {}),
+  });
+  // sortOrder 只在单次导入内递增——同一文件的分部/措施/其他项目表天然连续，
+  // 但历史数据每个文件都从 0 起排，裸按 sortOrder 会让不同文件的行交错。
+  // 统一按（文件导入先后 → 表内序号）排：手工补录（无文件）永远在最后。
+  const fileRank = new Map<string, number>();
+  for (const it of items.filter(i => i.file).sort((a, b) => a.file!.createdAt.getTime() - b.file!.createdAt.getTime())) {
+    if (!fileRank.has(it.fileId!)) fileRank.set(it.fileId!, fileRank.size);
+  }
+  items.sort((a, b) => {
+    const ra = a.fileId ? (fileRank.get(a.fileId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    const rb = b.fileId ? (fileRank.get(b.fileId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    return ra - rb || a.sortOrder - b.sortOrder;
   });
   return items.map(toBoqDTO);
 }
@@ -89,9 +101,14 @@ export interface BoqPatch {
   unitPrice?: string;
   /** 主材暂估价：组价输入，写入不影响 合价=量×综合单价 */
   mainMaterialPrice?: string;
+  /** 人材机分解列（成本构成分析输入），非负 */
+  laborUnitPrice?: string;
+  machineUnitPrice?: string;
   /** 组价方案（PricingPlanLine[]），组价写回/人工选定定额时更新 */
   pricingPlan?: unknown[];
   quantity?: string;
+  /** 工程量计算式原文；随 quantity 一起写入留痕，纯数字修改传 "" 清掉旧式 */
+  quantityExpr?: string;
   name?: string;
   rawFeature?: string;
   /** Receipt restoration and lump-sum amounts; never a material quotation price. */
@@ -120,6 +137,8 @@ export async function updateBoqItems(
       patch.unitPrice !== undefined ? round2(D(patch.unitPrice)) : cur.unitPrice;
     if (!qty.isFinite() || !price.isFinite() || price.lt(0)) throw new Error("工程量和综合单价必须为有效数字，单价不能为负数");
     if (patch.mainMaterialPrice !== undefined && (!D(patch.mainMaterialPrice).isFinite() || D(patch.mainMaterialPrice).lt(0))) throw new Error("主材暂估价必须为非负有效数字");
+    for (const k of ["laborUnitPrice", "machineUnitPrice"] as const)
+      if (patch[k] !== undefined && (!D(patch[k]).isFinite() || D(patch[k]).lt(0))) throw new Error("人工/机械单价必须为非负有效数字");
     if (patch.name !== undefined && !patch.name.trim()) throw new Error("项目名称不能为空");
     if (patch.totalPrice !== undefined && !D(patch.totalPrice).isFinite()) throw new Error("合价必须为有效数字");
     const features =
@@ -139,10 +158,18 @@ export async function updateBoqItems(
         ...(patch.mainMaterialPrice !== undefined
           ? { mainMaterialPrice: round2(D(patch.mainMaterialPrice)) }
           : {}),
+        ...(patch.laborUnitPrice !== undefined
+          ? { laborUnitPrice: round2(D(patch.laborUnitPrice)) }
+          : {}),
+        ...(patch.machineUnitPrice !== undefined
+          ? { machineUnitPrice: round2(D(patch.machineUnitPrice)) }
+          : {}),
         ...(patch.pricingPlan !== undefined
           ? { pricingPlan: toJson(patch.pricingPlan) }
           : {}),
         quantity: qty,
+        // 工程量一旦有改动就同步留痕：计算式编辑写原文，纯数字编辑清空旧式（式与值不再对应）
+        ...(patch.quantity !== undefined ? { quantityExpr: patch.quantityExpr ?? "" } : {}),
         unitPrice: price,
         // Imported lump-sum/other-fee totals survive material and text edits.
         totalPrice: patch.totalPrice !== undefined ? round2(D(patch.totalPrice)) : patch.quantity !== undefined || patch.unitPrice !== undefined ? lineTotal(qty, price) : cur.totalPrice,

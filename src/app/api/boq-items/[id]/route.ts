@@ -5,10 +5,20 @@ import { toJson } from "@shared/json";
 import { z } from "zod";
 
 const edit = z.object({
-  unitPrice: z.string().optional(), quantity: z.string().optional(), mainMaterialPrice: z.string().optional(),
+  unitPrice: z.string().optional(), quantity: z.string().optional(), quantityExpr: z.string().max(500).optional(),
+  mainMaterialPrice: z.string().optional(),
+  laborUnitPrice: z.string().optional(), machineUnitPrice: z.string().optional(),
   totalPrice: z.string().optional(),
   name: z.string().trim().min(1).max(500).optional(), rawFeature: z.string().max(10000).optional(),
 }).strict().refine(value => Object.keys(value).length > 0);
+
+// 变更记录与 toast 共用中文字段名：操作记录是给老板看的账，不是给程序看的日志
+const FIELD_LABEL: Record<string, string> = {
+  unitPrice: "综合单价", quantity: "工程量", quantityExpr: "工程量计算式",
+  mainMaterialPrice: "主材暂估价", laborUnitPrice: "人工单价", machineUnitPrice: "机械单价",
+  totalPrice: "合价", name: "项目名称", rawFeature: "项目特征",
+};
+const disp = (v: string | null) => (v === null || v === "" ? "空" : v);
 
 // User edits in the workspace land here — recorded as ActionReceipt so the
 // agent's context (recentChanges) always knows what the user changed.
@@ -29,7 +39,10 @@ export async function PATCH(
   const patch: Record<string, string> = {};
   if (body.unitPrice !== undefined) patch.unitPrice = String(body.unitPrice);
   if (body.quantity !== undefined) patch.quantity = String(body.quantity);
+  if (body.quantityExpr !== undefined) patch.quantityExpr = body.quantityExpr;
   if (body.mainMaterialPrice !== undefined) patch.mainMaterialPrice = String(body.mainMaterialPrice);
+  if (body.laborUnitPrice !== undefined) patch.laborUnitPrice = String(body.laborUnitPrice);
+  if (body.machineUnitPrice !== undefined) patch.machineUnitPrice = String(body.machineUnitPrice);
   if (body.totalPrice !== undefined) patch.totalPrice = body.totalPrice;
   if (body.name !== undefined) patch.name = String(body.name);
   if (body.rawFeature !== undefined) patch.rawFeature = String(body.rawFeature);
@@ -39,23 +52,55 @@ export async function PATCH(
     { id, patch },
   ]); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "修改失败" }, { status: 400 }); }
   const { before, after } = result;
+  let receiptId: string | null = null;
+  let changes: { field: string; label: string; from: string | null; to: string | null }[] = [];
   if (after.length) {
     const b = before[0];
     const a = after[0];
-    const changes = (["unitPrice", "quantity", "mainMaterialPrice", "totalPrice", "name", "rawFeature"] as const)
+    changes = (["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "rawFeature"] as const)
       .filter((f) => b[f] !== a[f])
-      .map((f) => `${f}: ${b[f]} → ${a[f]}`)
-      .join("；");
-    if (changes) await prisma.actionReceipt.create({
+      .map((f) => ({ field: f, label: FIELD_LABEL[f] ?? f, from: b[f] ?? null, to: a[f] ?? null }));
+    if (changes.length) {
+      const text = changes
+        .map((c) => c.field === "quantityExpr" && c.to ? `工程量计算式: ${c.to}` : `${c.label}: ${disp(c.from)} → ${disp(c.to)}`)
+        .join("；");
+      const receipt = await prisma.actionReceipt.create({
+        data: {
+          projectId: item.projectId,
+          actionType: "USER_EDIT",
+          summary: `用户在工作区修改「${a.name}」：${text}`,
+          before: toJson(before),
+          after: toJson(after),
+          createdBy: "user",
+        },
+      });
+      receiptId = receipt.id;
+    }
+  }
+  return NextResponse.json({ item: after[0] ?? null, receiptId, changes });
+}
+
+// Row delete keeps the full row in the receipt's before snapshot — the revert
+// endpoint recreates it verbatim, so a mis-click is recoverable.
+export async function DELETE(
+  _: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const item = await prisma.boqItem.findUnique({ where: { id } });
+  if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const [receipt] = await prisma.$transaction([
+    prisma.actionReceipt.create({
       data: {
         projectId: item.projectId,
         actionType: "USER_EDIT",
-        summary: `用户在工作区修改「${a.name}」：${changes}`,
-        before: toJson(before),
-        after: toJson(after),
+        summary: `用户在工作区删除清单行「${item.name}」（${item.sheetName} 第 ${item.rowIndex + 1} 行）`,
+        before: toJson([item]),
+        after: toJson([]),
         createdBy: "user",
       },
-    });
-  }
-  return NextResponse.json(after[0] ?? null);
+    }),
+    prisma.boqItem.delete({ where: { id } }),
+  ]);
+  return NextResponse.json({ deleted: id, receiptId: receipt.id });
 }

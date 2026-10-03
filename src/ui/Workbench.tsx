@@ -1,214 +1,227 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ClipboardList, Download, FileSpreadsheet, Loader2, Upload } from "lucide-react";
-import { useStore, type ConvBlock } from "./store";
-import { AnomalyTable, BoqTable, Breakdown, DiffView, DocumentView, ExportResult, SpecResultView, FeeSummaryView, FileCompareView, FileList, MeasureFeeView, QuotaResult, QuotationMatch, ReceiptsView } from "./views";
-import { ColumnMappingView } from "./views/ColumnMappingView";
-import { PricingSettings } from "./PricingSettings";
-import { CostOverview } from "./CostOverview";
-import { ConfirmDialog, toast } from "./primitives";
-import type { WorkspaceView } from "@shared/types";
+import { ClipboardList, Loader2, Upload } from "lucide-react";
+import { useStore, OPEN_CONV_EVENT } from "./store";
+import { isBusy, isDirty } from "./busy";
+import { Conversation, FOCUS_COMPOSER } from "./Conversation";
+import { ConfirmDialog, Modal, toast } from "./primitives";
+import { SECTIONS, sectionOf, type SectionId } from "./sections";
+import { ProjectHeader, StatusBar } from "./shell/ProjectHeader";
+import { ResultsPanel } from "./shell/ResultsPanel";
+import { SubTabs } from "./shell/SubTabs";
+import { PendingImports } from "./shell/PendingImports";
+import { ViewRenderer } from "./shell/ViewRenderer";
 
-const NAV = [
-  { id: "boq", label: "清单", viewId: "view:boq" },
-  { id: "files", label: "资料", viewId: "view:files" },
-  { id: "results", label: "成果", viewId: "empty:results" },
-] as const;
-const INFO = [
-  { id: "overview", label: "工程概况", viewId: "view:overview" },
-  { id: "settings", label: "计价设置", viewId: "view:facts" },
-  { id: "history", label: "操作记录", viewId: "view:receipts" },
-] as const;
-const PAGES = [...NAV, ...INFO];
+const SHORTCUTS: [string, string][] = [
+  ["Ctrl + K", "聚焦对话输入框"],
+  ["/", "清单内查找"],
+  ["↑ / ↓", "清单内移动选中行"],
+  ["Enter", "编辑选中单元格"],
+  ["Tab", "编辑中移到下一格"],
+  ["Ctrl + A", "全选清单行"],
+  ["Ctrl + C / V", "复制所选行到 Excel / 粘回更新"],
+  ["Shift / Ctrl + 点击", "连选 / 加选多行批量调价"],
+  ["Delete", "删除选中行"],
+  ["Ctrl + Z", "撤销最近一笔修改"],
+  ["Esc", "取消编辑 / 关闭"],
+  ["?", "打开本快捷键帮助"],
+];
 
-type ObjectId = (typeof PAGES)[number]["id"];
-
-/** 每个视图归属的对象；对象是唯一的顶级层级，视图只是它下面的结果。 */
-const OWNER: Record<WorkspaceView["kind"], ObjectId> = {
-  overview: "overview",
-  receipts: "history",
-  factList: "settings",
-  boqTable: "boq",
-  quotaResult: "results",
-  quotationMatch: "results",
-  specResult: "results",
-  anomalyTable: "results",
-  fileCompare: "results",
-  diff: "results",
-  fileList: "files",
-  columnMapping: "files",
-  document: "files",
-  feeSummary: "results",
-  measureFee: "results",
-  breakdown: "results",
-  exportResult: "results",
-};
-
-/** 对象为空时的唯一动作入口；与在对话里直接说这句话等价。 */
-const EMPTY_TASK: Partial<Record<ObjectId, string>> = {
-  results: "生成费用汇总表，说明计价条件缺项",
-};
-
-function Result({ view, onUpload }: { view: WorkspaceView; onUpload: () => void }) {
-  switch (view.kind) {
-    case "boqTable": return <BoqTable view={view} />;
-    case "overview": return <CostOverview onUpload={onUpload} />;
-    case "receipts": return <ReceiptsView />;
-    case "anomalyTable": return <AnomalyTable view={view} />;
-    case "quotationMatch": return <QuotationMatch view={view} />;
-    case "breakdown": return <Breakdown view={view} />;
-    case "quotaResult": return <QuotaResult view={view} />;
-    case "feeSummary": return <FeeSummaryView view={view} />;
-    case "measureFee": return <MeasureFeeView view={view} />;
-    case "fileCompare": return <FileCompareView view={view} />;
-    case "document": return <DocumentView view={view} />;
-    case "specResult": return <SpecResultView view={view} />;
-    case "diff": return <DiffView view={view} />;
-    case "factList": return <PricingSettings />;
-    case "exportResult": return <ExportResult view={view} />;
-    case "fileList": return <FileList />;
-    case "columnMapping": return <ColumnMappingView view={view} />;
-  }
+/** 快捷键速查卡（? 呼出） */
+function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Modal open={open} label="快捷键" width={400} onClose={onClose}>
+      <div className="dlg-title">快捷键</div>
+      <p className="dlg-desc">工作台支持键盘操作，效率操作不必伸手摸鼠标。</p>
+      <div className="mt-4 divide-y divide-neutral-100">
+        {SHORTCUTS.map(([k, d]) => (
+          <div key={k} className="flex items-center justify-between gap-4 py-2 text-[12.5px]">
+            <span className="text-neutral-600">{d}</span>
+            <kbd className="kbd !h-[19px] !min-w-0 px-1.5">{k}</kbd>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
 }
 
-function ImportConfirmation({ block }: { block: Extract<ConvBlock, { type: "confirm" }> }) {
-  const s = useStore();
-  const busy = s.running || s.agentRunning || s.importRunning || s.saving || s.boqDirty || s.settingsDirty || s.mappingDirty;
-  const mapping = s.views.find(v => v.kind === "columnMapping" && (v.fileId === block.fileId || block.description.includes(v.filename)));
-  const closedMapping = s.closedViewIds.find(id => id === `view:mapping:${block.fileId}` || s.files.some(f => id === `view:mapping:${f.id}` && block.description.includes(f.filename)));
-  const mappingId = mapping?.id ?? closedMapping;
-  const review = () => { if (!mappingId) return; s.setActiveView(mappingId); if (!mapping && s.projectId) void s.init(s.projectId, true); };
-  if (s.activeViewId !== mappingId) return <div className="import-confirm" role="status"><div><strong>有资料需要核对</strong><p>{block.description}</p></div><button className="cost-btn" onClick={mappingId ? review : () => s.setActiveView("view:files")}>核对并导入<ArrowRight size={14} /></button></div>;
-  return <div className="import-confirm" role="status"><div><strong>请核对表格，再导入</strong><p>{s.mappingDirty ? "你改了识别结果，请先保存，再确认导入。" : block.description}</p></div><div className="cost-actions"><button className="cost-btn" disabled={busy} onClick={() => void s.confirmImport(block.runId, false)}>取消导入</button>{mappingId && <button className="cost-btn" onClick={review}>核对表格</button>}<button className="cost-btn primary" disabled={busy || s.mappingDirty} onClick={() => void s.confirmImport(block.runId, true)}>确认导入</button></div></div>;
+/** 工作台全局快捷键：Ctrl+Z 撤销最近一笔清单修改，Ctrl+K 聚焦对话输入，? 打开帮助。 */
+function useShortcuts(setConvOpen: (open: boolean) => void, setHelpOpen: (open: boolean) => void) {
+  useEffect(() => {
+    const openConv = () => setConvOpen(true);
+    window.addEventListener(OPEN_CONV_EVENT, openConv);
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      const inField = !!(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable));
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !inField) { e.preventDefault(); setHelpOpen(true); return; }
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "k") {
+        e.preventDefault();
+        setConvOpen(true);
+        requestAnimationFrame(() => window.dispatchEvent(new Event(FOCUS_COMPOSER)));
+        return;
+      }
+      if (key !== "z" || e.shiftKey) return;
+      // 焦点在输入框里时放行原生撤销（撤销的是框内文字，不是清单数据）
+      if (inField) return;
+      e.preventDefault();
+      void useStore.getState().undoLast();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_CONV_EVENT, openConv);
+    };
+  }, [setConvOpen, setHelpOpen]);
 }
+
+const CONV_W_KEY = "cost-conv-w";
+const CONV_W_MIN = 300;
+const CONV_W_MAX = 560;
 
 export function Workbench({ projectId }: { projectId: string }) {
   const s = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
-  const infoRef = useRef<HTMLDetailsElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const selectedViews = useRef<Partial<Record<ObjectId, string>>>({});
+  const [convOpen, setConvOpen] = useState(true);
+  const [convW, setConvW] = useState(() => {
+    if (typeof localStorage === "undefined") return 380;
+    const v = Number(localStorage.getItem(CONV_W_KEY));
+    return Number.isFinite(v) && v > 0 ? Math.min(CONV_W_MAX, Math.max(CONV_W_MIN, v)) : 380;
+  });
+  const [resizing, setResizing] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  /** 每个分区上次停留的视图：切回分区时回到原处 */
+  const remembered = useRef<Partial<Record<SectionId, string>>>({});
+
+  // 对话栏拖宽：指针捕获拖动，键盘也可用 ←/→ 微调
+  const onResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setResizing(true);
+  };
+  const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    setConvW(Math.min(CONV_W_MAX, Math.max(CONV_W_MIN, e.clientX)));
+  };
+  const onResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    setResizing(false);
+    localStorage.setItem(CONV_W_KEY, String(convW));
+  };
+  const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = Math.min(CONV_W_MAX, Math.max(CONV_W_MIN, convW + (e.key === "ArrowRight" ? 24 : -24)));
+    setConvW(next);
+    localStorage.setItem(CONV_W_KEY, String(next));
+  };
 
   useEffect(() => {
-    const origin = new URLSearchParams(location.search).get("harnessOrigin");
-    if (origin) sessionStorage.setItem("installation:harnessOrigin", origin);
     void s.init(projectId);
-    selectedViews.current = {};
+    remembered.current = {};
+    // 空闲时轮询，同步其他窗口或后台任务带来的变化
     const timer = setInterval(() => {
-      const state = useStore.getState();
-      if (document.visibilityState === "visible" && !state.running && !state.importRunning && !state.saving && !state.boqDirty) void state.init(projectId, true);
-    }, 8000);
+      const st = useStore.getState();
+      if (document.visibilityState === "visible" && !isBusy(st) && !isDirty(st)) void st.init(projectId, true);
+    }, 10000);
     return () => clearInterval(timer);
   }, [projectId]);
 
-  // 与对话侧的握手：接受"定位到某个结果视图/某一行"和"立刻重载"。
-  // 定位是用户点了卡片才发生的，不是系统替用户决定看什么。
-  useEffect(() => {
-    const parentOrigin = new URLSearchParams(location.search).get("harnessOrigin") ?? sessionStorage.getItem("installation:harnessOrigin");
-    if (!parentOrigin || window.parent === window) return;
-    const receive = (event: MessageEvent) => {
-      if (event.origin !== parentOrigin || event.source !== window.parent) return;
-      if (event.data?.projectId !== projectId) return;
-      if (event.data.type === "installation:taskState") {
-        useStore.setState({ agentRunning: !!event.data.running });
-        return;
-      }
-      if (event.data.type === "installation:importState") {
-        useStore.setState({ importRunning: !!event.data.running });
-        return;
-      }
-      if (event.data.type === "installation:focus") {
-        const store = useStore.getState();
-        if (typeof event.data.viewId === "string") {
-          store.setActiveView(event.data.viewId);
-          if (!store.views.some(v => v.id === event.data.viewId)) void store.init(projectId, true);
-        }
-        if (typeof event.data.boqQuery === "string" && event.data.boqQuery) store.gotoBoqItem(event.data.boqQuery);
-        return;
-      }
-      if (event.data.type === "installation:refresh" && !useStore.getState().running) void useStore.getState().init(projectId, true);
-    };
-    window.addEventListener("message", receive);
-    return () => window.removeEventListener("message", receive);
-  }, [projectId]);
+  useShortcuts(setConvOpen, setHelpOpen);
 
-  // 视图重放完成才通知对话侧：在那之前"定位到某个结果"没有落点。
   useEffect(() => {
-    if (!s.ready || s.loadingError || s.projectId !== projectId) return;
-    const parentOrigin = new URLSearchParams(location.search).get("harnessOrigin") ?? sessionStorage.getItem("installation:harnessOrigin");
-    if (parentOrigin && window.parent !== window) window.parent.postMessage({ type: "installation:ready", projectId }, parentOrigin);
-  }, [s.ready, s.loadingError, s.projectId, projectId]);
+    document.title = s.projectName ? `${s.projectName} · 安装造价` : "安装造价工作台";
+  }, [s.projectName]);
 
-  const activityStamp = `${s.lastViewEvent}:${s.receipts[0]?.id}:${s.files.map(f => `${f.id}:${f.status}`).join(",")}:${s.blocks.filter(b => b.type === "confirm").map(b => b.type === "confirm" ? `${b.confirmId}:${b.decided}` : "").join(",")}`;
+  // 页内切换已有放弃确认；刷新或关闭页面时使用浏览器原生未保存提示
+  const unsaved = isDirty(s) || s.saving;
   useEffect(() => {
-    if (!s.ready || s.projectId !== projectId) return;
-    const origin = sessionStorage.getItem("installation:harnessOrigin");
-    if (origin && window.parent !== window) window.parent.postMessage({ type: "installation:activityChanged", projectId }, origin);
-  }, [activityStamp, s.ready, s.projectId, projectId]);
-
-  // 页内切换保留编辑决策，刷新或关闭页面时使用浏览器原生未保存提示。
-  useEffect(() => {
-    if (!s.mappingDirty && !s.settingsDirty && !s.boqDirty && !s.saving) return;
+    if (!unsaved) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [s.mappingDirty, s.settingsDirty, s.boqDirty, s.saving]);
-  const active = s.views.find(v => v.id === s.activeViewId);
-  const object: ObjectId = active ? OWNER[active.kind] : (PAGES.find(n => `empty:${n.id}` === s.activeViewId)?.id ?? "boq");
-  const owned = s.views.filter(v => OWNER[v.kind] === object);
-  if (active) selectedViews.current[object] = active.id;
-  const busy = s.running || s.agentRunning || s.importRunning || s.saving || uploading || !s.ready;
-  const actionsBlocked = busy || s.mappingDirty || s.settingsDirty || s.boqDirty || !!s.loadingError;
+  }, [unsaved]);
 
-  const open = (id: ObjectId) => {
-    const current = s.views.find(v => v.id === s.activeViewId);
-    if (current && OWNER[current.kind] === id) return;
-    const remembered = selectedViews.current[id];
-    const target = s.views.find(v => v.id === remembered && OWNER[v.kind] === id)
-      ?? (id === "results" ? [...s.views].reverse().find(v => OWNER[v.kind] === id) : undefined);
-    s.setActiveView(target?.id ?? PAGES.find(n => n.id === id)!.viewId);
+  const active = s.views.find((v) => v.id === s.activeViewId);
+  const section: SectionId = active ? sectionOf(active.kind) : s.activeViewId === "empty:results" ? "results" : "overview";
+  if (active) remembered.current[section] = active.id;
+  const blocked = isBusy(s) || isDirty(s) || !!s.loadingError || !s.ready;
+
+  const open = (id: SectionId) => {
+    if (section === id) return;
+    const back = s.views.find((v) => v.id === remembered.current[id] && sectionOf(v.kind) === id);
+    s.setActiveView(back?.id ?? SECTIONS.find((n) => n.id === id)!.home);
   };
 
   const upload = async (files: File[]) => {
-    if (actionsBlocked) { toast.info("请先完成当前任务，保存或取消编辑后再导入"); return; }
-    setUploading(true);
-    try { for (const file of files) await useStore.getState().upload(file); }
-    finally { setUploading(false); }
+    if (blocked) { toast.info("请先完成当前任务，保存或取消编辑后再导入"); return; }
+    for (const file of files) await useStore.getState().upload(file);
   };
+  const pickFile = () => fileRef.current?.click();
 
-  const pending = s.blocks.filter((b): b is Extract<ConvBlock, { type: "confirm" }> => b.type === "confirm" && !b.decided);
+  const sectionViews = s.views.filter((v) => sectionOf(v.kind) === section);
+  const body = (() => {
+    if (!s.ready) return <div className="cost-empty"><Loader2 size={22} className="spin" /><p>正在读取项目资料</p></div>;
+    if (s.loadingError && !s.projectName) return null;
+    if (section === "results") return <ResultsPanel projectId={projectId} onUpload={pickFile} />;
+    if (section === "boq" && !s.items.length) return <div className="cost-empty">
+      <ClipboardList size={30} /><h3>还没有工程清单</h3><p>上传招标清单、投标报价或结算清单（Excel / PDF），系统会自动识别表格结构。</p>
+      <button className="cost-btn primary" disabled={blocked} onClick={pickFile}><Upload size={14} />上传清单</button>
+    </div>;
+    const view = active ?? sectionViews[0];
+    return view ? <>
+      <SubTabs views={sectionViews} active={view} label={`${SECTIONS.find((n) => n.id === section)!.label}视图切换`} />
+      <ViewRenderer view={view} onUpload={pickFile} />
+    </> : null;
+  })();
 
-  const lastRunBlock = [...s.blocks].reverse().find(b => "runId" in b && b.runId);
-  const latestRunId = lastRunBlock && "runId" in lastRunBlock ? lastRunBlock.runId : undefined;
-  const errors = s.blocks.filter((b): b is Extract<ConvBlock, { type: "error" }> => b.type === "error" && (!b.runId || b.runId === latestRunId)).slice(-1);
-  const title = active?.title ?? PAGES.find(n => n.id === object)?.label ?? "清单";
-  useEffect(() => {
-    const origin = sessionStorage.getItem("installation:harnessOrigin");
-    if (s.ready && origin && window.parent !== window) window.parent.postMessage({ type: "installation:workspaceState", projectId, title, busy: actionsBlocked }, origin);
-  }, [s.ready, projectId, title, actionsBlocked]);
-  const ownedTitle = PAGES.find(n => n.id === object)?.label ?? "清单";
-  const emptyTask = EMPTY_TASK[object];
-  const nav = PAGES.find(n => n.id === object)!;
-
-  return <main className={`cost-workbench ${dragging ? "drop-armed" : ""}`} onDragOver={e => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); void upload([...e.dataTransfer.files]); }}>
-    <ConfirmDialog open={!!s.pendingViewId} busy={s.saving} title="放弃未保存的修改？" description="当前页面有未保存的调整。返回后保存，或放弃修改并切换页面。" confirmText="放弃并切换" onCancel={() => useStore.setState({ pendingViewId: null })} onConfirm={() => { const id = useStore.getState().pendingViewId; useStore.setState({ mappingDirty: false, settingsDirty: false, boqDirty: false, pendingViewId: null }); if (id) useStore.getState().setActiveView(id); }} />
-    <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv,.pdf" multiple className="hidden" onChange={e => { void upload([...(e.target.files ?? [])]); e.target.value = ""; }} />
-    <div className="cost-workspace-top"><a className="cost-back" href="/" aria-label="返回工程项目"><ArrowLeft size={14} />工程项目</a><span title={s.projectName}>{s.projectName || "造价工作区"}</span></div>
-    <nav className="cost-project-nav" aria-label="工程工作区">{NAV.map(n => <button key={n.id} onClick={() => open(n.id)} aria-current={object === n.id ? "page" : undefined} className={object === n.id ? "active" : ""}>{n.label}{n.id === "files" && pending.length > 0 && <small>{pending.length} 待核对</small>}</button>)}<details ref={infoRef} className="cost-project-info" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.open = false; }} onKeyDown={e => { if (e.key === "Escape") { e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}><summary className={INFO.some(n => n.id === object) ? "active" : ""}>工程信息</summary><div>{INFO.map(n => <button key={n.id} aria-current={object === n.id ? "page" : undefined} onClick={() => { open(n.id); if (infoRef.current) infoRef.current.open = false; }}>{n.label}</button>)}</div></details></nav>
-    <section className="cost-content">
-      <div className="cost-content-heading"><h2>{PAGES.some(n => n.viewId === active?.id) ? nav.label : title}</h2><div className="cost-actions">
-        {object === "files" && <button className="cost-btn primary" disabled={actionsBlocked} onClick={() => fileRef.current?.click()}><Upload size={14} />上传文件</button>}
-        {object === "boq" && s.items.length > 0 && <button className="cost-btn" disabled={actionsBlocked} onClick={() => void s.send("帮我给工程清单报价：查材料价、匹配定额并计算，先展示结果，需要修改清单时请求我的确认。")}>让助手测算</button>}
-        {object === "results" && s.items.length > 0 && <button className="cost-btn primary" disabled={actionsBlocked} onClick={() => void s.send("导出修改后的清单 Excel")}><Download size={13} />导出 Excel</button>}
-      </div></div>
-      {owned.length > 1 && <div className="cost-view-switch"><label className="cost-view-picker">{ownedTitle === "成果" ? "查看成果" : `切换${ownedTitle}`}<select aria-label={`切换${ownedTitle}页面`} value={active?.id ?? ""} onChange={e => s.setActiveView(e.target.value)}>{[...owned].reverse().map(v => <option key={v.id} value={v.id}>{v.title}</option>)}</select></label>{object === "files" && active?.id !== "view:files" && <button className="cost-btn" onClick={() => s.setActiveView("view:files")}>全部资料</button>}{object === "boq" && active?.id !== "view:boq" && <button className="cost-btn" onClick={() => s.setActiveView("view:boq")}>完整清单</button>}</div>}
-      {active && ["quotaResult", "quotationMatch", "feeSummary", "measureFee", "anomalyTable", "fileCompare", "breakdown"].includes(active.kind) && <p className="cost-file-hint">此结果保留生成时的数据。清单或计价设置变化后，可让助手重新生成。</p>}
-      {pending.map(block => <ImportConfirmation key={block.confirmId} block={block} />)}
-      {busy && s.ready && <div className="cost-status" role="status"><Loader2 size={14} className="spin" />{s.saving ? "正在保存…" : s.agentRunning ? "助手正在处理…" : uploading || s.importRunning ? "正在整理文件…" : "正在处理…"}</div>}
-      {s.loadingError && <div className="cost-error" role="alert">{s.loadingError}<button className="cost-btn" disabled={s.saving || s.running || s.agentRunning || s.importRunning} onClick={() => void s.init(projectId, true)}>重试</button></div>}
-      {errors.map((e, i) => <div className="cost-error" key={i} role="alert">{e.text}</div>)}
-      <div className="cost-result-body">{!s.ready ? <div className="cost-empty"><Loader2 size={22} className="spin" /><p>正在读取项目资料</p></div> : s.loadingError && !s.projectName ? null : object === "boq" && !s.items.length ? <div className="cost-empty"><ClipboardList size={30} /><h3>还没有工程清单</h3><p>上传清单后，系统会帮你整理。</p><button className="cost-btn primary" disabled={actionsBlocked} onClick={() => fileRef.current?.click()}><Upload size={14} />上传清单</button></div> : active ? <Result key={active.kind === "boqTable" ? `${active.id}:${s.boqFocusVersion}` : active.id} view={active} onUpload={() => fileRef.current?.click()} /> : <div className="cost-empty"><FileSpreadsheet size={30} /><h3>尚未生成成果</h3><p>{s.items.length ? "在对话里提出测算、检查或汇总任务，完成后会在这里显示。" : "先上传清单，再查看成果。"}</p>{s.items.length && emptyTask ? <button className="cost-btn primary" disabled={actionsBlocked} onClick={() => void s.send(emptyTask)}>让助手汇总费用<ArrowRight size={14} /></button> : <button className="cost-btn" onClick={() => open("files")}>查看项目资料<ArrowRight size={14} /></button>}</div>}</div>
-    </section>{dragging && <div className="drop-overlay">松开文件，导入清单或项目资料</div>}
+  return <main
+    className={`wb ${convOpen ? "conv-open" : "conv-closed"} ${dragging ? "drop-armed" : ""} ${resizing ? "wb-resizing" : ""}`}
+    style={{ "--conv-w": `${convW}px` } as React.CSSProperties}
+    onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
+    onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+    onDrop={(e) => { e.preventDefault(); setDragging(false); void upload([...e.dataTransfer.files]); }}
+  >
+    <ConfirmDialog open={!!s.pendingViewId} busy={s.saving} title="放弃未保存的修改？" description="当前页面有未保存的调整。返回后保存，或放弃修改并切换页面。" confirmText="放弃并切换"
+      onCancel={() => useStore.setState({ pendingViewId: null })}
+      onConfirm={() => {
+        const id = useStore.getState().pendingViewId;
+        useStore.setState({ mappingDirty: false, settingsDirty: false, boqDirty: false, pendingViewId: null });
+        if (id) useStore.getState().setActiveView(id);
+      }} />
+    <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv,.pdf" multiple hidden onChange={(e) => { const fs = [...(e.target.files ?? [])]; e.target.value = ""; void upload(fs); }} />
+    {convOpen && (
+      <aside className="wb-conv" aria-label="造价助手对话">
+        <Conversation onCollapse={() => setConvOpen(false)} />
+        <div
+          className="wb-conv-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整对话栏宽度"
+          title="拖动调整对话栏宽度，双击复位"
+          onPointerDown={onResizeStart}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          onPointerCancel={onResizeEnd}
+          onDoubleClick={() => { setConvW(380); localStorage.setItem(CONV_W_KEY, "380"); }}
+          tabIndex={0}
+          onKeyDown={onResizeKey}
+        />
+      </aside>
+    )}
+    <div className="wb-main">
+      <ProjectHeader section={section} onOpen={open} onUpload={pickFile} convOpen={convOpen} onOpenConv={() => setConvOpen(true)} />
+      <section className={`wb-body ${section === "results" ? "is-results" : ""}`}>
+        <PendingImports />
+        {s.loadingError && <div className="cost-error" role="alert">{s.loadingError}<button className="cost-btn" disabled={isBusy(s)} onClick={() => void s.init(projectId, true)}>重试</button></div>}
+        {body}
+      </section>
+      {s.ready && <StatusBar />}
+    </div>
+    {dragging && <div className="drop-overlay">松开文件，导入清单或项目资料</div>}
+    <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
   </main>;
 }

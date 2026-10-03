@@ -56,4 +56,35 @@ describe("parseWorkbook 真实导出容错", () => {
     // 有名称+编码即可成项；数值由导入层 numCell 容错兜底
     expect(tmp?.isItem).toBe(true);
   });
+
+  it("特征里写「详见图集…第65页」的清单行不是页脚噪声，必须保留", async () => {
+    const buf = await wb([
+      ["序号", "项目编码", "", "项目名称", "项目特征", "", "单位", "工程量", "综合单价", "合价"],
+      ["71", "031003001008", "", "螺纹阀门", "1、名称：止回阀", "", "个", "5", "29.64", "148.20"],
+      // 真实案例：减压器子目特征引用图集页码，曾被页脚噪声过滤整行删掉（漏 1281.28 元）
+      ["72", "031003006001", "", "减压器", "1、类型：可调式减压阀组\n2、规格：DN50\n4、详见图集01SS105第65页", "", "组", "1", "1281.28", "1281.28"],
+      ["73", "031002003001", "", "套管", "1、名称：钢套管", "", "个", "2", "23.84", "47.68"],
+    ]);
+    const s = parseWorkbook(buf)[0];
+    const item = s.rows.find((r) => r.cells.code === "031003006001");
+    expect(item?.isItem).toBe(true);
+    expect(item?.cells.totalPrice).toBe("1281.28");
+    expect(s.rows.filter((r) => r.isItem)).toHaveLength(3);
+  });
+
+  it("真页脚（纯页码行 / 工程名称页眉）仍然过滤", async () => {
+    const buf = await wb([
+      ["工程名称：H01综合楼安装工程 标段： 第1页 共2页"],
+      ["序号", "项目编码", "", "项目名称", "项目特征", "", "单位", "工程量", "综合单价", "合价"],
+      ["1", "031003001008", "", "螺纹阀门", "1、名称：止回阀", "", "个", "5", "29.64", "148.20"],
+      ["第2页 共2页"],
+      ["2", "031003006001", "", "减压器", "1、可调式减压阀组", "", "组", "1", "1281.28", "1281.28"],
+      ["编制人（造价人员）：", "复核人（造价工程师）："],
+    ]);
+    const s = parseWorkbook(buf)[0];
+    expect(s.rows.filter((r) => r.isItem)).toHaveLength(2);
+    expect(s.rows.some((r) => r.raw.join("").includes("工程名称"))).toBe(false);
+    expect(s.rows.some((r) => r.raw.join("").includes("第2页"))).toBe(false);
+    expect(s.rows.some((r) => r.raw.join("").includes("编制人"))).toBe(false);
+  });
 });

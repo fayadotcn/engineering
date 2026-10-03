@@ -45,7 +45,16 @@ export async function ensureInspection(
 
 /** 类型判定达到这个置信度，才算"本文件自己说得清楚"，可以顶掉模板记录的类型。 */
 const TYPE_CERTAIN = 0.9;
-export const SHEET_TYPE_LABEL = { BOQ: "清单", QUOTATION: "询价表", GENERIC: "忽略" } as const;
+export const SHEET_TYPE_LABEL = {
+  BOQ: "清单",
+  QUOTATION: "询价表",
+  GENERIC: "忽略",
+  COMPARE: "对比表",
+  APPROVAL: "报审资料",
+  PENDING_QUOTE: "待报价清单",
+  FACTS: "汇总/说明表",
+  MATERIAL_PRICE: "材料价格表",
+} as const;
 
 export interface TemplateRecord {
   sheetType: string;
@@ -139,10 +148,10 @@ export function applySheetPatch(
   sheet: SheetMeta,
   body: {
     columns?: Record<string, number | null>;
-    type?: "BOQ" | "QUOTATION" | "GENERIC";
+    type?: SheetInspection["type"];
   }
 ): void {
-  if (body.type && ["BOQ", "QUOTATION", "GENERIC"].includes(body.type)) {
+  if (body.type && SHEET_TYPE_LABEL[body.type] !== undefined) {
     sheet.type = body.type;
     sheet.typeConfidence = 1;
     sheet.typeEvidence = "用户指定";
@@ -237,6 +246,8 @@ export function toSheetMappings(
       headerRow: s.headerRow,
       merged: s.merged,
       columns: s.columns,
+      taxIncluded: s.taxIncluded,
+      unitProject: s.unitProject,
     };
   return out;
 }

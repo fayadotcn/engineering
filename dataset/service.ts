@@ -125,7 +125,7 @@ export async function createDataset(
         priceType: normalizePriceType(defaults?.priceType) || undefined,
       };
       const targets = Object.values(meta.mapping).filter(
-        (s) => s.type === "QUOTATION"
+        (s) => s.type === "QUOTATION" || s.type === "MATERIAL_PRICE"
       );
       if (targets.length) {
         // 确认门（同 file.ingest）：模板命中/人工改过/置信≥0.9 才自动放行；
@@ -358,7 +358,7 @@ export async function saveDatasetMapping(
   id: string,
   sheetName: string,
   columns?: Record<string, number | null>,
-  type?: "BOQ" | "QUOTATION" | "GENERIC"
+  type?: Parameters<typeof applySheetPatch>[1]["type"]
 ) {
   const ds = await prisma.dataset.findUnique({ where: { id } });
   if (!ds) return null;

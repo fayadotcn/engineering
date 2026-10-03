@@ -30,6 +30,8 @@ export function rowToBoqInput(
     sortOrder: number;
     section: string;
     feeType: SheetFeeType;
+    /** 行级单位工程覆盖（「单位工程名称：X」标记行），缺省用 sheet 级 */
+    unitProject?: string;
   }
 ): Prisma.BoqItemCreateManyInput & {
   __flags: { nonNumericQty: boolean; derivedUnitPrice: boolean };
@@ -58,6 +60,9 @@ export function rowToBoqInput(
   let price = D(numCell(row.cells.unitPrice));
   // 清单表里的「材料单价/主材价」列 → mainMaterialPrice（组价输入，非综合单价）
   const mainMat = D(numCell(row.cells.price));
+  // 综合单价分析表自带的人材机分解列（每清单单位）→ 成本构成分析直接消费
+  const laborUnit = D(numCell(row.cells.laborPrice));
+  const machineUnit = D(numCell(row.cells.machinePrice));
   const total = (row.cells.totalPrice ?? "").trim()
     ? D(numCell(row.cells.totalPrice))
     : lineTotal(qty, price);
@@ -83,9 +88,13 @@ export function rowToBoqInput(
     quantity: round3(qty),
     unitPrice: round2(price),
     mainMaterialPrice: round2(mainMat),
+    laborUnitPrice: round2(laborUnit),
+    machineUnitPrice: round2(machineUnit),
     totalPrice: total.toDecimalPlaces(2),
     feeType: ctx.feeType,
     sectionPath: ctx.section,
+    unitProject: ctx.unitProject ?? sheet.unitProject ?? "",
+    taxIncluded: sheet.taxIncluded === true,
     isHeader: row.isHeader && !row.isItem,
     sortOrder: ctx.sortOrder,
     discipline: inferDiscipline(name, rawFeature, ctx.section),

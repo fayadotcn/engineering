@@ -26,7 +26,7 @@ const CATEGORIES: [RegExp, string][] = [
   [/电线|导线|BV|BVR|RVV|RVS|BYJ/, "电线"],
   [/配电箱|控制箱|配电柜|开关柜|电表箱|接线箱/, "配电箱柜"],
   [/母线|母线槽/, "母线"],
-  [/镀锌钢管|钢塑复合管|不锈钢管|无缝钢管|焊接钢管|螺旋钢管|铸铁管|PPR|PE|PVC|UPVC|HDPE|JDG|KBG|SC管|穿线管|软管|金属软管|水管|管道|管材/, "管道"],
+  [/镀锌钢管|钢塑复合管|不锈钢管|无缝钢管|焊接钢管|螺旋钢管|铸铁管|PPR|PE(?!X)(?!\s*=)|PVC|UPVC|HDPE|JDG|KBG|SC管|穿线管|软管|金属软管|水管|管道|管材/, "管道"],
   [/蝶阀|闸阀|球阀|止回阀|截止阀|安全阀|减压阀|排气阀|电磁阀|信号阀|阀门/, "阀门"],
   [/喷头|喷淋头|水流指示器|湿式报警阀|末端试水/, "喷淋设备"],
   [/消火栓|灭火器|水泵接合器/, "消防设备"],
@@ -51,7 +51,7 @@ const MATERIALS: [RegExp, string][] = [
   [/焊接钢管/, "焊接钢管"],
   [/球墨铸铁|铸铁管/, "铸铁管"],
   [/PPR|PP-R/, "PPR"],
-  [/HDPE|PE(?!X)/, "PE"],
+  [/HDPE|PE(?!X)(?!\s*=)/, "PE"],
   [/UPVC|PVC-U|PVC/, "PVC"],
   [/JDG/, "JDG"],
   [/KBG/, "KBG"],
@@ -134,13 +134,25 @@ export function parseSemanticFeature(
   if (pn) f.pressure = `PN${pn[1]}`;
   else if (mpa) f.pressure = `${mpa[1]}MPa`;
 
-  // Cable/duct spec: 4x25+1x16, 3x2.5, 100x200, 2*4
+  // 设备额定功率：Pe=60kW / Pjs=30kW / N=4.0kW(水泵风机电机) / 功率 7.5kW / 315kVA。
+  // 配电箱柜、风机、水泵等的第一定价因子——不进特征，
+  // 不同功率的设备会被当「相同项」误报单价不一致（5kW 与 132kW 本就该不同价）。
+  // 复合写法 Pe=165+165(备)kW 取第一个数（额定容量，备机不计）。
+  // 单位强制 kW/kVA：N=/PN= 之类的非功率写法拿不到单位就不会误中。
+  const power =
+    text.match(/\b(?:P[EJSN]{0,2}|N)\s*[=＝]\s*(\d+(?:\.\d+)?)\s*(?:\+\s*\d+(?:\.\d+)?\s*[(（]?备?[)）]?\s*)*(KVA|KW)\b/i) ??
+    text.match(/(?:功率|额定功率|容量|额定容量)\s*[:：=＝]?\s*(\d+(?:\.\d+)?)\s*(KVA|KW)\b/i);
+  if (power) f.power = `${power[1]}${power[2].toUpperCase() === "KVA" ? "kVA" : "kW"}`;
+
+  // Cable/duct spec: 4x25+1x16, 3x2.5, 100x200, 2*4, De25*2.3(壁厚)。
+  // 第二段允许小数（壁厚 2.3/4.2 是区分冷热水管的关键特征），分隔符统一归一为 x，
+  // 否则 4x25 与 4*25 会被特征比对当成「规格不同」误报。
   const cable = text.match(/(\d+)\s*[X×*]\s*(\d+(?:\.\d+)?)(\s*\+\s*\d+\s*[X×*]\s*\d+(?:\.\d+)?)*/);
-  const dim = text.match(/(\d{2,4})\s*[X×*]\s*(\d{2,4})(?!\d)/);
+  const dim = text.match(/(\d{2,4})\s*[X×*]\s*(\d+(?:\.\d+)?)(?!\d)/);
   if (cable && /电缆|电线|导线|YJV|BV|RVV|BYJ|芯/.test(text)) {
-    f.specification = cable[0].replace(/\s/g, "");
+    f.specification = cable[0].replace(/\s/g, "").replace(/[×*X]/g, "x");
   } else if (dim) {
-    f.specification = dim[0].replace(/\s/g, "");
+    f.specification = dim[0].replace(/\s/g, "").replace(/[×*X]/g, "x");
   }
   // 定额式上限规格：截面 35mm²以内 / 重量 0.3t以内 / 容量 500L以内 / 功率 15kW以下
   // 归一化为「值+单位」，两侧（定额名/清单特征）同式可精确比对
@@ -204,6 +216,7 @@ export function groupKey(
     f.material ?? "",
     f.diameter ?? "",
     !f.diameter && f.specification ? f.specification : "",
+    f.power ?? "",
     f.connectionMethod ?? "",
     f.system ?? "",
     unit,
@@ -222,16 +235,19 @@ export function featureCompatible(
     "category",
     "material",
     "diameter",
+    "specification",
     "connectionMethod",
     "system",
     "pressure",
+    "power",
     "installationMethod",
     "location",
   ];
   for (const k of fields) {
     const av = a[k];
     const bv = b[k];
-    if (av && bv && av !== bv) conflicts.push(`${k}: ${av} ≠ ${bv}`);
+    // 两侧值排序后拼接，避免同一冲突因行序不同出现「A≠B」与「B≠A」两条。
+    if (av && bv && av !== bv) conflicts.push(`${k}: ${[av, bv].sort().join(" ≠ ")}`);
   }
   return { ok: conflicts.length === 0, conflicts };
 }

@@ -137,11 +137,12 @@ export function buildPriceRows(
   const filePeriod = filenamePeriod(filename);
 
   for (const sheet of sheets) {
-    if (sheet.type === "BOQ") {
+    if (sheet.type === "BOQ" || sheet.type === "PENDING_QUOTE") {
       skippedBoqSheets.push(sheet.sheetName);
       continue;
     }
-    if (sheet.type !== "QUOTATION") continue;
+    // MATERIAL_PRICE（信息价/市场价表）与 QUOTATION 同管道进价格库
+    if (sheet.type !== "QUOTATION" && sheet.type !== "MATERIAL_PRICE") continue;
     const usedCols = new Set(
       Object.values(sheet.columns).filter((v): v is number => v !== undefined)
     );

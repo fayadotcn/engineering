@@ -7,6 +7,7 @@ import {
   findPriceAnomalies,
   findSameItemDifferentPrice,
 } from "@cost-engine/compare";
+import { fmtMoney } from "@cost-engine/money";
 import type { AnomalyRow, DiffRow, WorkspaceView } from "@shared/types";
 
 const ANOMALY_LABEL: Record<string, string> = {
@@ -187,33 +188,53 @@ registerTool({
 
 registerTool({
   name: "boq.compareFiles",
-  description: "两版清单对审：按编码/语义对齐，输出价差/量差/独有项与总价差额（招标vs中标vs结算）",
+  description: "两版清单对审：按编码/语义对齐，输出价差/量差/独有项与总价差额；自动按文件阶段配对（招标vs中标/结算、上期vs本期进度），两份都带汇总表时附申报口径对比",
   implemented: true,
   schema: z.object({
-    fileAId: z.string().optional().describe("基准文件；缺省取最早的清单文件"),
-    fileBId: z.string().optional().describe("对比文件；缺省取最新的清单文件"),
+    fileAId: z.string().optional().describe("基准文件；缺省按阶段/期次自动配对取基准侧"),
+    fileBId: z.string().optional().describe("对比文件；缺省按阶段/期次自动配对取对比侧"),
   }),
   handler: async (ctx, args: { fileAId?: string; fileBId?: string }) => {
     const { prisma } = await import("@database/client");
+    const { getFact } = await import("@project/facts");
+    const { compareBoqSets, compareSummary, compareDeclaredFees, pickComparePair } = await import("@cost-engine/fileCompare");
     const files = await prisma.projectFile.findMany({
       where: { projectId: ctx.projectId, kind: { startsWith: "BOQ" }, status: "PARSED" },
       orderBy: { createdAt: "asc" },
     });
     if (files.length < 2 && !args.fileAId && !args.fileBId)
-      return { observation: { error: "需要两份清单文件才能对审，请再上传一版（如中标/结算清单）" } };
-    const fileA = args.fileAId ? files.find((f) => f.id === args.fileAId) : files[0];
-    const fileB = args.fileBId ? files.find((f) => f.id === args.fileBId) : files[files.length - 1];
+      return { observation: { error: "需要两份清单文件才能对审，请再上传一版（如中标/结算/进度申报清单）" } };
+    const [autoA, autoB] = files.length >= 2 ? pickComparePair(files) : [files[0], files[0]];
+    const fileA = args.fileAId ? files.find((f) => f.id === args.fileAId) : autoA;
+    const fileB = args.fileBId ? files.find((f) => f.id === args.fileBId) : autoB;
     if (!fileA || !fileB || fileA.id === fileB.id)
       return { observation: { error: "文件选择无效" } };
 
     const items = await listBoq(ctx.projectId);
     const a = items.filter((i) => i.fileId === fileA.id);
     const b = items.filter((i) => i.fileId === fileB.id);
-    const { compareBoqSets, compareSummary } = await import("@cost-engine/fileCompare");
     const rows = compareBoqSets(a, b);
     const summary = compareSummary(rows);
+
+    // 申报口径对比：两份文件都有「文件汇总」事实时，费用口径差 + 单位工程差一并给出
+    const declaredUnits = async (filename: string) => {
+      const f = await getFact(ctx.projectId, `文件汇总:${filename}`);
+      if (!f) return null;
+      try { return JSON.parse(f.value) as Record<string, unknown>[]; } catch { return null; }
+    };
+    const [unitsA, unitsB] = await Promise.all([declaredUnits(fileA.filename), declaredUnits(fileB.filename)]);
+    const declared = unitsA && unitsB ? compareDeclaredFees(unitsA, unitsB) : null;
+    const declaredTotal = declared?.labels.find((l) => l.label === "合计");
+
+    const stageTag = (f: { stage: string; period: string }) =>
+      [f.stage, f.period].filter(Boolean).join("·");
     return {
-      observation: { fileA: fileA.filename, fileB: fileB.filename, ...summary },
+      observation: {
+        fileA: fileA.filename, fileB: fileB.filename,
+        stageA: stageTag(fileA) || undefined, stageB: stageTag(fileB) || undefined,
+        ...summary,
+        declared: declared ?? undefined,
+      },
       views: [
         {
           kind: "fileCompare",
@@ -221,15 +242,23 @@ registerTool({
           title: `对审 ${fileA.filename} ↔ ${fileB.filename}`,
           labelA: fileA.filename,
           labelB: fileB.filename,
+          fileAId: fileA.id,
+          fileBId: fileB.id,
+          stageA: fileA.stage || undefined,
+          periodA: fileA.period || undefined,
+          stageB: fileB.stage || undefined,
+          periodB: fileB.period || undefined,
           rows,
           summary,
+          declared: declared ?? undefined,
         },
       ],
       message:
-        `对审完成：${fileA.filename} vs ${fileB.filename} — 一致 ${summary.same} 项，` +
+        `对审完成：${fileA.filename}${stageTag(fileA) ? `（${stageTag(fileA)}）` : ""} vs ${fileB.filename}${stageTag(fileB) ? `（${stageTag(fileB)}）` : ""} — 一致 ${summary.same} 项，` +
         `价差 ${summary.priceDiff} 项，量差 ${summary.qtyDiff} 项` +
         (summary.qtyOver15 ? `（其中 ${summary.qtyOver15} 项量差>15%，按 GB50500 应重新组价）` : "") +
-        `，仅A ${summary.onlyA} 项，仅B ${summary.onlyB} 项，总额差 ${summary.totalDelta} 元`,
+        `，仅A ${summary.onlyA} 项，仅B ${summary.onlyB} 项，清单合价差 ${fmtMoney(summary.totalDelta)} 元` +
+        (declaredTotal ? `；申报合计 ${fmtMoney(declaredTotal.a)} → ${fmtMoney(declaredTotal.b)}（差 ${fmtMoney(declaredTotal.diff)}）` : ""),
     };
   },
 });

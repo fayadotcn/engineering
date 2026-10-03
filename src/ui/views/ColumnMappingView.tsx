@@ -4,7 +4,7 @@ import { useStore } from "../store";
 import { COLUMN_ROLE_LABEL, COLUMN_ROLES, type WorkspaceView } from "@shared/types";
 import { reconcilePriceRole } from "@shared/mapping";
 import { ConfirmDialog, toast } from "../primitives";
-import { readResponse } from "../http";
+import { readResponse } from "../api";
 import { FileSpreadsheet, Save, RefreshCw } from "lucide-react";
 
 type MappingView = Extract<WorkspaceView, { kind: "columnMapping" }>;
@@ -15,7 +15,16 @@ const TYPE_LABEL: Record<Sheet["type"], string> = {
   BOQ: "清单",
   QUOTATION: "询价表",
   GENERIC: "忽略",
+  COMPARE: "对比表",
+  APPROVAL: "报审资料",
+  PENDING_QUOTE: "待报价清单",
+  FACTS: "汇总/说明表",
+  MATERIAL_PRICE: "材料价格表",
 };
+const TYPE_OPTIONS: Sheet["type"][] = [
+  "BOQ", "PENDING_QUOTE", "QUOTATION", "MATERIAL_PRICE",
+  "COMPARE", "APPROVAL", "FACTS", "GENERIC",
+];
 
 const colLetter = (i: number): string => {
   let s = "";
@@ -169,14 +178,14 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         const d = drafts[s.sheetName] ?? toDraft(s);
         return (
           <div key={s.sheetName} className="xl-sheet mb-4 overflow-hidden rounded-lg">
-            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-2">
               <span className="text-[12.5px] font-medium">{s.sheetName}</span>
               <select
                 value={d.type}
                 title={s.typeEvidence}
                 aria-label={`${s.sheetName}的表格类型`}
                 onChange={(e) => setType(s.sheetName, e.target.value as Sheet["type"])}
-                className="h-6 rounded border border-neutral-200 bg-white px-1 text-[11px]"
+                className="cost-input !h-6 !px-1 !text-[11px] w-fit"
                 style={
                   s.typeConfidence < 0.9
                     ? {
@@ -186,22 +195,14 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                     : undefined
                 }
               >
-                {(["BOQ", "QUOTATION", "GENERIC"] as const).map((t) => (
+                {TYPE_OPTIONS.map((t) => (
                   <option key={t} value={t}>
                     {TYPE_LABEL[t]}
                   </option>
                 ))}
               </select>
-              {s.templateHit && (
-                <span className="rounded bg-[var(--success-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--success-soft-fg)]">
-                  已识别
-                </span>
-              )}
-              {s.userEdited && (
-                <span className="rounded bg-[var(--warning-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--warning-soft-fg)]">
-                  已修改
-                </span>
-              )}
+              {s.templateHit && <span className="chip ok">已识别</span>}
+              {s.userEdited && <span className="chip warn">已修改</span>}
               <span className="ml-auto text-[11px] text-neutral-400">
                 {s.minConfidence < 0.9 ? "需要核对" : "已识别"}
                 {s.typeConfidence < 0.9 && " · 请核对表格类型"}
@@ -228,8 +229,8 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                           value={d.byCol[i] ?? ""}
                           onChange={(e) => setRole(s.sheetName, i, e.target.value)}
                           className={cn(
-                            "w-full min-w-16 rounded border border-neutral-200 bg-white px-0.5 py-0.5 text-[10.5px]",
-                            d.byCol[i] && "border-neutral-400 font-medium"
+                            "cost-input w-full min-w-16 !h-[22px] !px-0.5 !text-[10.5px]",
+                            d.byCol[i] && "border-[var(--hairline-strong)] font-medium"
                           )}
                         >
                           <option value="">— 忽略 —</option>
@@ -298,7 +299,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
           }}
           disabled={blocked || dirty || store.blocks.some(b => b.type === "confirm" && !b.decided)}
           title={dirty ? "请先保存修改" : undefined}
-          className="flex h-8 items-center gap-1.5 rounded-md border border-neutral-200 px-3.5 text-[12.5px] text-neutral-600 hover:bg-[var(--hover)] disabled:opacity-40"
+          className="cost-btn"
         >
           <RefreshCw size={13} /> 重新导入
         </button>

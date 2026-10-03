@@ -54,6 +54,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     parsed.map(({ run: r, events }) => ({
       id: r.id,
       userMessage: r.userMessage,
+      // 已下线的 Harness 会话按工具粒度建 run，只保留其产出的结果视图，不再回放成对话
+      legacy: r.planner === "harness",
       status: r.status,
       createdAt: r.createdAt,
       events: events.map((e) =>

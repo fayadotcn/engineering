@@ -18,7 +18,7 @@ const item = (totalPrice: string, unitPrice = "1", feeType: BoqItemDTO["feeType"
 
 const params = (o: Partial<Parameters<typeof feeSummary>[1]> = {}) => ({
   measureRate: D(0), regulationRate: D(0), provisionalRate: D(0),
-  provisionalAmount: D(0), taxRate: D(0), laborBase: null, coeffMeasureFee: D(0),
+  provisionalAmount: D(0), taxRate: D(0), addonRate: D(0), laborBase: null, coeffMeasureFee: D(0),
   set: { measure: false, regulation: false, provisional: false, tax: false },
   ...o,
 });
@@ -43,6 +43,22 @@ describe("feeSummary 取费汇总", () => {
     );
     // 100000 → +3000 +5000 +2000 = 110000 税前 → +9900 税 = 119900
     expect(r.preTax).toBe("110000.00");
+    expect(r.grandTotal).toBe("119900.00");
+  });
+
+  it("含税单价项不重复计税：合价在税后并入，行内注明口径", () => {
+    const taxIncl = item("10900");
+    taxIncl.taxIncluded = true;
+    const r = feeSummary(
+      [item("100000"), taxIncl],
+      params({ taxRate: D(0.09), set: { measure: false, regulation: false, provisional: false, tax: true } })
+    );
+    // 税前基数只含非含税项 100000；税 9000；含税价清单 10900 税后并入
+    expect(r.rows.find((x) => x.seq === "一")?.amount).toBe("100000.00");
+    expect(r.rows.find((x) => x.seq === "一")?.note).toContain("含税单价");
+    expect(r.rows.find((x) => x.seq === "六")?.amount).toBe("9000.00");
+    expect(r.rows.find((x) => x.seq === "六·补")?.amount).toBe("10900.00");
+    expect(r.rows.find((x) => x.seq === "七")?.basis).toContain("含税价清单");
     expect(r.grandTotal).toBe("119900.00");
   });
 
@@ -112,6 +128,20 @@ describe("feeSummary 取费汇总", () => {
     const r = feeSummary([item("10000"), item("0", "0", "总价措施"), item("0", "0", "其他项目")], params({ measureRate: D(.03), provisionalRate: D(.05) }));
     expect(r.rows.find(x => x.seq === "二")?.amount).toBe("0.00");
     expect(r.rows.find(x => x.seq === "三")?.amount).toBe("0.00");
+  });
+
+  it("附加税率设置后：增值税×附加税率出附加税行，计入含税造价", () => {
+    const r = feeSummary(
+      [item("100000")],
+      params({ taxRate: D(0.09), addonRate: D(0.12), set: { measure: false, regulation: false, provisional: false, tax: true } })
+    );
+    // 增值税 9000，附加税 9000×12% = 1080，含税 = 100000+9000+1080 = 110080
+    expect(r.rows.find((x) => x.seq === "六·附")?.amount).toBe("1080.00");
+    expect(r.rows.find((x) => x.seq === "六·附")?.name).toBe("附加税");
+    expect(r.grandTotal).toBe("110080.00");
+    // 未设置附加税率时不产生附加税行
+    const none = feeSummary([item("100000")], params({ taxRate: D(0.09) }));
+    expect(none.rows.find((x) => x.seq === "六·附")).toBeUndefined();
   });
 
   it("各费用先取分，展示的小计与总计能逐行相加复核", () => {

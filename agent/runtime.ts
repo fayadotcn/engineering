@@ -5,8 +5,14 @@ import { getTool, type ToolContext, type ToolResult } from "./tools/registry";
 import { waitForConfirm } from "./pending";
 import { toJson } from "@shared/json";
 import { randomUUID } from "crypto";
+import { resolveContext, type RunContext } from "./context";
+import { modelConfig, runLLMLoop } from "./llm";
+import { RulePlanner, type Plan, type PlanStep } from "./planner";
 
-// Deterministic file ingestion only. Harness owns all model conversations.
+// Agent runtime: one run per user message.
+// message → resolveContext → LLM loop（配置了模型）或 RulePlanner →
+// confirm-gated executeTool → persisted events → SSE。
+// 文件导入（extra.ingestFileId）是确定性流程，不走规划。
 
 export interface StartRunInput {
   projectId: string;
@@ -16,13 +22,13 @@ export interface StartRunInput {
 }
 
 export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
-  if (typeof input.extra?.ingestFileId !== "string") throw new Error("请在 Harness 对话面板发起造价任务");
+  const isImport = typeof input.extra?.ingestFileId === "string";
+  const isAutopilot = input.extra?.autopilot === true;
   const run = await prisma.agentRun.create({
     data: {
       projectId: input.projectId,
       userMessage: input.message,
-      // 文件导入是确定性流程（文件已知、无决策点），不走 LLM 规划
-      planner: "import",
+      planner: isImport ? "import" : isAutopilot ? "autopilot" : modelConfig() ? "llm" : "rule",
     },
   });
   // fire-and-forget: events stream via subscribeRun
@@ -47,12 +53,10 @@ async function executeRun(runId: string, input: StartRunInput) {
     emit,
   };
 
-  await emit("activity", { text: "正在分析项目资料" });
-
   const summaries: string[] = [];
   let cancelled = false;
   // 确认门：confirm 标记的工具先暂停 run，等用户批准才执行。
-  // 规则引擎和 LLM 路径都经过这里，行为一致。
+  // 规则引擎、LLM 与导入路径都经过这里，行为一致。
   const execute = async (c: ToolContext, t: string, a: unknown): Promise<ToolResult> => {
     const def = getTool(t);
     if (def?.implemented && def.confirm) {
@@ -84,7 +88,32 @@ async function executeRun(runId: string, input: StartRunInput) {
   };
 
   try {
-    await ingestFile(String(input.extra!.ingestFileId), toolCtx, execute, summaries);
+    const fileId = input.extra?.ingestFileId;
+    if (typeof fileId === "string") {
+      await emit("activity", { text: "正在分析项目资料" });
+      await ingestFile(fileId, toolCtx, execute, summaries);
+    } else {
+      const ctx = await resolveContext(input.projectId);
+      // autopilot 必须确定性：配了模型也走规则管线，避免 LLM 自由发挥改流程
+      const useLLM = !!modelConfig() && !input.extra?.autopilot;
+      await emit("activity", { text: useLLM ? "正在理解任务" : "正在分析任务" });
+      if (useLLM) {
+        try {
+          const final = await runLLMLoop(ctx, input.message, toolCtx, execute);
+          summaries.push(final);
+        } catch (e) {
+          // 模型不可达 → 降内置规则引擎，任务不断；model_fallback 事件让前端持续显示"固定任务模式"
+          const reason = e instanceof Error ? e.message.slice(0, 120) : "error";
+          await emit("model_fallback", { reason });
+          await emit("activity", {
+            text: `模型暂不可用，切换为固定任务模式`,
+          });
+          await runPlan(ctx, input, toolCtx, execute, summaries);
+        }
+      } else {
+        await runPlan(ctx, input, toolCtx, execute, summaries);
+      }
+    }
 
     const summary = summaries.filter(Boolean).join("\n") || "完成。";
     await emit("message", { role: "agent", text: summary });
@@ -103,17 +132,45 @@ async function executeRun(runId: string, input: StartRunInput) {
   }
 }
 
+async function runPlan(
+  ctx: RunContext,
+  input: StartRunInput,
+  toolCtx: ToolContext,
+  execute: (c: ToolContext, t: string, a: unknown) => Promise<ToolResult>,
+  summaries: string[]
+) {
+  const plan: Plan = await new RulePlanner().plan(ctx, input.message, input.extra);
+  const results: ToolResult[] = [];
+  for (const step of plan.steps) {
+    const resolved: PlanStep | null = typeof step === "function" ? await step(results) : step;
+    if (!resolved) continue;
+    if (resolved.activity) await toolCtx.emit("activity", { text: resolved.activity });
+    const result = await execute(toolCtx, resolved.tool, resolved.args);
+    results.push(result);
+    if (result.message) summaries.push(result.message);
+    const observation = result.observation as { cancelled?: boolean } | null;
+    if (observation?.cancelled) break;
+  }
+  if (plan.fallbackMessage) summaries.push(plan.fallbackMessage);
+}
+
 async function ingestFile(
   fileId: string,
   toolCtx: ToolContext,
   execute: (c: ToolContext, t: string, a: unknown) => Promise<ToolResult>,
   summaries: string[]
 ) {
+  let boqish = true;
   for (const tool of ["file.inspect", "file.ingest", "project.summary"]) {
+    if (tool === "project.summary" && !boqish) continue; // 询价/参考资料不产生清单行，0 行汇总是误导性噪声
     const result = await execute(toolCtx, tool, tool === "project.summary" ? {} : { fileId });
-    const observation = result.observation as { error?: string; cancelled?: boolean; ok?: boolean; reason?: string } | null;
+    const observation = result.observation as { error?: string; cancelled?: boolean; ok?: boolean; reason?: string; kind?: string } | null;
     if (observation?.error || observation?.ok === false) throw new Error(observation.error ?? observation.reason ?? "工具执行失败");
+    if (tool === "file.ingest" && typeof observation?.kind === "string") boqish = observation.kind.startsWith("BOQ_");
     if (result.message) summaries.push(result.message);
     if (observation?.cancelled) break;
   }
+  // 傻瓜式引导：清单进来了就告诉用户下一步只需一句话
+  if (boqish && !summaries.some((s) => s.includes("已取消")))
+    summaries.push("回复「一键报价」，我会自动补主材价、匹配定额测算并汇总费用（写回清单前会请你确认）。");
 }

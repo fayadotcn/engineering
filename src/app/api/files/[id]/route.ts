@@ -10,6 +10,9 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
   if (!file) return NextResponse.json({ error: "not found" }, { status: 404 });
   const removed = await prisma.boqItem.count({ where: { fileId: id } });
   const quotes = await prisma.quotationItem.count({ where: { fileId: id } });
+  // 文件级事实（文件汇总/推导税率等 sourceFileId 行）随文件一起删除；
+  // 用户手工改写的台账是新行、不带 sourceFileId，不受影响。
+  const orphanFacts = await prisma.costFact.deleteMany({ where: { sourceFileId: id } });
   await deleteByFile(id);
   await storage.delete(file.storageKey);
   await prisma.projectFile.delete({ where: { id } });

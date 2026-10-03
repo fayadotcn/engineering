@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BoqItemDTO, WorkspaceView } from "@shared/types";
 
 vi.mock("../src/ui/primitives", () => ({
-  toast: { error: vi.fn(), info: vi.fn(), success: vi.fn() }, ConfirmDialog: () => null,
+  toast: { error: vi.fn(), info: vi.fn(), success: vi.fn() }, ConfirmDialog: () => null, Modal: () => null,
   EmptyState: ({ title, hint }: { title: string; hint?: string }) => React.createElement("p", null, title, hint),
 }));
 const state = vi.hoisted(() => ({
@@ -12,11 +12,11 @@ const state = vi.hoisted(() => ({
   blocks: [] as unknown[], views: [] as WorkspaceView[], closedViewIds: [] as string[], facts: [], receipts: [],
   boqQuery: "", boqOnlyUnpriced: false, running: false, agentRunning: false, importRunning: false, saving: false,
   projectId: "project", patchItem: vi.fn(), setBoqQuery: vi.fn(), setActiveView: vi.fn(), replaceView: vi.fn(), init: vi.fn(),
-  summary: { itemCount: 0, pricedCount: 0, pricableCount: 0, disciplines: [], missingSettings: [] as string[], fees: { unpricedCount: 0, preTax: "0", grandTotal: "0" } },
+  summary: { itemCount: 0, pricedCount: 0, pricableCount: 0, disciplines: [] as { key: string; label: string; amount: string; share: number; count: number }[], missingSettings: [] as string[], fees: { unpricedCount: 0, preTax: "0", grandTotal: "0", rows: [] as { seq: string; name: string; basis: string; rate: string | null; amount: string; level: "leaf" | "subtotal" | "total"; note?: string }[] } },
   ready: true, projectName: "工程", activeViewId: "view:boq", pendingViewId: null,
 }));
-vi.mock("../src/ui/store", () => ({ useStore: Object.assign(() => state, { setState: vi.fn() }) }));
-import { BoqTable, ExportResult, FeeSummaryView, FileCompareView, FileList, QuotaResult, QuotationMatch } from "../src/ui/views";
+vi.mock("../src/ui/store", () => ({ useStore: Object.assign(() => state, { setState: vi.fn() }), FIXED_VIEWS: new Set(["view:overview", "view:files", "view:boq", "view:facts", "view:receipts", "view:prices"]) }));
+import { BoqTable, ExportResult, FeeSummaryView, FileCompareView, FileList, PriceComposition, QuotaResult, QuotationMatch, displayFeature } from "../src/ui/views";
 import { PricingSettings } from "../src/ui/PricingSettings";
 import { CostOverview } from "../src/ui/CostOverview";
 import { PriceRowsPanel } from "../src/ui/admin/PriceRowsPanel";
@@ -26,7 +26,7 @@ import { Workbench } from "../src/ui/Workbench";
 
 const item: BoqItemDTO = {
   id: "pipe", projectId: "project", fileId: "file", sheetName: "清单", rowIndex: 3, code: "030101", name: "给水管道", rawFeature: "DN50",
-  unit: "m", quantity: "10", unitPrice: "0", mainMaterialPrice: "0", pricingPlan: [], totalPrice: "0", feeType: "分部分项", sectionPath: "",
+  unit: "m", quantity: "10", unitPrice: "0", mainMaterialPrice: "0", laborUnitPrice: "0", machineUnitPrice: "0", pricingPlan: [], totalPrice: "0", feeType: "分部分项", sectionPath: "",
   isHeader: false, sortOrder: 0, discipline: "PLUMBING", features: {},
 };
 
@@ -39,25 +39,29 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("工作区只有三个主要入口，测算归成果且可直接切换结果", () => {
+it("工作区五个分区；成果按类只列最新一份，可直接切换", () => {
   state.items = [item];
   state.activeViewId = "quota";
   state.views = [
     { kind: "boqTable", id: "view:boq", title: "工程清单" },
     { kind: "quotationMatch", id: "match", title: "材料匹配", rows: [], unmatched: [] },
+    { kind: "quotaResult", id: "quota-old", title: "测算结果", rows: [], mgmtRate: 0, profitRate: 0 },
     { kind: "quotaResult", id: "quota", title: "测算结果", rows: [], mgmtRate: 0, profitRate: 0 },
   ];
   const html = renderToStaticMarkup(React.createElement(Workbench, { projectId: "project" }));
-  const nav = html.match(/<nav[\s\S]*?<\/nav>/)![0];
-  expect(nav.split("<details")[0].match(/<button/g)).toHaveLength(3);
-  expect(nav).toMatch(/aria-current="page" class="active">成果/);
-  expect(nav).toContain("计价设置");
-  expect(html).toContain('class="cost-view-switch"');
-  expect(html).toContain("材料匹配</option>");
-  expect(html).not.toContain("关闭当前结果");
+  const nav = html.match(/<nav class="wb-nav"[\s\S]*?<\/nav>/)![0];
+  expect(nav.match(/<button/g)).toHaveLength(5);
+  for (const label of ["概况", "清单", "资料", "成果", "设置"]) expect(nav).toContain(label);
+  expect(nav).toMatch(/aria-current="page" class="active">[\s\S]*?成果/);
+  const list = html.match(/<nav class="results-list"[\s\S]*?<\/nav>/)![0];
+  expect(list.match(/aria-label="移除测算结果"/g)).toHaveLength(1);
+  expect(list).toContain("材料匹配");
+  expect(html).toContain("重新生成");
+  expect(html).not.toContain("较早生成的快照");
 });
 
 it("清单页的待导入提示引导核对，不直接批准看不到的映射", () => {
+  state.items = [item];
   state.views = [
     { kind: "boqTable", id: "view:boq", title: "工程清单" },
     { kind: "columnMapping", id: "view:mapping:file", fileId: "file", filename: "资料.xlsx", sheets: [] },
@@ -112,11 +116,36 @@ it("概况只突出一个下一步，费用和操作记录默认折叠", () => {
   state.summary.itemCount = 2; state.summary.fees.unpricedCount = 1;
   const html = renderToStaticMarkup(React.createElement(CostOverview));
   expect(html).toContain("现在做这一步");
-  expect(html).toContain("自动测算");
+  expect(html).toContain("一键报价");
   expect(html.match(/class="cost-btn primary"/g)).toHaveLength(1);
   expect(html).toMatch(/<details class="cost-fact-details"><summary>查看费用明细/);
   expect(html).toMatch(/<details class="cost-fact-details"><summary>查看操作记录/);
   expect(html).not.toContain("cost-workflow");
+});
+
+it("概况仪表盘：有清单时出专业环形图与费用瀑布，可下钻", () => {
+  state.summary.itemCount = 10;
+  state.summary.pricableCount = 10;
+  state.summary.pricedCount = 6;
+  state.summary.fees.grandTotal = "10632100.02";
+  state.summary.disciplines = [
+    { key: "ELECTRICAL", label: "电气", amount: "6000000", share: 0.59, count: 6 },
+    { key: "PLUMBING", label: "给排水", amount: "3000000", share: 0.3, count: 4 },
+  ];
+  state.summary.fees.rows = [
+    { seq: "一", name: "分部分项工程费", basis: "", rate: null, amount: "9477335.43", level: "leaf" },
+    { seq: "二", name: "措施项目费", basis: "", rate: null, amount: "276884.77", level: "leaf" },
+    { seq: "五", name: "税前工程造价", basis: "", rate: null, amount: "9754220.20", level: "subtotal" },
+    { seq: "六", name: "增值税", basis: "", rate: null, amount: "877879.82", level: "leaf" },
+    { seq: "七", name: "含税工程造价", basis: "", rate: null, amount: "10632100.02", level: "total" },
+  ];
+  const html = renderToStaticMarkup(React.createElement(CostOverview));
+  expect(html).toContain("dash-charts");
+  expect(html).toContain('aria-label="各专业费用占比"');
+  expect(html).toContain("1063.2万"); // 环形图中心万元缩写
+  expect(html).toContain("税前"); // 瀑布图列名
+  expect(html).toContain("59%"); // 专业图例百分比
+  expect(html).toContain('role="progressbar"'); // 定价进度环
 });
 
 it("清单默认六列，保留规格提示和金额编辑规则", () => {
@@ -127,7 +156,56 @@ it("清单默认六列，保留规格提示和金额编辑规则", () => {
   expect(head).not.toContain("项目编码");
   expect(html).toContain("DN50");
   expect(html).toMatch(/<details class="cost-simple-more"><summary>更多筛选/);
-  expect(html).toContain("点击数量或单价即可修改");
+  expect(html).toContain("点击数量、单价或金额即可修改");
+});
+
+it("金额列内嵌数据条，大额项一眼可见", () => {
+  state.items = [
+    { ...item, id: "a", name: "大额电缆", unitPrice: "1000", quantity: "100", totalPrice: "100000" },
+    { ...item, id: "b", name: "小额配件", unitPrice: "500", quantity: "100", totalPrice: "50000" },
+  ];
+  const html = renderToStaticMarkup(React.createElement(BoqTable));
+  expect(html).toContain("width:50%");
+  expect(html).toContain("width:100%");
+  expect(html).toContain("inset-y-0");
+});
+
+it("行号悬停能回查来源文件和表内行号", () => {
+  state.files = [{ id: "file", filename: "水电安装.xls", status: "PARSED", kindLabel: "招标清单" }];
+  state.items = [item];
+  const html = renderToStaticMarkup(React.createElement(BoqTable));
+  expect(html).toContain('title="来源：水电安装.xls · 清单 · 第 4 行"');
+});
+
+it("总额计价行的单价列显示占位符而不是 0.00", () => {
+  state.items = [{ ...item, id: "fee", name: "安全文明施工费", feeType: "总价措施", unit: "项", quantity: "1", unitPrice: "0", totalPrice: "50000" }];
+  const html = renderToStaticMarkup(React.createElement(BoqTable));
+  expect(html).toContain("总额计价行没有单价");
+  expect(html).toContain("50,000.00");
+});
+
+it("组价过的清单项在常规模式就有构成入口，展开能复核到每条子目", () => {
+  const priced: BoqItemDTO = {
+    ...item, id: "p1", name: "镀锌钢管 DN50", unitPrice: "107.40", totalPrice: "1074",
+    pricingPlan: [
+      { quotaCode: "5H-0123", quotaName: "镀锌钢管安装 DN50", labor: "28.00", materialAux: "5.40", machine: "2.00", fee: "9.10", mainMaterialName: "镀锌钢管 DN50", mainQty: "1.02", mainPrice: "45.00", subtotal: "90.40" },
+      { quotaCode: "5H-0310", quotaName: "管道水压试验", labor: "10.00", materialAux: "1.50", machine: "1.00", fee: "4.50", mainMaterialName: null, mainQty: null, mainPrice: null, subtotal: "17.00" },
+      { quotaCode: "5H-0456", quotaName: "管道消毒冲洗", labor: "12.00", materialAux: "2.10", machine: "0", fee: "3.50", mainMaterialName: null, mainQty: null, mainPrice: null, subtotal: "17.60", suggested: true, scope: "工作内容含冲洗消毒" },
+    ],
+  };
+  state.items = [priced];
+  const html = renderToStaticMarkup(React.createElement(BoqTable));
+  expect(html).toContain("组价×2");
+  expect(html).toContain("aria-expanded");
+  const comp = renderToStaticMarkup(React.createElement(PriceComposition, { item: priced }));
+  expect(comp).toContain("综合单价构成");
+  expect(comp).toContain("5H-0123");
+  expect(comp).toContain("镀锌钢管 DN50");
+  expect(comp).toContain("107.40");
+  expect(comp).toContain("与综合单价一致");
+  expect(comp).toContain("建议增列");
+  expect(comp).toContain("管道消毒冲洗");
+  expect(comp).toContain("让助手核对组价");
 });
 
 it("测算默认显示建议价与原价，五项成本构成按需展开", () => {
@@ -168,6 +246,27 @@ it("费用汇总与材料匹配默认隐藏计算基础和评分列", () => {
   const quotation = renderToStaticMarkup(React.createElement(QuotationMatch, { view: { kind: "quotationMatch", id: "match", title: "材料", rows: [], unmatched: [] } }));
   expect(quotation.match(/<thead>[\s\S]*?<\/thead>/)![0]).not.toContain("匹配评分");
   expect(quotation).toContain("暂无材料价匹配结果");
+});
+
+it("费用汇总用瀑布图呈现各费用怎么累加到含税总价", () => {
+  const rows = [
+    { seq: "一", name: "分部分项工程费", basis: "Σ 合价", rate: null, amount: "800000", level: "leaf" },
+    { seq: "二", name: "措施项目费", basis: "", rate: null, amount: "0", level: "leaf" },
+    { seq: "三", name: "其他项目费", basis: "", rate: null, amount: "30000", level: "leaf" },
+    { seq: "四", name: "规费", basis: "", rate: "8%", amount: "20000", level: "leaf" },
+    { seq: "五", name: "税前工程造价", basis: "一+二+三+四", rate: null, amount: "850000", level: "subtotal" },
+    { seq: "六", name: "增值税", basis: "", rate: "9%", amount: "76500", level: "leaf" },
+    { seq: "七", name: "含税工程造价", basis: "五+六", rate: null, amount: "926500", level: "total" },
+  ];
+  const html = renderToStaticMarkup(React.createElement(FeeSummaryView, {
+    view: { kind: "feeSummary", id: "fee", title: "汇总", rows, grandTotal: "926500", unpricedCount: 0 } as never,
+  }));
+  expect(html).toContain("80.0万");                    // 分部分项缩写金额
+  expect(html).toContain("86.3%");                    // 分部分项占含税造价比例
+  expect(html).toContain("未计");                     // 措施费为 0 的列标出「未计」
+  expect(html).toContain("border-dashed");            // 水位连接线
+  // 税金的浮段叠在税前水位上：bottom = 850000 / 926500 ≈ 91.7%，height ≈ 8.3%
+  expect(html).toMatch(/bottom:91\.7[0-9]*%;height:8\.[0-9]+%/);
 });
 
 it("两版相同清单显示明确结果和版本来源", () => {
@@ -218,4 +317,16 @@ it("映射列与类型控件有可区分的标签，多行表头使用专用布�
   expect(html).toContain('aria-label="价格表的表格类型"');
   expect(html).toContain('aria-label="价格表的A列角色"');
   expect(html).toContain('class="xl-table mapping-table"');
+});
+
+it("名称列副标题剥离编号与重复的名称字段", () => {
+  const raw = "1、名称：配电箱 H01-1APz\n2、型号规格：Pe=60kW/详见系统图\n3、安装方式：挂墙明装/底边距地1.5m\n4、含端子接线";
+  const shown = displayFeature(raw, "配电箱");
+  expect(shown).toBe("H01-1APz · 型号规格：Pe=60kW/详见系统图 · 安装方式：挂墙明装/底边距地1.5m · 含端子接线");
+  expect(displayFeature("DN50 沟槽连接", "镀锌钢管")).toBe("DN50 沟槽连接"); // 干净原文不动
+  expect(displayFeature("1、名称：给水管道", "给水管道")).toBe("1、名称：给水管道"); // 只剩名称段时回退原文
+  state.items = [{ ...item, name: "配电箱", rawFeature: raw }];
+  const html = renderToStaticMarkup(React.createElement(BoqTable));
+  expect(html).toContain("H01-1APz · 型号规格：Pe=60kW");
+  expect(html).not.toContain(">1、名称：");
 });

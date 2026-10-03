@@ -86,7 +86,14 @@ const cellText = (v: unknown): string => {
   return String(v).trim();
 };
 
-const NOISE_ROW = /第\s*\d+\s*页|共\s*\d+\s*页|^工程名称[:：]|^标段[:：]|^编制|^复核/;
+// 分页页脚/表头噪声行。页码词必须「整行几乎都是页码」才算噪声——
+// 清单特征常写「详见图集01SS105第65页」，若用 /第\s*\d+\s*页/ 全行扫
+// 会把真实子目整行删掉（漏项漏钱；曾因此丢 减压器 行 1281.28 元）。
+const PAGE_TOKEN = String.raw`(?:第\s*\d+\s*页|共\s*\d+\s*页|第\s*\d+\s*\/\s*\d+\s*页|\d+\s*\/\s*\d+)`;
+const PAGE_ONLY = new RegExp(`^[\\s\\-—–·,，、]*(?:${PAGE_TOKEN}[\\s\\-—–·,，、]*)+$`);
+const NOISE_HEAD = /^\s*(?:工程名称\s*[:：]|标段\s*[:：]|编制|复核)/;
+const isNoiseRow = (joined: string): boolean =>
+  NOISE_HEAD.test(joined) || PAGE_ONLY.test(joined);
 const CODE_RE = /^\d{9,15}$/;
 const UNIT_RE = /^(m|米|个|套|台|根|块|组|kg|t|吨|m2|m3|㎡|m³|处|点|只|条|盏|座|km|100m|10m|宗|项|樘|面|箱|桶|具|台·次|工日)$/i;
 
@@ -217,10 +224,31 @@ function profileColumns(rows: string[][]): ColumnMap {
     if (Object.values(map).includes(c)) continue;
     if (stat(c).embedded >= 3) { map.feature = c; break; }
   }
-  // quantity: numeric column right after unit
+  // 量/价定位以 unit 列为锚：先右扫（广联达式 单位|量|价|合价），
+  // 右侧无数值列时回退左扫（抗震支吊架式 名|量|单位|价|合价）——
+  // 单价/合价取 unit 右侧依次出现的数值列，算术锁定再做最终裁决
   if (map.unit !== undefined) {
-    for (let c = map.unit + 1; c < Math.min(map.unit + 3, width); c++) {
-      if (stat(c).nums >= 3) { map.quantity = c; break; }
+    const rightNums: number[] = [];
+    for (let c = map.unit + 1; c < Math.min(map.unit + 5, width); c++) {
+      if (stat(c).nums >= 3) rightNums.push(c);
+    }
+    if (rightNums.length) {
+      map.quantity = rightNums[0];
+      if (rightNums[1] !== undefined) map.unitPrice = rightNums[1];
+      if (rightNums[2] !== undefined) map.totalPrice = rightNums[2];
+    } else {
+      for (let c = map.unit - 1; c >= Math.max(0, map.unit - 3); c--) {
+        if (Object.values(map).includes(c)) continue;
+        if (stat(c).nums >= 3) { map.quantity = c; break; }
+      }
+      if (map.quantity !== undefined) {
+        const right: number[] = [];
+        for (let c = map.unit + 1; c < Math.min(map.unit + 5, width); c++) {
+          if (stat(c).nums >= 3) right.push(c);
+        }
+        if (right[0] !== undefined) map.unitPrice = right[0];
+        if (right[1] !== undefined) map.totalPrice = right[1];
+      }
     }
   }
   // name: short-ish han text column that isn't feature
@@ -238,7 +266,18 @@ function profileColumns(rows: string[][]): ColumnMap {
   return map;
 }
 
-export type SheetType = "BOQ" | "QUOTATION" | "GENERIC";
+/**
+ * Sheet 类型学（真实文件归纳）：
+ * BOQ 清单 | QUOTATION 询价表 | GENERIC 忽略
+ * COMPARE 对比表（两版量价+差值列，不导入清单，走对审）
+ * APPROVAL 报审资料（材料/设备报审、合格证，走文档视图）
+ * PENDING_QUOTE 待报价清单（有量无价，按清单导入、单价留空）
+ * FACTS 汇总/说明表（表-03/04/13、扉页，不产清单行）
+ * MATERIAL_PRICE 材料价格表（信息价/市场价/调价表，按询价管道进价格库）
+ */
+export type SheetType =
+  | "BOQ" | "QUOTATION" | "GENERIC"
+  | "COMPARE" | "APPROVAL" | "PENDING_QUOTE" | "FACTS" | "MATERIAL_PRICE";
 
 /** 计价表体系费用口径。规费/税金/汇总表是计算结果而非清单项，不映射。 */
 export type SheetFeeType = "分部分项" | "单价措施" | "总价措施" | "其他项目";
@@ -260,6 +299,10 @@ export interface SheetMapping {
   merged: boolean;
   /** role → 0-based 列 */
   columns: Record<string, number>;
+  /** 单价列为含税价（表头含「含税」）→ BoqItem.taxIncluded */
+  taxIncluded?: boolean;
+  /** 单项/单位工程（多单位工程项目），sheet 名【A‖B】/表内「单位工程名称：X」 */
+  unitProject?: string;
 }
 
 export interface SheetInspection extends SheetMapping {
@@ -294,6 +337,10 @@ export interface ParsedSheet {
   headerLabels: string[];
   /** 措施/其他项目表的费用口径（分部分项表为 undefined） */
   feeType?: SheetFeeType;
+  /** 单价列含税 → BoqItem.taxIncluded */
+  taxIncluded?: boolean;
+  /** 单项/单位工程归属（sheet 名【A‖B】解析） */
+  unitProject?: string;
 }
 
 /**
@@ -361,8 +408,9 @@ function lockByArithmetic(
   };
   setRole("quantity", qtyCol);
   setRole("totalPrice", bestL.c);
-  // 分项成本价（材料/人工/机械/询价/费率列）不是综合单价：只锁量与合价
-  if (/材料|主材|人工|机械|询价|报价|费率/.test(hd(priceCol))) return { locked: true };
+  // 分项成本价（材料/人工/机械/询价/费率列）不是综合单价：只锁量与合价。
+  // 「报价」不在排除内——投标报价列就是综合单价，询价表会经 QUOTATION 还原回 price。
+  if (/材料|主材|人工|机械|询价|费率/.test(hd(priceCol))) return { locked: true };
   const stolenPrice = COLUMN_SYNONYMS.price.test(hd(priceCol)) ? priceCol : undefined;
   setRole("unitPrice", priceCol);
   return { locked: true, stolenPrice };
@@ -441,6 +489,50 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     (columns.materialName !== undefined || columns.spec !== undefined || columns.name !== undefined) &&
     priceCol !== undefined;
 
+  /* —— 非清单类型信号（真实文件归纳，判定顺序见 docs/restructure-design.md） —— */
+  // FACTS：汇总/说明表（表-03/04/13、扉页、编制说明、总价汇总页）
+  const factsSignal =
+    /表\s*[-—_]?\s*0?3(?!\d)|表\s*[-—_]?\s*0?4(?!\d)|表\s*[-—_]?\s*13(?!\d)|单项工程.{0,8}汇总|单位工程.{0,8}汇总|工程项目.{0,8}汇总|规费.{0,6}税金|税金.{0,6}规费|扉页|编制说明|总说明|封面|招标控制价.{0,4}汇总|投标总价/.test(sheetName) ||
+    (/招标人|投标人|法定代表人|编制单位|造价咨询/.test(headerText) && rows.length <= 30);
+  // COMPARE：两版量/价并列。差值列（价差/量差/增减）是直接证据；
+  // 双列版本要按词干去重——「投标报价单价」+「投标报价合价」是一组价不是两版
+  const VERSION_RE = /送审|审定|审核|审批|批准|报审|报批|投标|招标|标底|拦标|控制价|预算|结算|上期|本期|初审|终审|复核|原报|核后|已报|申请|批复/;
+  const stripPrice = (h: string) => h.replace(/综合单价|单价|合价|金额|价格|报价|价|元|（[^）]*）|\([^)]*\)|\s/g, "");
+  const stripQty = (h: string) => h.replace(/工程数量|工程量|数量|工程|量|\s|（[^）]*）|\([^)]*\)/g, "");
+  const versionedStems = (word: RegExp, strip: (h: string) => string) =>
+    new Set(
+      headerCells
+        .filter((h) => word.test(h) && VERSION_RE.test(h))
+        .map((h) => strip(h.replace(/\s/g, "")))
+        .filter((s) => s.length > 0)
+    );
+  const deltaCol = headerCells.some((h) =>
+    /差额|价差|量差|差异|增减|偏差|对比|核增|核减|下浮|浮动|变动|误差/.test(h.replace(/\s/g, ""))
+  );
+  const priceFamCount = headerCells.filter((h) => /单价|报价|合价|金额|价格|价/.test(h)).length;
+  const compareSignal =
+    deltaCol ||
+    versionedStems(/单价|报价|合价|金额|价格|价/, stripPrice).size >= 2 ||
+    versionedStems(/工程量|数量/, stripQty).size >= 2 ||
+    (/对比|对审|清标|比较|分析/.test(sheetName) && priceFamCount >= 2);
+  // APPROVAL：材料/设备报审、合格证、进场报验——审批流程文件，非计价数据
+  const approvalSignal =
+    /报审|报验|出厂证明|合格证|质量证明|使用部位|进场验收|开箱/.test(sheetName) ||
+    /报审|报验|出厂证明|合格证|质量证明|使用部位|进场验收/.test(headerText);
+  // MATERIAL_PRICE：信息价/市场价/调价表——材料名/规格列 + 库价类价列或地区/期次元数据
+  const libPriceCol = headerCells.some((h) =>
+    /材料单价|参考单价|信息价|市场价|供应价|综合价|除税价|调定价|核定价/.test(h.replace(/\s/g, ""))
+  );
+  const priceMeta =
+    columns.region !== undefined || columns.period !== undefined || columns.priceType !== undefined;
+  const materialPriceSignal =
+    !boqSignal &&
+    (columns.materialName !== undefined || columns.spec !== undefined || columns.brand !== undefined) &&
+    (libPriceCol || (priceMeta && priceCol !== undefined));
+  // PENDING_QUOTE：名称+单位+工程量齐但没有任何价列（待报价清单/器材表）
+  const noPriceCol =
+    columns.unitPrice === undefined && priceCol === undefined && columns.totalPrice === undefined;
+
   let type: SheetType;
   let typeConfidence: number;
   let typeEvidence: string;
@@ -448,10 +540,32 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     type = "BOQ";
     typeConfidence = 0.95;
     typeEvidence = "表名含措施/其他项目";
+  } else if (factsSignal) {
+    type = "FACTS";
+    typeConfidence = 0.85;
+    typeEvidence = "汇总/说明类表（规费税金/工程汇总/扉页），不产清单行";
+  } else if (compareSignal) {
+    type = "COMPARE";
+    typeConfidence = deltaCol ? 0.9 : 0.8;
+    typeEvidence = "含两版量/价与差值列，是对比表——不导入清单，可用文件对审";
+  } else if (approvalSignal) {
+    type = "APPROVAL";
+    typeConfidence = 0.85;
+    typeEvidence = "报审/证明类资料，按文档处理";
+  } else if (boqUsable && hasQty && noPriceCol) {
+    // 有量无价先于清单信号：招标工程量清单/器材表天生无价列，
+    // 语义上是「待报价」——仍按清单导入（单价 0 走未定价流程），类型标清
+    type = "PENDING_QUOTE";
+    typeConfidence = 0.8;
+    typeEvidence = "有名称/单位/工程量但无价格列，按待报价清单导入（单价留空待补）";
   } else if (boqSignal && boqUsable) {
     type = "BOQ";
     typeConfidence = 0.95;
     typeEvidence = "表头含项目编码/工程量/综合单价等清单信号";
+  } else if (materialPriceSignal) {
+    type = "MATERIAL_PRICE";
+    typeConfidence = 0.85;
+    typeEvidence = "材料价格表（信息价/市场价），按询价管道处理";
   } else if (quoteSignal && !boqSignal && quoteUsable) {
     type = "QUOTATION"; // 询价表带数量/合价也保持询价
     if (strongQuote) {
@@ -465,10 +579,11 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     type = "BOQ";
     typeConfidence = locked ? 0.85 : 0.75;
     typeEvidence = "有工程量与单价，按清单处理";
-    // 有工程量的清单里，裸「单价」按综合单价处理（分项成本价列除外）
+    // 有工程量的清单里，裸「单价」按综合单价处理（分项成本价列除外）；
+    // 「报价」不挡——投标/清标文件里它就是综合单价口径
     if (
       columns.unitPrice === undefined && columns.price !== undefined &&
-      !/材料|主材|人工|机械|询价|报价/.test(hd(columns.price))
+      !/材料|主材|人工|机械|询价/.test(hd(columns.price))
     ) {
       columns.unitPrice = columns.price;
       delete columns.price;
@@ -484,13 +599,24 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     typeConfidence = boqUsable ? 0.6 : 0.5;
     typeEvidence = boqUsable ? "可映射清单列" : "未识别到清单/询价结构";
   }
-  if (type === "QUOTATION" && columns.price === undefined && priceCol !== undefined) {
-    // 询价表的单价列就是 price：被算术锁定提升为 unitPrice 的还原回去
+  if ((type === "QUOTATION" || type === "MATERIAL_PRICE") && columns.price === undefined && priceCol !== undefined) {
+    // 询价/价格表的单价列就是 price：被算术锁定提升为 unitPrice 的还原回去
     if (columns.unitPrice === priceCol) delete columns.unitPrice;
     columns.price = priceCol;
     det.conf.price = Math.max(det.conf.price ?? 0, 0.9);
     det.ev.price = det.ev.price ?? `表头「${headerCells[priceCol]?.trim()}」`;
   }
+
+  // 单项/单位工程：sheet 名「【单项‖单位】」/「A‖B」取内容，去掉表号/清单词段
+  const upMatch =
+    sheetName.match(/【\s*([^】]+?)\s*】/) ?? sheetName.match(/^\s*([^\s—_-]{2,30}?)\s*(?:‖|\|\|)/);
+  const unitProject = upMatch?.[1]
+    ?.split(/[‖|]/)
+    .map((s) => s.trim())
+    .filter((s) => s && !/分部分项|清单|计价|措施|汇总|表\s*[-—_]?\s*\d/.test(s))
+    .join("‖") || undefined;
+  // 价列表头含「含税」→ 单价含税（「除税价」不含税，不算）
+  const taxIncluded = headerCells.some((h) => /含税/.test(h));
 
   const fingerprint =
     headerRow >= 0
@@ -518,6 +644,8 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     minConfidence: confs.length ? Math.min(...confs) : 0,
     typeConfidence,
     typeEvidence,
+    taxIncluded,
+    unitProject,
   };
 }
 
@@ -580,10 +708,20 @@ export function inspectWorkbook(buffer: Buffer): SheetInspection[] {
     const rows = trimTail(
       raw
         .map((r) => r.map(cellText))
-        .filter((r) => !NOISE_ROW.test(r.join(" ")))
+        .filter((r) => !isNoiseRow(r.join(" ")))
     );
     if (!rows.length) continue;
     out.push(detectSheet(rows, sheetName));
+  }
+  // 单位工程兜底：sheet 名本身就是单位工程名（多单位工程工作簿常见形态），
+  // 只对清单类表生效，且排除明显是表名而非工程名的命名
+  for (const s of out) {
+    if (s.unitProject || (s.type !== "BOQ" && s.type !== "PENDING_QUOTE")) continue;
+    if (
+      /工程|楼|栋|房|库|区|车间|站|馆|场|中心/.test(s.sheetName) &&
+      !/清单|计价|措施|汇总|报价|询价|对比|报审|说明|分析|表\s*[-—_]?\s*\d/.test(s.sheetName)
+    )
+      s.unitProject = s.sheetName.trim();
   }
   return out;
 }
@@ -606,7 +744,7 @@ export function parseWorkbook(
     const rows = trimTail(
       raw
         .map((r) => r.map(cellText))
-        .filter((r) => !NOISE_ROW.test(r.join(" ")))
+        .filter((r) => !isNoiseRow(r.join(" ")))
     );
 
     const override = opts?.mapping?.[sheetName];
@@ -658,8 +796,9 @@ export function parseWorkbook(
         (columns.quantity !== undefined && cells[columns.quantity]?.trim()) ||
         (columns.price !== undefined && cells[columns.price]?.trim()) ||
         (columns.unitPrice !== undefined && cells[columns.unitPrice]?.trim());
-      // 汇总/小计行：不导入也不合并（分部合计由系统自己算）
-      if (!hasAnchor && SUBTOTAL_RE.test(nameCell)) continue;
+      // 汇总/小计行：不导入也不合并（分部合计由系统自己算）。
+      // FACTS 表例外——表-04 的「合计/总计」行正是 factsExtract 要取的真值，不能丢。
+      if (!hasAnchor && SUBTOTAL_RE.test(nameCell) && type !== "FACTS") continue;
       if (
         !hasAnchor && merged.length && cells.some((c) => c.trim()) &&
         !nameCell // 真续行：名称列为空，只有特征/规格列有延续文本
@@ -725,7 +864,7 @@ export function parseWorkbook(
         isItem,
       });
     }
-    sheets.push({ type, sheetName, headerRow, columns, rows: parsedRows, headerLabels: headerCells, feeType: sheetFeeType ?? undefined });
+    sheets.push({ type, sheetName, headerRow, columns, rows: parsedRows, headerLabels: headerCells, feeType: sheetFeeType ?? undefined, taxIncluded: insp.taxIncluded, unitProject: insp.unitProject });
   }
   return sheets;
 }
@@ -737,6 +876,8 @@ export interface CellPatch {
   rowIndex: number;
   unitPrice?: string;
   quantity?: string;
+  /** 工程量计算式原文：写回时作为工程量单元格批注，复核可查且不改动表格结构 */
+  quantityExpr?: string;
   totalPrice?: string;
   priceCol?: number;
   qtyCol?: number;
@@ -774,7 +915,9 @@ export async function writeBackPrices(
         row.getCell((p.priceCol ?? cols.unitPrice)! + 1).value = Number(p.unitPrice);
       }
       if (p.quantity !== undefined && (p.qtyCol ?? cols.quantity) !== undefined) {
-        row.getCell((p.qtyCol ?? cols.quantity)! + 1).value = Number(p.quantity);
+        const cell = row.getCell((p.qtyCol ?? cols.quantity)! + 1);
+        cell.value = Number(p.quantity);
+        if (p.quantityExpr) cell.note = `工程量计算式：${p.quantityExpr}`;
       }
       if (p.totalPrice !== undefined && (p.totalCol ?? cols.totalPrice) !== undefined) {
         row.getCell((p.totalCol ?? cols.totalPrice)! + 1).value = Number(p.totalPrice);
@@ -794,6 +937,10 @@ export async function buildExportWorkbook(
     rows: {
       rowIndex: number;
       isHeader: boolean;
+      /** 未定价行：导出件里整行淡琥珀底色，复核时一眼定位 */
+      unpriced?: boolean;
+      /** 合计/小计行：整行加粗 */
+      bold?: boolean;
       values: Record<string, string>;
     }[];
   }[]
@@ -812,13 +959,19 @@ export async function buildExportWorkbook(
     const labels = s.headerLabels;
     ws.addRow(labels).font = { bold: true };
     for (const r of s.rows) {
-      ws.addRow(labels.map((l) => {
+      const row = ws.addRow(labels.map((l) => {
         const v = r.values[l] ?? "";
         const num = Number(v.replace(/,/g, ""));
         return v !== "" && !isNaN(num) && /单价|合价|工程量|金额|价格/.test(l)
           ? num
           : v;
       }));
+      if (r.bold) row.font = { bold: true };
+      if (r.unpriced) {
+        row.eachCell({ includeEmpty: true }, (c) => {
+          c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF7E0" } };
+        });
+      }
     }
     ws.columns.forEach((c: Partial<ExcelJS.Column>) => (c.width = 18));
   }

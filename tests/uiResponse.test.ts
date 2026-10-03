@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readResponse } from "../src/ui/http";
+import { readResponse } from "../src/ui/api";
 
 describe("前端请求反馈", () => {
   it("返回成功的数据", async () => {

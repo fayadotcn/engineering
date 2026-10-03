@@ -177,7 +177,7 @@ describe("通用清单列映射", () => {
     expect(item.cells.unitPrice).toBe("10260");
   });
 
-  it("无表头数据表 → 画像推断 BOQ、headerRow -1、置信≤0.7", async () => {
+  it("无表头数据表 → 画像推断待报价清单（有量无价）、headerRow -1、置信≤0.7", async () => {
     const buf = await wb([
       [1, "031001001001", "", "镀锌钢管", "1、材质：镀锌\n2、规格：DN100", "", "m", 12],
       [2, "031001001002", "", "镀锌钢管", "1、材质：镀锌\n2、规格：DN50", "", "m", 60],
@@ -185,7 +185,8 @@ describe("通用清单列映射", () => {
       [4, "031001001004", "", "阀门", "1、规格：DN50", "", "个", 6],
     ]);
     const s = firstSheet(parseWorkbook(buf));
-    expect(s.type).toBe("BOQ");
+    // 编码+名称+特征+单位+工程量但零价列 → 待报价清单（仍按清单导入，单价留空）
+    expect(s.type).toBe("PENDING_QUOTE");
     expect(s.headerRow).toBe(-1);
     const insp = inspectWorkbook(buf)[0];
     expect(insp.minConfidence).toBeLessThanOrEqual(0.7);

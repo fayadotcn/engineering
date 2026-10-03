@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupKey, inferDiscipline, parseSemanticFeature } from "@cost-engine/semantic";
+import { featureCompatible, groupKey, inferDiscipline, parseSemanticFeature } from "@cost-engine/semantic";
 
 describe("parseSemanticFeature", () => {
   it("parses 镀锌钢管 DN100 沟槽连接 室内消防", () => {
@@ -15,7 +15,20 @@ describe("parseSemanticFeature", () => {
   it("parses cable spec YJV-4x25+1x16", () => {
     const f = parseSemanticFeature("电力电缆", "YJV-4x25+1x16 铜芯 桥架内敷设");
     expect(f.category).toBe("电缆");
-    expect(f.specification).toBe("4x25+1x16".toUpperCase());
+    expect(f.specification).toBe("4x25+1x16");
+    // × / * / X 分隔符归一：同一规格的不同写法不应产生规格冲突
+    const g = parseSemanticFeature("电力电缆", "YJV-4*25+1*16");
+    expect(g.specification).toBe("4x25+1x16");
+    expect(featureCompatible(f, g).conflicts).toHaveLength(0);
+  });
+
+  it("parses wall-thickness spec De25*2.3 and flags it in feature conflicts", () => {
+    const cold = parseSemanticFeature("塑料管", "PP-R冷水管（含管件）/De25*2.3 热熔连接");
+    const hot = parseSemanticFeature("塑料管", "PP-R热水管（含管件）/De25*4.2 热熔连接");
+    expect(cold.specification).toBe("25x2.3");
+    expect(hot.specification).toBe("25x4.2");
+    // 同为 DN25 会同组，但壁厚不同必须写进冲突理由，不能谎报「特征一致」
+    expect(featureCompatible(cold, hot).conflicts.join()).toMatch(/specification/);
   });
 
   it("normalizes full-width DN and Φ", () => {
@@ -31,6 +44,40 @@ describe("parseSemanticFeature", () => {
     const a = parseSemanticFeature("镀锌钢管 DN100 沟槽");
     const b = parseSemanticFeature("镀锌钢管 DN150 沟槽");
     expect(groupKey("a", "m", a)).not.toBe(groupKey("b", "m", b));
+  });
+
+  it("extracts equipment power Pe=60kW without mistaking it for PE material", () => {
+    const f = parseSemanticFeature("配电箱", "型号规格：Pe=60kW/详见系统图 · 安装方式：挂墙明装");
+    expect(f.power).toBe("60kW");
+    expect(f.material).toBeUndefined();
+    const g = parseSemanticFeature("风机", "功率：7.5kW");
+    expect(g.power).toBe("7.5kW");
+    const t = parseSemanticFeature("变压器", "容量：315kVA");
+    // 315kVA 以「容量」形式出现时归到 specification 的定额式上限分支或功率分支均可
+    expect(t.power ?? t.specification).toMatch(/315\s*kVA/i);
+  });
+
+  it("extracts pump/fan motor rating N=4.0kW and compound Pe=165+165(备)kW", () => {
+    const pump = parseSemanticFeature("离心式泵", "参数：Q=40m³/h/H=15m/N=4.0kW");
+    expect(pump.power).toBe("4.0kW");
+    const standby = parseSemanticFeature("配电箱", "Pe=165+165(备)kW");
+    expect(standby.power).toBe("165kW");
+    // PN= 是公称压力不是功率（且无 kW 单位），不得误判
+    const notPower = parseSemanticFeature("阀门", "PN=1.6MPa");
+    expect(notPower.power).toBeUndefined();
+  });
+
+  it("different power => different group key + feature conflict", () => {
+    const a = parseSemanticFeature("配电箱", "Pe=5kW");
+    const b = parseSemanticFeature("配电箱", "Pe=60kW");
+    expect(groupKey("a", "台", a)).not.toBe(groupKey("b", "台", b));
+    expect(featureCompatible(a, b).conflicts.join()).toMatch(/power/);
+  });
+
+  it("same power + different price group stays grouped", () => {
+    const a = parseSemanticFeature("配电箱", "Pe=5kW 挂墙明装");
+    const b = parseSemanticFeature("配电箱", "Pe=5kW 挂墙明装");
+    expect(groupKey("a", "台", a)).toBe(groupKey("b", "台", b));
   });
 
   it("infers discipline", () => {

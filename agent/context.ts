@@ -12,12 +12,14 @@ import { FILE_KIND_LABEL, type FileKind } from "@shared/types";
 export interface RunContext {
   projectId: string;
   projectName: string;
-  files: { id: string; filename: string; kind: string; status: string }[];
+  files: { id: string; filename: string; kind: string; status: string; stage?: string; period?: string }[];
   facts: { key: string; value: string; source: string }[];
   boq: { itemCount: number; pricedCount: number; totalAmount: string };
   quotationCount: number;
   recentChanges: string[]; // recent receipts incl. user edits in workspace
   history: { role: string; text: string }[];
+  /** 最近一次已完成任务的过程回放：让「刚才/那些/继续」类指代有可解析对象 */
+  lastRun?: { user: string; steps: string[]; reply: string };
 }
 
 export async function resolveContext(
@@ -38,10 +40,11 @@ export async function resolveContext(
       where: { projectId, status: "DONE" },
       orderBy: { createdAt: "desc" },
       take: historyLimit,
-      include: { events: { where: { type: "message" }, orderBy: { seq: "asc" }, take: 4 } },
+      include: { events: { where: { type: { in: ["message", "tool_finished"] } }, orderBy: { seq: "asc" }, take: 10 } },
     }),
   ]);
   if (!project) throw new Error("项目不存在");
+  const last = runs[0];
   return {
     projectId,
     projectName: project.name,
@@ -50,6 +53,8 @@ export async function resolveContext(
       filename: f.filename,
       kind: FILE_KIND_LABEL[f.kind as FileKind] ?? f.kind,
       status: f.status,
+      stage: f.stage || undefined,
+      period: f.period || undefined,
     })),
     facts: facts.map((f) => ({ key: f.key, value: f.value, source: f.source })),
     boq: projectTotals(items),
@@ -61,5 +66,17 @@ export async function resolveContext(
         { role: "user", text: r.userMessage },
         ...(r.summary ? [{ role: "assistant", text: r.summary }] : []),
       ]),
+    lastRun: last && {
+      user: last.userMessage,
+      steps: last.events
+        .filter((e) => e.type === "tool_finished")
+        .map((e) => {
+          const p = e.payload as { tool?: string; message?: string };
+          return p?.message ? `${p.tool ?? "?"}: ${String(p.message).slice(0, 160)}` : null;
+        })
+        .filter((x): x is string => !!x)
+        .slice(0, 8),
+      reply: last.summary ?? "",
+    },
   };
 }

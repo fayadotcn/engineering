@@ -1,6 +1,7 @@
 import type { RunContext } from "./context";
 import type { ToolContext, ToolResult } from "./tools/registry";
 import { toolSchemasForLLM, toolNameFromWire } from "./tools/registry";
+import { fmtMoney } from "@cost-engine/money";
 
 // Model layer: provider-agnostic. openai-compatible covers OpenAI, DeepSeek,
 // Moonshot, and most relay gateways; anthropic covers Claude endpoints.
@@ -14,16 +15,21 @@ interface ModelConfig {
 }
 
 export function modelConfig(): ModelConfig | null {
-  const provider = process.env.MODEL_PROVIDER as
+  const rawProvider = process.env.MODEL_PROVIDER as
     | ModelConfig["provider"]
     | "rule"
     | undefined;
   const baseUrl = process.env.MODEL_BASE_URL;
-  const apiKey = process.env.MODEL_API_KEY;
+  const apiKey = process.env.MODEL_API_KEY || process.env.DEEPSEEK_API_KEY;
   const model = process.env.MODEL_NAME;
-  if (!provider || provider === "rule" || !baseUrl || !apiKey || !model) return null;
+  if (rawProvider === "rule" || !apiKey) return null;
+  // 只给了 key 时按 DeepSeek 官方端点兜底（openai-compatible / deepseek-chat）
+  const provider = rawProvider ?? "openai-compatible";
+  const effectiveBase = baseUrl || (process.env.DEEPSEEK_API_KEY ? "https://api.deepseek.com" : "");
+  const effectiveModel = model || (process.env.DEEPSEEK_API_KEY ? "deepseek-chat" : "");
+  if (!effectiveBase || !effectiveModel) return null;
   if (provider !== "openai-compatible" && provider !== "anthropic") return null;
-  return { provider, baseUrl: baseUrl.replace(/\/$/, ""), apiKey, model };
+  return { provider, baseUrl: effectiveBase.replace(/\/$/, ""), apiKey, model: effectiveModel };
 }
 
 interface LLMMsg {
@@ -149,6 +155,11 @@ const SYSTEM_PROMPT = `你是安装工程造价 Agent，运行在一个造价工
 - 所有金额、工程量、汇总、比较必须调用工具完成，禁止自己心算金额
 - 修改类操作与文件导入会经系统确认门等待用户批准，你无需再向用户确认，除非任务本身不明确
 - 项目事实（地区/税率/品牌/价格文件）在下方上下文给出，优先使用，不要重复猜测
+- 用户说「刚才/那些/继续/上面/这一轮」等指代时，对照下方「上一轮任务」和「最近变更」解析；仍无法确定操作对象（哪几行/哪个文件/哪份报价）时，用一句话反问并给出 2-3 个可选动作，不要猜测着调用工具
+- 需要写操作时直接调用对应工具——确认门会自动向用户请求批准，不要在文字里先问「要不要执行」；只有缺参数、缺台账事实或目标有歧义时才反问，且把缺的项一次问全
+- 读到工具结果但还没达成用户目标时，继续调用下一步工具（含写操作）直到能给出结论为止
+- 分析/检查类请求只调用用户点名的维度；只有用户说「全面检查/体检/都看看」时才一次跑多项检查，避免把无关视图铺满工作区
+- 工具结果里出现的清单项、文件 id、行号，可直接作为后续工具参数引用
 - 动手前先用一句话说明你打算怎么做，之后每步操作之间也可以简短说明（这些说明会实时展示给用户）
 - 回复用中文，简洁专业。先给结论，再给关键数字
 - 如果没有合适的工具，说明你需要什么信息
@@ -244,11 +255,14 @@ export async function runLLMLoop(
 
   const contextBlock = [
     `项目: ${ctx.projectName}`,
-    `清单: ${ctx.boq.itemCount} 项，已定价 ${ctx.boq.pricedCount}，合价 ${ctx.boq.totalAmount} 元`,
-    `文件: ${ctx.files.map((f) => `${f.filename}(${f.kind})`).join("，") || "无"}`,
+    `清单: ${ctx.boq.itemCount} 项，已定价 ${ctx.boq.pricedCount}，合价 ${fmtMoney(ctx.boq.totalAmount)} 元`,
+    `文件: ${ctx.files.map((f) => `${f.filename}(${f.kind}${f.stage ? "/" + f.stage : ""}${f.period ? "@" + f.period : ""},id=${f.id})`).join("，") || "无"}`,
     `询价条目: ${ctx.quotationCount}`,
     `事实台账: ${ctx.facts.map((f) => `${f.key}=${f.value}`).join("，") || "空"}`,
     ctx.recentChanges.length ? `最近变更: ${ctx.recentChanges.join("；")}` : "",
+    ctx.lastRun
+      ? `上一轮任务（用户:「${ctx.lastRun.user}」）: ${[...ctx.lastRun.steps, ctx.lastRun.reply].filter(Boolean).join("；").slice(0, 1500)}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n");

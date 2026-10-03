@@ -1,0 +1,177 @@
+tr.boq-flash > td {
+  animation: row-flash 2.4s var(--ease-brand);
+}
+/* ── Excel 风格数据表 ─────────────────────────────────
+   全网格线 + 左侧行号槽 + 灰底表头 + 活动单元格描边 */
+.xl-sheet {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.xl-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12.5px;
+}
+.xl-table th, .xl-table td {
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+/* 行高亮用轻微淡入淡出，hover 扫过不闪 */
+.xl-table tbody td {
+  transition: background-color .12s ease;
+}
+.xl-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--sidebar);
+  border-bottom-color: var(--hairline-strong);
+  color: var(--ink-2);
+  font-weight: 500;
+  font-size: 11.5px;
+  text-align: left;
+}
+/* 行号槽（Excel 行头）：灰底、居中、不可选、横向滚动时吸附左缘 */
+.xl-rn {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  width: 38px;
+  min-width: 38px;
+  padding-inline: 4px !important;
+  background: var(--sidebar);
+  color: var(--ink-4);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  text-align: center !important;
+  user-select: none;
+}
+.xl-table thead .xl-rn {
+  z-index: 20;
+}
+/* 分组行（清单分部标题 / 异常组头） */
+.xl-group td {
+  background: color-mix(in srgb, var(--sidebar) 62%, var(--surface));
+  font-weight: 500;
+  color: var(--ink-2);
+}
+/* 行 hover 与可编辑单元格 */
+.xl-table tbody tr:hover td {
+  background: var(--hover);
+}
+/* 选中行（Excel 行选中态） */
+.xl-table tbody tr.xl-sel td {
+  background: color-mix(in srgb, var(--brand-soft) 55%, var(--surface));
+}
+.xl-table tbody tr.xl-sel td:first-child {
+  box-shadow: inset 2px 0 0 var(--brand-ink);
+}
+.xl-table tbody tr:hover td.xl-rn {
+  background: var(--active);
+  color: var(--ink-2);
+}
+.xl-table td.xl-edit {
+  cursor: cell;
+}
+.xl-table td.xl-edit:hover {
+  background: color-mix(in srgb, var(--brand-soft) 45%, var(--surface));
+}
+/* 行号槽里的改动痕迹点：该行在操作记录里有留痕时出现的琥珀小点，悬浮行号看明细 */
+.xl-audit {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--amber);
+  opacity: 0.85;
+  pointer-events: none;
+}
+/* 查找框命中词高亮（Excel 查找同款琥珀底） */
+.xl-hit {
+  background: var(--warning-soft-bg);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+}
+/* 活动单元格：Excel 式绿框 */
+.xl-active {
+  outline: 2px solid var(--brand-ink);
+  outline-offset: -2px;
+}
+/* 展开的价格构成行：面板自管留白，不随行 hover 高亮 */
+.xl-table tbody tr.xl-expand td {
+  padding: 0;
+  white-space: normal;
+  cursor: default;
+}
+.xl-table tbody tr.xl-expand:hover td {
+  background: var(--surface);
+}
+/* 清单滚动容器是查询上下文：窄面板里名称列先收缩，让常规列尽量整表放下，
+   只有真的放不下的宽表才横向滚动（配合末列冻结） */
+.xl-scroll {
+  container-type: inline-size;
+}
+/* 末列吸附右缘：窄视口横向滚动时，金额/操作列始终可见（Excel 冻结列）。
+   只对末列是金额/操作/差额的表启用（加 xl-pin-last）；末列是备注/来源的表不冻结。 */
+.xl-table.xl-pin-last td:last-child, .xl-table.xl-pin-last thead th:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 5;
+  box-shadow: inset 1px 0 0 var(--hairline);
+}
+.xl-table.xl-pin-last tbody td:last-child {
+  background: var(--surface);
+}
+.xl-table.xl-pin-last tbody tr:hover td:last-child {
+  background: var(--hover);
+}
+.xl-table.xl-pin-last tbody tr.xl-sel td:last-child {
+  background: color-mix(in srgb, var(--brand-soft) 55%, var(--surface));
+}
+.xl-table.xl-pin-last thead th:last-child {
+  z-index: 20;
+  background: var(--sidebar);
+}
+.xl-table.xl-pin-last tbody tr.xl-group td:last-child {
+  background: color-mix(in srgb, var(--sidebar) 62%, var(--surface));
+}
+.xl-table.xl-pin-last tbody tr.xl-expand td:last-child, .xl-table.xl-pin-last tbody tr.xl-expand:hover td:last-child {
+  background: var(--surface);
+}
+.cost-fact-details .xl-sheet { overflow-x: auto; }
+/* 表格在自己的容器中横向滚动，长文本不撑开整个工作区。 */
+.xl-sheet { max-width: 100%; overflow-x: auto; }
+.xl-table th.text-right { text-align: right; }
+.xl-table th.text-center { text-align: center; }
+.mapping-table thead { position: sticky; top: 0; z-index: 10; }
+.mapping-table thead th { position: static; }
+.cost-recent-row p, .dash-kpi strong, fieldset > .xl-sheet > div:first-child > span:first-child { overflow-wrap: anywhere; }
+fieldset > .xl-sheet > div:first-child > span:first-child { max-width: 100%; }
+@container (max-width: 620px) {
+  .xl-scroll .xl-name {
+    max-width: 11rem;
+  }
+}
+@container (max-width: 470px) {
+  .xl-scroll .xl-name {
+    max-width: 8rem;
+  }
+}
+@media print {
+  .xl-sheet { overflow: visible !important; border: 0; }
+  .xl-table { font-size: 11px; }
+  .xl-table thead th { position: static; }
+  .xl-table.xl-pin-last td:last-child, .xl-table.xl-pin-last thead th:last-child { position: static; box-shadow: none; }
+  .xl-table td, .xl-table th { white-space: normal; }
+  .xl-rn { display: none; }
+  .xl-group td { background: #f2f2f2 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { storage } from "@file/storage";
+import { inferFileStage } from "@file/classify";
 import { startRun } from "@agent/runtime";
 import { createHash } from "crypto";
 import path from "path";
@@ -31,6 +32,7 @@ export async function POST(
   const ext = path.extname(filename) || ".bin";
   const storageKey = await storage.put(buffer, ext);
 
+  const { stage, period } = inferFileStage(filename);
   const record = await prisma.projectFile.create({
     data: {
       projectId,
@@ -39,6 +41,8 @@ export async function POST(
       storageKey,
       sizeBytes: buffer.length,
       contentHash,
+      stage,
+      period,
     },
   });
 

@@ -23,7 +23,7 @@ const item = (
   unit,
   quantity: qty,
   unitPrice: price,
-  mainMaterialPrice: "0",
+  mainMaterialPrice: "0", laborUnitPrice: "0", machineUnitPrice: "0",
   pricingPlan: [],
   feeType: "分部分项",
   totalPrice: (parseFloat(qty) * parseFloat(price)).toFixed(2),

@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { resolveConfirm } from "@agent/pending";
-import { preflight } from "@shared/cors";
 import { z } from "zod";
-
-// Harness 面板在确认卡上直接批准导入，因此这条路由要能应答跨源预检。
-export const OPTIONS = preflight;
 
 // Approve / reject a paused confirm-flagged tool call.
 export async function POST(
@@ -14,7 +10,7 @@ export async function POST(
 ) {
   const { runId: id } = await params;
   const input = z.object({ approve: z.boolean() }).strict().safeParse(await req.json().catch(() => null));
-  if (!input.success) return NextResponse.json({ error: "请明确批准或取消此导入" }, { status: 400 });
+  if (!input.success) return NextResponse.json({ error: "请明确批准或取消此操作" }, { status: 400 });
   const { approve } = input.data;
   const run = await prisma.agentRun.findUnique({ where: { id } });
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });

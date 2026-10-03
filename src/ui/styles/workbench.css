@@ -1,0 +1,108 @@
+/* ── 工程工作台：左对话 ｜ 右工作区，两栏各自滚动；对话栏宽可拖拽（300–560px，localStorage 记忆） ── */
+.wb { position: relative; display: grid; grid-template-columns: var(--conv-w, 380px) minmax(0, 1fr); height: 100dvh; overflow: hidden; background: var(--bg); }
+.wb.conv-closed { grid-template-columns: minmax(0, 1fr); }
+.wb-conv { position: relative; min-width: 0; min-height: 0; border-right: 1px solid var(--hairline); background: var(--panel-soft); }
+/* 拖宽手柄：6px 隐形热区贴右缘，悬停/拖动时亮出品牌色细线 */
+.wb-conv-resize { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 25; touch-action: none; }
+.wb-conv-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background .15s; }
+.wb-conv-resize:hover::after, .wb-conv-resize:focus-visible::after, .wb-resizing .wb-conv-resize::after { background: var(--brand-ink); }
+.wb-resizing { cursor: col-resize; }
+.wb-resizing, .wb-resizing * { user-select: none !important; }
+.wb-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+.wb-header { flex-shrink: 0; border-bottom: 1px solid var(--hairline); background: var(--surface); }
+.wb-top { display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 24px; }
+.wb-top > .cost-actions { margin-left: auto; flex-wrap: nowrap; }
+.wb-crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: var(--ink-4); }
+/* 工程标识块：首字渐变砖，与对话头像同一套品牌语言 */
+.wb-avatar { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 8px; background: var(--brand-grad); color: var(--brand-on-accent); font-size: 11.5px; font-weight: 600; box-shadow: 0 1px 4px rgb(66 87 232 / .3), inset 0 1px 0 rgb(255 255 255 / .18); }
+.wb-crumbs .cost-back:hover { color: var(--ink-1); }
+.wb-name { min-width: 0; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 7px; margin-left: -7px; border-radius: 7px; font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; color: var(--ink-1); cursor: text; transition: background .15s; }
+.wb-name:hover { background: var(--hover); }
+.wb-name-input { width: min(46ch, 40vw); padding: 4px 7px; border: 1px solid var(--brand-ink); border-radius: 7px; font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; background: var(--surface); outline: 2px solid var(--brand-soft); }
+.wb-conv-open { position: relative; width: 32px; height: 32px; border-radius: 8px; }
+.wb-theme { width: 32px; height: 32px; border-radius: 8px; }
+.wb-conv-open i { position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--danger); color: var(--brand-on-accent); font-size: 9px; font-style: normal; display: flex; align-items: center; justify-content: center; }
+
+.wb-nav { display: flex; gap: 4px; padding: 0 18px; overflow-x: auto; }
+.wb-nav > button { position: relative; display: flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 11px 10px 12px; font-size: 13px; color: var(--ink-3); cursor: pointer; white-space: nowrap; transition: color var(--dur-hover) ease; }
+.wb-nav > button svg { transition: color .15s; }
+.wb-nav > button:hover { color: var(--ink-1); }
+.wb-nav > button:hover svg { color: var(--ink-2); }
+.wb-nav > button.active { color: var(--ink-1); font-weight: 600; }
+.wb-nav > button.active svg { color: var(--brand-ink); }
+.wb-nav > button::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--brand-ink); transform: scaleX(0); transition: transform .22s var(--ease-out); }
+.wb-nav > button.active::after { transform: scaleX(1); }
+.wb-nav small { font-size: 10.5px; font-weight: 500; padding: 1px 6px; border-radius: 8px; }
+.wb-nav small.warn { background: var(--warning-soft-bg); color: var(--warning-soft-fg); }
+.wb-nav small.count { background: var(--sidebar); color: var(--ink-3); }
+.wb-nav > button.active small.count { background: var(--brand-soft); color: var(--brand-ink); }
+
+.wb-body { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px 28px; }
+/* 视图切换上浮入场：替换出来的顶层节点播一次，轮询更新的同节点不重放 */
+.wb-body > * { animation: rise .24s var(--ease-out) backwards; }
+/* 阅读型内容在宽屏下收窄到可读宽度（表格/成果仍用满宽） */
+.cost-overview, .cost-settings { max-width: 1240px; }
+.wb-body.is-results { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.wb-body.is-results > .import-confirm, .wb-body.is-results > .cost-error { margin: 16px 24px 0; }
+.wb-body .text-neutral-300, .wb-body .text-neutral-400 { color: var(--ink-3); }
+
+.wb-status { flex-shrink: 0; display: flex; align-items: center; gap: 18px; height: 30px; padding: 0 24px; border-top: 1px solid var(--hairline); background: var(--surface); font-size: 11px; color: var(--ink-3); }
+.wb-status b { color: var(--ink-1); font-weight: 500; }
+.wb-status-warn { border-radius: 6px; padding: 2px 8px; background: var(--warning-soft-bg); color: var(--warning-soft-fg); font-size: 11px; cursor: pointer; transition: filter .15s; }
+.wb-status-warn:hover { filter: brightness(.96); }
+.wb-status-state { margin-left: auto; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.wb-status-state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--success-soft-fg); }
+.wb-status-state.busy::before { background: var(--brand-accent); animation: pulse-soft 1.2s ease-in-out infinite; }
+
+/* 分区内的二级切换：胶囊容器 + 浮起选中块 */
+.subtabs { display: flex; gap: 3px; margin-bottom: 18px; padding: 4px; width: fit-content; max-width: 100%; overflow-x: auto; border-radius: 11px; background: var(--sidebar); }
+.subtabs > div { display: flex; align-items: center; flex-shrink: 0; border-radius: 8px; color: var(--ink-3); transition: color .15s; }
+.subtabs > div.active { background: var(--surface); color: var(--ink-1); box-shadow: var(--shadow-sm), 0 0 0 1px var(--hairline); }
+.subtabs button { padding: 6px 12px; font-size: 12px; white-space: nowrap; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; transition: color .15s; }
+.subtabs button + button { padding: 6px 8px 6px 0; color: var(--ink-4); }
+.subtabs button + button:hover { color: var(--ink-1); }
+
+/* 成果：左列表 ｜ 右内容 */
+.results { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+.results-list { min-height: 0; overflow-y: auto; padding: 14px 10px; border-right: 1px solid var(--hairline); background: var(--panel-soft); display: flex; flex-direction: column; gap: 2px; }
+.results-list > div { display: flex; align-items: center; border-radius: 9px; transition: background .15s; }
+.results-list > div:hover { background: var(--hover); }
+.results-list > div.active { background: var(--surface); box-shadow: 0 0 0 1px var(--hairline), var(--shadow-sm); }
+.results-list > div > button:first-child { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; text-align: left; cursor: pointer; }
+.results-list small { font-size: 10.5px; color: var(--ink-4); }
+.results-list span { font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results-list > div.active span { color: var(--ink-1); font-weight: 600; }
+.results-close { padding: 6px; margin-right: 4px; border-radius: 5px; color: var(--ink-4); opacity: 0; cursor: pointer; }
+.results-list > div:hover .results-close, .results-list > div.active .results-close, .results-close:focus-visible { opacity: 1; }
+.results-close:hover { color: var(--ink-1); background: var(--sidebar); }
+.results-detail { min-width: 0; min-height: 0; overflow: auto; padding: 18px 24px 28px; }
+.results-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.results-head small { font-size: 11px; color: var(--ink-4); }
+.results-head h3 { margin-top: 3px; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.results-head .cost-actions { flex-shrink: 0; }
+
+.drop-armed .wb-main { outline: 2px dashed var(--brand-ink); outline-offset: -6px; }
+
+@media (max-width: 1100px) {
+  .wb { grid-template-columns: var(--conv-w, 320px) minmax(0, 1fr); }
+  .results { grid-template-columns: 200px minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .wb, .wb.conv-closed { display: flex; flex-direction: column; height: auto; min-height: 100dvh; overflow: visible; }
+  .wb-conv { height: 52dvh; border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .wb-conv-resize { display: none; }
+  .wb-top { padding: 0 14px; }
+  .wb-top .cost-btn.ghost { display: none; }
+  .wb-nav { padding: 0 8px; }
+  .wb-body { padding: 16px 14px; overflow: visible; }
+  .results { grid-template-columns: 1fr; }
+  .results-list { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--hairline); }
+  .results-list > div { flex-shrink: 0; max-width: 200px; }
+  .wb-status { display: none; }
+}
+@media print {
+  .wb { display: block; height: auto; overflow: visible; }
+  .wb-conv, .wb-header, .wb-status, .results-list, .subtabs, .results-head .cost-actions, .import-confirm, .cost-toaster, .drop-overlay { display: none !important; }
+  .wb-body, .results-detail { overflow: visible !important; padding: 0; }
+}

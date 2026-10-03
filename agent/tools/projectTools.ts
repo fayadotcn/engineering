@@ -4,11 +4,12 @@ import { registerTool, type ToolResult } from "./registry";
 import { listBoq } from "@boq/service";
 import { getFacts } from "@project/facts";
 import { projectTotals } from "@cost-engine/aggregate";
+import { fmtMoney } from "@cost-engine/money";
 import { FILE_KIND_LABEL, type FileKind } from "@shared/types";
 import { storage } from "@file/storage";
 import { parseWorkbook } from "@file/excel";
 import { classifyFile } from "@file/classify";
-import { ensureInspection, mappingToView, toSheetMappings } from "@file/inspection";
+import { ensureInspection, mappingToView, toSheetMappings, SHEET_TYPE_LABEL } from "@file/inspection";
 import { COLUMN_ROLE_LABEL, type ColumnRole } from "@shared/types";
 import { colLetter } from "@file/excel";
 import { importBoqFromSheets, deleteByFile } from "@boq/service";
@@ -66,7 +67,7 @@ registerTool({
     const t = projectTotals(items);
     return {
       observation: t,
-      message: `清单 ${t.itemCount} 行（可计价 ${t.pricableCount} 项，已定价 ${t.pricedCount} 项），合价 ${t.totalAmount} 元`,
+      message: `清单 ${t.itemCount} 行（可计价 ${t.pricableCount} 项，已定价 ${t.pricedCount} 项），合价 ${fmtMoney(t.totalAmount)} 元`,
     };
   },
 });
@@ -171,7 +172,7 @@ registerTool({
   },
 });
 
-const SHEET_TYPE_LABEL = { BOQ: "清单", QUOTATION: "询价表", GENERIC: "忽略" } as const;
+// SHEET_TYPE_LABEL 由 @file/inspection 提供（8 类全量中文标签）
 
 /**
  * file.inspect: 识别上传表格的列映射（不写数据），把 columnMapping 视图推到工作区。
@@ -206,7 +207,7 @@ registerTool({
     return {
       observation: { filename: file.filename, sheets: obs },
       views: [mappingToView(file, mapping)],
-      message: `识别到 ${sheets.length} 个工作表：${summary}`,
+      message: `识别到 ${sheets.length} 个工作表${sheets.length ? `：${summary}` : ""}`,
     };
   },
 });
@@ -223,8 +224,12 @@ registerTool({
   confirm: async (args: { fileId: string }) => {
     const { file, mapping, isPdf } = await ensureInspection(args.fileId);
     if (isPdf || !mapping) return null;
+    // 确认门只盯会真正导数据的类型；COMPARE/APPROVAL/FACTS/GENERIC 不导入，
+    // 识别结果本身已展示在「列映射」视图，无需列级确认
     const targets = Object.values(mapping).filter(
-      (s) => s.type === "BOQ" || s.type === "QUOTATION"
+      (s) =>
+        s.type === "BOQ" || s.type === "QUOTATION" ||
+        s.type === "PENDING_QUOTE" || s.type === "MATERIAL_PRICE"
     );
     if (!targets.length) return null;
     // needsConfirm 是识别阶段给出的"必须让人看一眼"（例如模板类型与本文件证据冲突）。
@@ -392,6 +397,11 @@ registerTool({
     });
 
     // fact extraction — FILE_EXTRACTED, never INFERRED masquerading
+    // 重导幂等：清掉本文件上一轮提取的事实再重抽
+    await prisma.costFact.deleteMany({
+      where: { projectId: ctx.projectId, sourceFileId: file.id },
+    });
+    let extractedKeys: string[] = [];
     const province = file.filename.match(REGION_RE)?.[0];
     if (province)
       await setFact(ctx.projectId, {
@@ -402,6 +412,26 @@ registerTool({
         sourceFileId: file.id,
         agentRunId: ctx.runId,
       });
+    // FACTS 表取数：表-04 推税率、单位工程汇总真值、扉页字段
+    if (sheets?.length) {
+      const { extractFileFacts } = await import("@file/factsExtract");
+      const extracted = extractFileFacts(sheets, file.filename);
+      extractedKeys = extracted.map((f) => f.key);
+      for (const f of extracted) {
+        try {
+          await setFact(ctx.projectId, {
+            factType: f.factType,
+            key: f.key,
+            value: f.value,
+            source: "FILE_EXTRACTED",
+            sourceFileId: file.id,
+            agentRunId: ctx.runId,
+          });
+        } catch {
+          /* 校验不过的事实跳过，不拖垮导入 */
+        }
+      }
+    }
     if (kind === "MATERIAL_QUOTATION")
       await setFact(ctx.projectId, {
         factType: "PRICE_FILE",
@@ -411,6 +441,18 @@ registerTool({
         sourceFileId: file.id,
         agentRunId: ctx.runId,
       });
+
+    // 非导入类表的说明：让用户知道这些表被认出但没进清单（对比表→对审，其余→资料）
+    const skipped = (sheets ?? []).filter(
+      (s) => s.type === "COMPARE" || s.type === "APPROVAL" || s.type === "FACTS"
+    );
+    const skippedNote = skipped.length
+      ? `；另识别到${skipped
+          .map((s) => `表「${s.sheetName}」为${SHEET_TYPE_LABEL[s.type]}，未导入`)
+          .join("、")}${
+          skipped.some((s) => s.type === "COMPARE") ? "，对比表可在「资料」里发起文件对审" : ""
+        }`
+      : "";
 
     const views = [
       ...(imported ? [{ kind: "boqTable" as const, id: "view:boq", title: "工程量清单" }] : []),
@@ -443,11 +485,16 @@ registerTool({
           reversible: false,
         },
       ],
-      message: `已解析「${file.filename}」→ 识别为**${FILE_KIND_LABEL[kind]}**，导入 ${imported} 行数据${
-        province ? `，提取事实：地区=${province}` : ""
-      }${nonNumericQty ? `；${nonNumericQty} 行工程量非数值已保留原文` : ""}${
-        derivedUnitPrice ? `；${derivedUnitPrice} 项综合单价由 合价÷工程量 推导` : ""
-      }${laborPriceCol ? "；检测到人工/机械单价列，已保留在原始单元格（成本模型接入后可直接使用）" : ""}`,
+      message: kind.startsWith("BOQ_")
+        ? `已解析「${file.filename}」→ 识别为**${FILE_KIND_LABEL[kind]}**，导入 ${imported} 行数据${
+            province ? `，提取事实：地区=${province}` : ""
+          }${extractedKeys.length ? `，汇总表取数 ${extractedKeys.length} 项进台账${extractedKeys.includes("税率") ? "（含推导税率）" : ""}` : ""}${
+            nonNumericQty ? `；${nonNumericQty} 行工程量非数值已保留原文` : ""}${
+            derivedUnitPrice ? `；${derivedUnitPrice} 项综合单价由 合价÷工程量 推导` : ""
+          }${laborPriceCol ? "；检测到人工/机械单价列，已提取为成本分量（「成本构成分析」可直接使用）" : ""}${skippedNote}`
+        : `已解析「${file.filename}」→ 识别为**${FILE_KIND_LABEL[kind]}**，${
+            imported ? `登记 ${imported} 行价格数据，材料取价时会自动参考` : "已登记为项目资料，不参与清单组价"
+          }${province ? `，提取事实：地区=${province}` : ""}${skippedNote}`,
     };
   },
 });

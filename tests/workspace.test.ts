@@ -35,9 +35,9 @@ describe("专业结果与工程对话联动", () => {
     expect(useStore.getState().mappingDirty).toBe(true);
   });
 
-  it("按需打开工作区先展示清单，概况和历史结果仍可查看", async () => {
+  it("按需打开工作区先展示总览，清单和历史结果仍可查看", async () => {
     fixture(); await useStore.getState().init("project-1");
-    expect(useStore.getState().activeViewId).toBe("view:boq");
+    expect(useStore.getState().activeViewId).toBe("view:overview");
     expect(useStore.getState().views.some(v => v.id === "result")).toBe(true);
   });
 
@@ -48,6 +48,17 @@ describe("专业结果与工程对话联动", () => {
     expect(ids).toContain("view:files");
     expect(ids).toContain("view:facts");
     expect(ids).toContain("view:receipts");
+  });
+
+  it("后台刷新不清除用户在清单视图上的专业筛选", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    // 用户在总览点了专业占比，或清单页里选了专业 —— 都写在 view:boq.filter 上
+    useStore.setState(st => ({
+      views: st.views.map(v => v.id === "view:boq" && v.kind === "boqTable" ? { ...v, filter: { ...v.filter, discipline: "ELECTRICAL" } } : v),
+    }));
+    await useStore.getState().init("project-1", true); // 8 秒轮询走的同一条路
+    const boq = useStore.getState().views.find(v => v.id === "view:boq");
+    expect(boq?.kind === "boqTable" ? boq.filter?.discipline : undefined).toBe("ELECTRICAL");
   });
 
   it("Agent 推送的对象视图与常驻视图同 id，不会出现两个重复标签", async () => {
@@ -154,7 +165,8 @@ describe("专业结果与工程对话联动", () => {
     fixture(); await useStore.getState().init("project-1");
     vi.stubGlobal("fetch", vi.fn(async (_url, init) => init?.method === "PATCH" ? Response.json({}) : Response.json({}, { status: 503 })));
     expect(await useStore.getState().patchItem("item", { unitPrice: "20" })).toBe(true);
-    expect(useStore.getState().loadingError).toContain("修改已保存");
+    // 刷新在后台进行：写入即返回，刷新失败稍后落 loadingError
+    await vi.waitFor(() => expect(useStore.getState().loadingError).toContain("修改已保存"));
     expect(useStore.getState().saving).toBe(false);
   });
 

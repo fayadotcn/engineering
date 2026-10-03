@@ -13,7 +13,7 @@ import {
 import { ConfirmDialog, toast } from "../primitives";
 import { DatasetMappingPanel } from "./DatasetMappingPanel";
 import { PriceRowsPanel } from "./PriceRowsPanel";
-import { readResponse } from "../http";
+import { readResponse } from "../api";
 
 interface DatasetDTO {
   id: string;
@@ -41,10 +41,19 @@ const KINDS = [
 
 const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
+// 数据集副标题里的来源标签：
+// - 本地计价软件导入的内部库文件（*.DB3 之类）显示人话，全名留在 title 里供复核；
+// - 名称已经就是文件名（去扩展名）时不重复显示一遍。
+const sourceLabel = (d: DatasetDTO) => {
+  if (/\.db3?\b/i.test(d.filename)) return "本地计价软件数据";
+  const stem = d.filename.replace(/\.[^.]+$/, "");
+  if (stem === d.name || (stem.length > 8 && d.name.startsWith(stem))) return "";
+  return d.filename;
+};
+
 type CardPanel = "preview" | "prices" | "mapping";
 
-const toggleBtn =
-  "flex h-7 items-center gap-1 rounded-md px-2 text-[11.5px] text-neutral-500 hover:bg-[var(--hover)]";
+const toggleBtn = "cost-btn sm ghost";
 
 function DatasetCard({
   d,
@@ -131,40 +140,32 @@ function DatasetCard({
         <FileSpreadsheet size={15} className="shrink-0 text-neutral-400" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium">{d.name}</div>
-          <div className="mt-0.5 break-words text-[11px] text-neutral-500">
-            {d.filename} ·{" "}
-            {d.status === "FAILED"
-              ? "解析失败"
-              : d.status === "PENDING"
-                ? "需要核对表格"
-                : `${d.rowCount} 行`}{" "}
-            · {d.createdAt.slice(0, 10)}
+          <div
+            className="mt-0.5 break-words text-[11px] text-neutral-500"
+            title={sourceLabel(d) === d.filename ? undefined : `源文件：${d.filename}`}
+          >
+            {[
+              sourceLabel(d),
+              d.status === "FAILED"
+                ? "解析失败"
+                : d.status === "PENDING"
+                  ? "需要核对表格"
+                  : `${d.rowCount} 行`,
+              d.createdAt.slice(0, 10),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </div>
         </div>
-        {d.status === "FAILED" && (
-          <span
-            className="rounded px-1.5 py-0.5 text-[11px]"
-            style={{ background: "var(--danger-soft-bg)", color: "var(--danger-soft-fg)" }}
-          >
-            失败
-          </span>
-        )}
-        {d.status === "PENDING" && (
-          <span
-            className="rounded px-1.5 py-0.5 text-[11px]"
-            style={{ background: "var(--warning-soft-bg)", color: "var(--warning-soft-fg)" }}
-          >
-            待确认
-          </span>
-        )}
-        {!d.active && <span className="text-xs text-neutral-500">已停用</span>}
+        {d.status === "FAILED" && <span className="chip danger">失败</span>}
+        {d.status === "PENDING" && <span className="chip warn">待确认</span>}
+        {!d.active && <span className="chip">已停用</span>}
         {d.kind === "MATERIAL_PRICE" && (d.status === "PENDING" || d.status === "FAILED") && (
           <button
             onClick={() => togglePanel("mapping")}
             disabled={dirty || busy}
             aria-expanded={panel === "mapping"}
-            className="flex h-7 items-center gap-1 rounded-md px-3 text-[11.5px] font-medium text-white"
-            style={{ background: "var(--brand-accent)" }}
+            className="cost-btn sm primary"
           >
             <Check size={12} /> 核对表格
           </button>
@@ -199,12 +200,12 @@ function DatasetCard({
           className={toggleBtn}
           title="删除数据集"
         >
-          {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={13} />}删除
+          {busy ? <Loader2 size={12} className="spin" /> : <Trash2 size={13} />}删除
         </button>
         </div></details>
       </div>
       {dirty && <p className="px-4 pb-2 text-xs text-neutral-500" role="status">请先保存或取消编辑，再切换面板、筛选或停用数据集。</p>}
-      {panel === "preview" && previewLoading && <div className="cost-empty" role="status"><Loader2 size={14} className="animate-spin" />正在加载预览</div>}
+      {panel === "preview" && previewLoading && <div className="cost-empty" role="status"><Loader2 size={14} className="spin" />正在加载预览</div>}
       {panel === "preview" && previewError && <div className="cost-error" role="alert">{previewError}<button className="cost-btn" onClick={() => void togglePreview(true)}>重试</button></div>}
       <ConfirmDialog
         open={confirmDel}
@@ -349,10 +350,9 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={blocked}
-            className="ml-auto flex h-9 items-center gap-1.5 rounded-md px-4 text-[12.5px] font-medium text-white transition-all enabled:active:translate-y-px disabled:opacity-50"
-            style={{ background: "var(--brand-accent)" }}
+            className="cost-btn primary ml-auto !h-9 !px-4 !text-[12.5px]"
           >
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+            {busy ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
             上传{KINDS.find((k) => k.k === kind)?.label}
           </button>
         </div>
@@ -363,7 +363,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               aria-label="整表默认价格类型"
               value={defPriceType}
               onChange={(e) => setDefPriceType(e.target.value)}
-              className="h-7 rounded-md border border-neutral-200 bg-white px-1.5 text-[11.5px] text-neutral-600"
+              className="cost-input"
               title="整表默认价格类型"
             >
               <option value="">价格类型：自动</option>
@@ -378,7 +378,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               value={defRegion}
               onChange={(e) => setDefRegion(e.target.value)}
               placeholder="地区"
-              className="h-7 w-24 rounded-md border border-neutral-200 bg-white px-2 text-[11.5px] outline-none focus:border-[var(--brand-accent)]"
+              className="cost-input w-24"
             />
             <input
               disabled={busy}
@@ -386,7 +386,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               value={defPeriod}
               onChange={(e) => setDefPeriod(e.target.value)}
               placeholder="如 2024-06，留空自动从表/文件名识别"
-              className="h-7 w-64 rounded-md border border-neutral-200 bg-white px-2 text-[11.5px] outline-none focus:border-[var(--brand-accent)]"
+              className="cost-input w-64"
             />
             <input
               disabled={busy}
@@ -394,7 +394,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               value={defBrand}
               onChange={(e) => setDefBrand(e.target.value)}
               placeholder="品牌（整表默认）"
-              className="h-7 w-32 rounded-md border border-neutral-200 bg-white px-2 text-[11.5px] outline-none focus:border-[var(--brand-accent)]"
+              className="cost-input w-32"
             />
           </div></details>
         )}

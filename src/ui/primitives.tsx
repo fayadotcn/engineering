@@ -9,21 +9,22 @@ const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" 
    全局轻提示：操作反馈、错误浮层。右下堆叠，4s 自动消散。 */
 
 type ToastKind = "info" | "success" | "error";
-interface ToastItem { id: number; kind: ToastKind; text: string }
+interface ToastItem { id: number; kind: ToastKind; text: string; action?: { label: string; onClick: () => void } }
 
 interface ToastState {
   toasts: ToastItem[];
-  push(kind: ToastKind, text: string): void;
+  push(kind: ToastKind, text: string, action?: ToastItem["action"]): void;
   dismiss(id: number): void;
 }
 
 let seq = 0;
 export const useToast = create<ToastState>((set) => ({
   toasts: [],
-  push(kind, text) {
+  push(kind, text, action) {
     const id = ++seq;
-    set((s) => ({ toasts: [...s.toasts.slice(-4), { id, kind, text }] }));
-    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 4200);
+    set((s) => ({ toasts: [...s.toasts.slice(-4), { id, kind, text, action }] }));
+    // 可操作的提示多留几秒：撤销入口要留够用户反应时间
+    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? 10000 : 4200);
   },
   dismiss(id) {
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
@@ -31,9 +32,9 @@ export const useToast = create<ToastState>((set) => ({
 }));
 
 export const toast = {
-  info: (t: string) => useToast.getState().push("info", t),
-  success: (t: string) => useToast.getState().push("success", t),
-  error: (t: string) => useToast.getState().push("error", t),
+  info: (t: string, action?: ToastItem["action"]) => useToast.getState().push("info", t, action),
+  success: (t: string, action?: ToastItem["action"]) => useToast.getState().push("success", t, action),
+  error: (t: string, action?: ToastItem["action"]) => useToast.getState().push("error", t, action),
 };
 
 const TOAST_STYLE: Record<ToastKind, { icon: React.ReactNode; cls: string }> = {
@@ -51,10 +52,18 @@ export function Toaster() {
         <div
           key={t.id}
           role={t.kind === "error" ? "alert" : "status"}
-          className="fadein pointer-events-auto flex items-start gap-2.5 rounded-xl border border-neutral-200 bg-[var(--surface)] px-3.5 py-3 shadow-[var(--shadow-lg)]"
+          className="toast-in pointer-events-auto flex items-start gap-2.5 rounded-[14px] border border-neutral-200 bg-[var(--surface)] px-3.5 py-3 shadow-[var(--shadow-lg)]"
         >
           <span className="mt-px shrink-0">{TOAST_STYLE[t.kind].icon}</span>
           <span className="min-w-0 flex-1 break-words text-[12.5px] leading-relaxed text-neutral-700">{t.text}</span>
+          {t.action && (
+            <button
+              onClick={() => { t.action!.onClick(); dismiss(t.id); }}
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-[var(--brand-ink)] hover:bg-[var(--hover)]"
+            >
+              {t.action.label}
+            </button>
+          )}
           <button
             onClick={() => dismiss(t.id)}
             aria-label="关闭提示"
@@ -129,27 +138,20 @@ export function ConfirmDialog({
           <AlertTriangle size={15} />
         </span>
         <div className="min-w-0 flex-1 break-words">
-          <div className="text-[14px] font-medium">{title}</div>
+          <div className="dlg-title">{title}</div>
           {description && (
             <div className="mt-1 text-[12.5px] leading-relaxed text-neutral-500">{description}</div>
           )}
         </div>
       </div>
-      <div className="mt-5 flex flex-wrap justify-end gap-2">
-        <button
-          onClick={onCancel}
-          disabled={busy}
-          className="h-8 rounded-lg border border-neutral-200 px-3.5 text-[12.5px] text-neutral-600 hover:bg-[var(--hover)] disabled:opacity-40"
-        >
+      <div className="dlg-actions">
+        <button onClick={onCancel} disabled={busy} className="cost-btn">
           取消
         </button>
         <button
           onClick={onConfirm}
           disabled={busy}
-          className={cn(
-            "h-8 rounded-lg px-3.5 text-[12.5px] font-medium text-white transition-colors disabled:opacity-50",
-            danger ? "bg-[var(--danger)] hover:opacity-90" : "bg-[var(--brand-accent)] hover:opacity-90"
-          )}
+          className={cn("cost-btn primary", danger && "danger")}
         >
           {busy ? "处理中…" : confirmText}
         </button>
@@ -164,16 +166,23 @@ export function EmptyState({
   icon,
   title,
   hint,
+  action,
 }: {
   icon?: React.ReactNode;
   title: string;
   hint?: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
-      {icon && <div className="text-neutral-300">{icon}</div>}
-      <div className="text-[12px] text-neutral-400">{title}</div>
-      {hint && <div className="max-w-sm px-4 text-[11px] text-neutral-500">{hint}</div>}
+    <div className="flex h-40 flex-col items-center justify-center gap-2.5 text-center">
+      {icon && (
+        <span className="mb-1 flex h-11 w-11 items-center justify-center rounded-[14px] text-neutral-400" style={{ background: "var(--sidebar)", boxShadow: "inset 0 0 0 1px var(--hairline)" }}>
+          {icon}
+        </span>
+      )}
+      <div className="text-[12.5px] font-medium text-neutral-500">{title}</div>
+      {hint && <div className="max-w-sm px-4 text-[11.5px] leading-relaxed text-neutral-400">{hint}</div>}
+      {action && <div className="mt-2">{action}</div>}
     </div>
   );
 }

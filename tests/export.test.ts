@@ -15,7 +15,7 @@ const ctx: ToolContext = { projectId: "p1", runId: "r1", userId: "user", emit: v
 const item = (patch: Partial<BoqItemDTO>): BoqItemDTO => ({
   id: "i1", projectId: "p1", fileId: "f1", sheetName: "清单", rowIndex: 2,
   code: "030001", name: "镀锌钢管", rawFeature: "DN100", unit: "m", quantity: "10", unitPrice: "50",
-  mainMaterialPrice: "0", pricingPlan: [], totalPrice: "500", feeType: "分部分项", sectionPath: "",
+  mainMaterialPrice: "0", laborUnitPrice: "0", machineUnitPrice: "0", pricingPlan: [], totalPrice: "500", feeType: "分部分项", sectionPath: "",
   isHeader: false, sortOrder: 0, discipline: "PLUMBING", features: {}, ...patch,
 });
 const load = async (buffer: Buffer) => {
@@ -34,8 +34,9 @@ describe("可追溯的清单导出", () => {
   it("不同文件的同名表分别导出，保留类别与来源，标题行不占清单序号", async () => {
     mocks.items.mockResolvedValue([
       item({ id: "header", isHeader: true, name: "给排水工程" }),
-      item({ sortOrder: 1 }),
+      item({ sortOrder: 1, quantity: "41", quantityExpr: "3层×12个+5" }),
       item({ id: "fee", sortOrder: 2, feeType: "总价措施", name: "安全文明施工费", quantity: "0", unitPrice: "0", totalPrice: "1250.50" }),
+      item({ id: "noprice", sortOrder: 3, unitPrice: "0", totalPrice: "0" }),
       item({ id: "i2", fileId: "f2", totalPrice: "600", unitPrice: "60" }),
     ]);
     const result = await getTool("report.exportExcel")!.handler!(ctx, {});
@@ -45,11 +46,19 @@ describe("可追溯的清单导出", () => {
     expect(wb.worksheets[0].getCell("A2").value).toBe("");
     expect(wb.worksheets[0].getCell("A3").value).toBe("1");
     expect(wb.worksheets[0].getCell("B3").value).toBe("030001");
-    expect(wb.worksheets[0].getCell("H4").value).toBe(1250.5);
-    expect(wb.worksheets[0].getCell("I4").value).toBe("总价措施");
-    expect(wb.worksheets[0].getCell("J4").value).toBe("招标清单.xlsx");
-    expect(wb.worksheets[1].getCell("J2").value).toBe("结算清单.xlsx");
-    expect(wb.worksheets[1].getCell("H2").value).toBe(600);
+    expect(wb.worksheets[0].getCell("F3").value).toBe(41);
+    expect(wb.worksheets[0].getCell("G3").value).toBe("3层×12个+5");
+    expect(wb.worksheets[0].getCell("G4").value).toBe("");
+    expect(wb.worksheets[0].getCell("I4").value).toBe(1250.5);
+    // J=定价状态：可计价行显式标已定价/未定价，非计价行留白；未定价行整行淡琥珀底色
+    expect(wb.worksheets[0].getCell("J3").value).toBe("已定价");
+    expect(wb.worksheets[0].getCell("J4").value).toBe("");
+    expect(wb.worksheets[0].getCell("K4").value).toBe("总价措施");
+    expect(wb.worksheets[0].getCell("L4").value).toBe("招标清单.xlsx");
+    expect(wb.worksheets[0].getCell("J5").value).toBe("未定价");
+    expect((wb.worksheets[0].getRow(5).getCell(1).fill as ExcelJS.FillPattern).fgColor?.argb).toBe("FFFFF7E0");
+    expect(wb.worksheets[1].getCell("L2").value).toBe("结算清单.xlsx");
+    expect(wb.worksheets[1].getCell("I2").value).toBe(600);
   });
 
   it("超长、非法及忽略大小写后的重复表名仍能完整导出", async () => {
@@ -76,7 +85,9 @@ describe("可追溯的清单导出", () => {
     ws.addRow(["项目", "工程量", "综合单价", "合价", "备注"]);
     ws.addRow(["设备", 2, 10, 20, "需保留"]); ws.getCell("E2").font = { bold: true };
     const original = Buffer.from(await book.xlsx.writeBuffer());
-    const wb = await load(await writeBackPrices(original, [{ sheetName: "安装", rowIndex: 2, quantity: "3", unitPrice: "12.5", totalPrice: "37.5" }], { 安装: { quantity: 1, unitPrice: 2, totalPrice: 3 } }));
+    const wb = await load(await writeBackPrices(original, [{ sheetName: "安装", rowIndex: 2, quantity: "3", quantityExpr: "3层×12个-33", unitPrice: "12.5", totalPrice: "37.5" }], { 安装: { quantity: 1, unitPrice: 2, totalPrice: 3 } }));
+    expect(wb.worksheets[0].getCell("B2").value).toBe(3);
+    expect(String(wb.worksheets[0].getCell("B2").note)).toContain("3层×12个-33");
     expect(wb.worksheets[0].getCell("D2").value).toBe(37.5);
     expect(wb.worksheets[0].getCell("E2").value).toBe("需保留");
     expect(wb.worksheets[0].getCell("E2").font.bold).toBe(true);

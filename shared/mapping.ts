@@ -3,10 +3,13 @@
 
 /**
  * 类型与单价角色对齐：清单里裸「单价」= 综合单价；询价表里单价 = price。
- * 分项成本价（材料/主材/人工/机械/询价/报价 表头）不动。不改入参对象。
+ * 分项成本价（材料/主材/人工/机械/询价 表头）不动；「报价」不挡——投标报价
+ * 就是综合单价口径，询价表里它先升格也会由 unitPrice→price 还原。不改入参对象。
  */
 export function reconcilePriceRole(
-  type: "BOQ" | "QUOTATION" | "GENERIC",
+  type:
+    | "BOQ" | "QUOTATION" | "GENERIC"
+    | "COMPARE" | "APPROVAL" | "PENDING_QUOTE" | "FACTS" | "MATERIAL_PRICE",
   columns: Record<string, number>,
   headerCells: string[]
 ): {
@@ -15,17 +18,17 @@ export function reconcilePriceRole(
 } {
   const next = { ...columns };
   const hd = (i: number) => (headerCells[i] ?? "").replace(/\s+/g, "");
-  if (type === "BOQ") {
+  if (type === "BOQ" || type === "PENDING_QUOTE") {
     if (
       next.price !== undefined &&
       next.unitPrice === undefined &&
-      !/材料|主材|人工|机械|询价|报价/.test(hd(next.price))
+      !/材料|主材|人工|机械|询价/.test(hd(next.price))
     ) {
       next.unitPrice = next.price;
       delete next.price;
       return { columns: next, moved: "price→unitPrice" };
     }
-  } else if (type === "QUOTATION") {
+  } else if (type === "QUOTATION" || type === "MATERIAL_PRICE") {
     if (next.unitPrice !== undefined && next.price === undefined) {
       next.price = next.unitPrice;
       delete next.unitPrice;

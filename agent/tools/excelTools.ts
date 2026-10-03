@@ -2,11 +2,13 @@ import { z } from "zod";
 import { prisma } from "@database/client";
 import { registerTool } from "./registry";
 import { listBoq } from "@boq/service";
+import { assembleExportSheets } from "@boq/export";
 import { storage } from "@file/storage";
 import { writeBackPrices, buildExportWorkbook, type ColumnMap, type CellPatch } from "@file/excel";
 import { ensureInspection, mappingToView } from "@file/inspection";
 import { fromJson } from "@shared/json";
 import { projectTotals } from "@cost-engine/aggregate";
+import { fmtMoney } from "@cost-engine/money";
 
 registerTool({
   name: "excel.read",
@@ -103,6 +105,7 @@ registerTool({
       rowIndex: i.rowIndex,
       unitPrice: i.unitPrice,
       quantity: i.quantity,
+      quantityExpr: i.quantityExpr || undefined,
       totalPrice: i.totalPrice,
     }));
     const original = await storage.get(file.storageKey);
@@ -140,55 +143,12 @@ registerTool({
   implemented: true,
   schema: z.object({ filename: z.string().optional() }),
   handler: async (ctx, args: { filename?: string }) => {
-    const [items, files] = await Promise.all([
-      listBoq(ctx.projectId),
-      prisma.projectFile.findMany({ where: { projectId: ctx.projectId }, select: { id: true, filename: true } }),
-    ]);
-    if (!items.length) return { observation: { error: "清单为空" } };
-
-    const filenames = new Map(files.map(f => [f.id, f.filename]));
-    // 同名工作表仍按源文件分开，避免把招标版和结算版混成一张表。
-    const bySheet = new Map<string, typeof items>();
-    items.forEach((i) => {
-      const key = JSON.stringify([i.fileId, i.sheetName]);
-      const arr = bySheet.get(key) ?? [];
-      arr.push(i);
-      bySheet.set(key, arr);
-    });
-    const headerLabels = ["序号", "项目编码", "项目名称", "项目特征", "计量单位", "工程量", "综合单价", "合价", "费用类别", "源文件", "源工作表"];
-    const sheets = [...bySheet.values()].map(rows => {
-      let seq = 0;
-      return {
-        sheetName: rows[0].sheetName,
-        columns: {},
-        headerLabels,
-        rows: rows
-          .sort((a, b) => a.sortOrder - b.sortOrder)
-          .map((r) => ({
-            rowIndex: r.rowIndex,
-            isHeader: r.isHeader,
-            values: (r.isHeader
-              ? { 项目名称: r.name }
-              : {
-                  序号: String(++seq),
-                  项目编码: r.code,
-                  项目名称: r.name,
-                  项目特征: r.rawFeature,
-                  计量单位: r.unit,
-                  工程量: r.quantity,
-                  综合单价: r.unitPrice,
-                  合价: r.totalPrice,
-                  费用类别: r.feeType,
-                  源文件: r.fileId ? filenames.get(r.fileId) ?? "" : "手工录入",
-                  源工作表: r.sheetName,
-                }) as Record<string, string>,
-          })),
-      };
-    });
-    const out = await buildExportWorkbook(sheets);
+    const assembled = await assembleExportSheets(ctx.projectId);
+    if (!assembled) return { observation: { error: "清单为空" } };
+    const { items, total } = assembled;
+    const out = await buildExportWorkbook(assembled.sheets);
     const filename = args.filename ?? `清单导出_${new Date().toISOString().slice(0, 10)}.xlsx`;
     const artifact = await saveArtifact(ctx, out, filename);
-    const total = projectTotals(items).totalAmount;
     return {
       observation: { artifactId: artifact.id, rows: items.length, total },
       views: [
@@ -198,7 +158,7 @@ registerTool({
           title: "导出完成",
           artifactId: artifact.id,
           filename: artifact.label,
-          summary: `${items.filter((i) => !i.isHeader).length} 个清单项，合计 ${total} 元`,
+          summary: `${items.filter((i) => !i.isHeader).length} 个清单项，合计 ${fmtMoney(total)} 元`,
         },
       ],
       receipts: [
@@ -210,7 +170,7 @@ registerTool({
           reversible: false,
         },
       ],
-      message: `已导出「${filename}」，合计 ${total} 元`,
+      message: `已导出「${filename}」，合计 ${fmtMoney(total)} 元`,
     };
   },
 });
@@ -227,6 +187,7 @@ registerTool({
 
     const { projectTotals, aggregateByDiscipline, aggregateByCategory } = await import("@cost-engine/aggregate");
     const { findSameItemDifferentPrice, findPriceAnomalies } = await import("@cost-engine/compare");
+    const { analyzeCostComposition } = await import("@cost-engine/costComposition");
     const { feeSummary } = await import("@cost-engine/fees");
     const { getFacts, loadFeeParams } = await import("@project/facts");
     const ExcelJS = (await import("exceljs")).default;
@@ -286,6 +247,33 @@ registerTool({
     for (const c of aggregateByCategory(items).slices)
       s3.addRow([c.label, Number(c.amount), `${(c.share * 100).toFixed(1)}%`, c.count]);
 
+    // 人材机成本构成（分量来源：定额组价方案 > 源表分解列 > 主材暂估价）
+    const comp = analyzeCostComposition(items);
+    const sCost = wb.addWorksheet("成本构成");
+    const ch = sCost.addRow(["项目编码", "项目名称", "工程量", "合价", "人工费", "材料费", "机械费", "管利及其他", "毛利率%", "分量来源"]);
+    ch.font = bold.font;
+    const srcLabel: Record<string, string> = { quotaPlan: "定额组价", imported: "源表分解", partial: "仅主材价", none: "无数据" };
+    for (const r of comp.rows) {
+      const row = sCost.addRow([
+        r.code, r.name, Number(r.quantity), Number(r.revenue),
+        r.labor === null ? "—" : Number(r.labor),
+        r.material === null ? "—" : Number(r.material),
+        r.machine === null ? "—" : Number(r.machine),
+        Number(r.other),
+        r.marginRate === null ? "—" : Number(r.marginRate),
+        srcLabel[r.source],
+      ]);
+      for (const ci of [4, 5, 6, 7, 8]) {
+        const cell = row.getCell(ci);
+        if (typeof cell.value === "number") cell.numFmt = moneyFmt;
+      }
+      if (r.inverted) row.font = { bold: true, color: { argb: "FFC00000" } };
+    }
+    const tRow = sCost.addRow(["合计", "", "", Number(comp.totals.revenue), Number(comp.totals.labor), Number(comp.totals.material), Number(comp.totals.machine), Number(comp.totals.other), comp.totals.marginRate === null ? "—" : Number(comp.totals.marginRate), ""]);
+    tRow.font = bold.font;
+    for (const ci of [4, 5, 6, 7, 8]) tRow.getCell(ci).numFmt = moneyFmt;
+    sCost.columns = [{ width: 16 }, { width: 30 }, { width: 10 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 10 }, { width: 10 }];
+
     // 台账
     const s4 = wb.addWorksheet("项目台账");
     s4.addRow(["类型", "键", "值", "来源", "置信度"]).font = bold.font;
@@ -299,20 +287,20 @@ registerTool({
     for (const g of findPriceAnomalies(items))
       s5.addRow(["单价异常", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
 
-    for (const s of [s1, s2, s3, s4, s5]) s.columns.forEach((c) => { if (!c.width) c.width = 22; });
+    for (const s of [s1, s2, s3, sCost, s4, s5]) s.columns.forEach((c) => { if (!c.width) c.width = 22; });
 
     const out = Buffer.from(await wb.xlsx.writeBuffer());
     const filename = args.filename ?? `造价分析报告_${new Date().toISOString().slice(0, 10)}.xlsx`;
     const artifact = await saveArtifact(ctx, out, filename);
     return {
-      observation: { artifactId: artifact.id, sheets: 7, total: totals.totalAmount, grandTotal: fee.grandTotal },
+      observation: { artifactId: artifact.id, sheets: 8, total: totals.totalAmount, grandTotal: fee.grandTotal },
       views: [{
         kind: "exportResult",
         id: `view:report:${artifact.id}`,
         title: "分析报告",
         artifactId: artifact.id,
         filename: artifact.label,
-        summary: `汇总/取费/清单/专业/材料/台账/异常 7 个 sheet，含税造价 ${fee.grandTotal} 元`,
+        summary: `汇总/取费/清单/专业/材料/成本构成/台账/异常 8 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
       }],
       receipts: [{
         actionType: "EXPORT",
@@ -321,7 +309,43 @@ registerTool({
         after: { artifactId: artifact.id },
         reversible: false,
       }],
-      message: `已生成「${filename}」：费用汇总（含税 ${fee.grandTotal} 元）+ 分部分项清单 + 占比/台账/异常`,
+      message: `已生成「${filename}」：费用汇总（含税 ${fmtMoney(fee.grandTotal)} 元）+ 分部分项清单 + 占比/台账/异常`,
+    };
+  },
+});
+
+registerTool({
+  name: "report.exportCompare",
+  description: "导出两版清单对审报告 Excel：对审结论 + 申报口径对比 + 差异明细（量差>15% 标应调价）",
+  implemented: true,
+  schema: z.object({
+    fileAId: z.string().optional().describe("基准文件；缺省按阶段/期次自动配对取基准侧"),
+    fileBId: z.string().optional().describe("对比文件；缺省按阶段/期次自动配对取对比侧"),
+    filename: z.string().optional(),
+  }),
+  handler: async (ctx, args: { fileAId?: string; fileBId?: string; filename?: string }) => {
+    const { buildCompareReport } = await import("@file/compareReport");
+    const built = await buildCompareReport(ctx.projectId, args);
+    if ("error" in built) return { observation: { error: built.error } };
+    const artifact = await saveArtifact(ctx, built.out, built.filename);
+    return {
+      observation: { artifactId: artifact.id, diffRows: built.diffRows, totalDelta: built.totalDelta, declared: built.hasDeclared },
+      views: [{
+        kind: "exportResult",
+        id: `view:export:${artifact.id}`,
+        title: "对审报告",
+        artifactId: artifact.id,
+        filename: artifact.label,
+        summary: `差异 ${built.diffRows} 项 · 合价差 ${fmtMoney(built.totalDelta)} 元${built.hasDeclared ? " · 含申报口径对比" : ""}`,
+      }],
+      receipts: [{
+        actionType: "EXPORT",
+        summary: `导出对审报告：${built.filename}`,
+        before: {},
+        after: { artifactId: artifact.id },
+        reversible: false,
+      }],
+      message: `已导出对审报告「${built.filename}」：差异明细 ${built.diffRows} 项${built.hasDeclared ? " + 申报口径对比" : ""}`,
     };
   },
 });

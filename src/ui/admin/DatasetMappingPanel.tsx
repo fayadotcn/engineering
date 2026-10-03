@@ -3,13 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { COLUMN_ROLE_LABEL, COLUMN_ROLES } from "@shared/types";
 import { reconcilePriceRole } from "@shared/mapping";
 import { ConfirmDialog, toast } from "../primitives";
-import { readResponse } from "../http";
+import { readResponse } from "../api";
 import { FileSpreadsheet, Loader2, RefreshCw, Save, X } from "lucide-react";
 
 // 数据集列映射面板：展示后端自动识别结果（含置信度/证据），管理员可改列角色
 // 与 sheet 类型，保存后确认导入价格库。交互照搬 ColumnMappingView。
 
-type SheetType = "BOQ" | "QUOTATION" | "GENERIC";
+type SheetType =
+  | "BOQ" | "QUOTATION" | "GENERIC"
+  | "COMPARE" | "APPROVAL" | "PENDING_QUOTE" | "FACTS" | "MATERIAL_PRICE";
 
 interface MappingSheetDTO {
   sheetName: string;
@@ -47,7 +49,16 @@ const TYPE_LABEL: Record<SheetType, string> = {
   BOQ: "清单",
   QUOTATION: "询价表",
   GENERIC: "忽略",
+  COMPARE: "对比表",
+  APPROVAL: "报审资料",
+  PENDING_QUOTE: "待报价清单",
+  FACTS: "汇总/说明表",
+  MATERIAL_PRICE: "材料价格表",
 };
+const TYPE_OPTIONS: SheetType[] = [
+  "BOQ", "PENDING_QUOTE", "QUOTATION", "MATERIAL_PRICE",
+  "COMPARE", "APPROVAL", "FACTS", "GENERIC",
+];
 
 const colLetter = (i: number): string => {
   let s = "";
@@ -225,19 +236,14 @@ export function DatasetMappingPanel({
     return (
       <div className="border-t border-neutral-100 px-4 py-6 text-center text-[12px] text-neutral-400">
         映射信息加载失败
-        <button
-          onClick={() => setReload(n => n + 1)}
-          className="ml-2 rounded-md border border-neutral-200 px-2 py-0.5 text-[11.5px] text-neutral-500 hover:bg-[var(--hover)]"
-        >
-          重试
-        </button>
+        <button onClick={() => setReload(n => n + 1)} className="cost-btn sm ml-2">重试</button>
       </div>
     );
 
   if (!mapping)
     return (
       <div className="flex h-28 items-center justify-center gap-2 border-t border-neutral-100 text-xs text-neutral-500" role="status">
-        <Loader2 size={15} className="animate-spin" />正在读取列映射
+        <Loader2 size={15} className="spin" />正在读取列映射
       </div>
     );
 
@@ -270,7 +276,7 @@ export function DatasetMappingPanel({
         const d = drafts[s.sheetName] ?? toDraft(s);
         return (
           <div key={s.sheetName} className="xl-sheet mb-3 overflow-hidden rounded-lg">
-            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-neutral-50 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-2">
               <span className="text-[12.5px] font-medium">{s.sheetName}</span>
               <div className="flex flex-col gap-0.5">
                 <select
@@ -278,7 +284,7 @@ export function DatasetMappingPanel({
                   title={s.typeEvidence}
                   aria-label={`${s.sheetName}的表格类型`}
                   onChange={(e) => setType(s.sheetName, e.target.value as SheetType)}
-                  className="h-6 w-fit rounded border border-neutral-200 bg-white px-1 text-[11px]"
+                  className="cost-input !h-6 w-fit !px-1 !text-[11px]"
                   style={
                     s.typeConfidence < 0.9
                       ? {
@@ -288,7 +294,7 @@ export function DatasetMappingPanel({
                       : undefined
                   }
                 >
-                  {(["BOQ", "QUOTATION", "GENERIC"] as const).map((t) => (
+                  {TYPE_OPTIONS.map((t) => (
                     <option key={t} value={t}>
                       {TYPE_LABEL[t]}
                     </option>
@@ -296,20 +302,12 @@ export function DatasetMappingPanel({
                 </select>
                 {kind === "MATERIAL_PRICE" && (
                   <span className="text-[10px] leading-tight text-neutral-400">
-                    只有「询价表」类型的工作表会导入价格库
+                    只有「询价表/材料价格表」类型的工作表会导入价格库
                   </span>
                 )}
               </div>
-              {s.templateHit && (
-                <span className="rounded bg-[var(--success-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--success-soft-fg)]">
-                  已识别
-                </span>
-              )}
-              {s.userEdited && (
-                <span className="rounded bg-[var(--warning-soft-bg)] px-1.5 py-0.5 text-[10.5px] text-[var(--warning-soft-fg)]">
-                  已修改
-                </span>
-              )}
+              {s.templateHit && <span className="chip ok">已识别</span>}
+              {s.userEdited && <span className="chip warn">已修改</span>}
               <span className="ml-auto text-[11px] text-neutral-400">
                 {s.minConfidence < 0.9 ? "需要核对" : "已识别"}
                 {s.typeConfidence < 0.9 && " · 请核对表格类型"}
@@ -342,8 +340,8 @@ export function DatasetMappingPanel({
                           value={d.byCol[i] ?? ""}
                           onChange={(e) => setRole(s.sheetName, i, e.target.value)}
                           className={cn(
-                            "w-full min-w-16 rounded border border-neutral-200 bg-white px-0.5 py-0.5 text-[10.5px]",
-                            d.byCol[i] && "border-neutral-400 font-medium"
+                            "cost-input w-full min-w-16 !h-[22px] !px-0.5 !text-[10.5px]",
+                            d.byCol[i] && "border-[var(--hairline-strong)] font-medium"
                           )}
                         >
                           <option value="">— 忽略 —</option>
@@ -412,19 +410,9 @@ export function DatasetMappingPanel({
           }}
           disabled={busy || dirty || !mapping.sheets.length}
           title={dirty ? "请先保存修改" : undefined}
-          className={cn(
-            "flex h-8 items-center gap-1.5 rounded-md px-3.5 text-[12.5px] disabled:opacity-40",
-            mapping.status === "PENDING"
-              ? "font-medium text-white"
-              : "border border-neutral-200 text-neutral-600 hover:bg-[var(--hover)]"
-          )}
-          style={
-            mapping.status === "PENDING"
-              ? { background: "var(--brand-accent)" }
-              : undefined
-          }
+          className={cn("cost-btn", mapping.status === "PENDING" && "primary")}
         >
-          {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          {busy ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
           {mapping.status === "PENDING" ? "确认导入" : "重新导入"}
         </button>
         <button className="cost-btn" disabled={busy || !dirty} onClick={() => setDrafts(Object.fromEntries(mapping.sheets.map(s => [s.sheetName, toDraft(s)])))}>取消修改</button>

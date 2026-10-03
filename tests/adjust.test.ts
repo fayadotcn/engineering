@@ -5,7 +5,7 @@ import type { BoqItemDTO } from "@shared/types";
 
 const item = (patch: Partial<BoqItemDTO>): BoqItemDTO => ({
   id: "item", projectId: "p", fileId: null, sheetName: "清单", rowIndex: 1, code: "", name: "安装",
-  rawFeature: "", unit: "m", quantity: "10", unitPrice: "100", mainMaterialPrice: "0", pricingPlan: [],
+  rawFeature: "", unit: "m", quantity: "10", unitPrice: "100", mainMaterialPrice: "0", laborUnitPrice: "0", machineUnitPrice: "0", pricingPlan: [],
   totalPrice: "1000", feeType: "分部分项", sectionPath: "", isHeader: false, sortOrder: 0, discipline: "OTHER", features: {}, ...patch,
 });
 const items = [item({}), item({ id: "fee", quantity: "0", unitPrice: "0", feeType: "总价措施", totalPrice: "200" }), item({ id: "other", quantity: "1", unitPrice: "50", totalPrice: "300", feeType: "其他项目" })];
