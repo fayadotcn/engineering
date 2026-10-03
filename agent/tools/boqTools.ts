@@ -411,6 +411,8 @@ const patchSchema = z.object({
   name: z.string().optional(),
   code: z.string().optional().describe("项目编码修正（缺/错编码的处置通道）"),
   rawFeature: z.string().optional(),
+  feeType: z.enum(["分部分项", "单价措施", "总价措施", "其他项目"]).optional().describe("计价表分层修正"),
+  unitProject: z.string().optional().describe("单位工程归属修正"),
 });
 
 registerTool({
@@ -440,7 +442,7 @@ registerTool({
     for (const b of before) {
       const a = after.find((x) => x.id === b.id);
       if (!a) continue;
-      for (const field of ["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "code", "rawFeature"] as const) {
+      for (const field of ["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "code", "rawFeature", "feeType", "unitProject"] as const) {
         if (b[field] !== a[field])
           diffRows.push({
             itemId: b.id,

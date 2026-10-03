@@ -119,6 +119,10 @@ export interface BoqPatch {
   /** 项目编码修正（缺/错编码检查后的处置通道） */
   code?: string;
   rawFeature?: string;
+  /** 计价表分层修正（清单行挂错表层的处置通道），变更后按新口径解释合价 */
+  feeType?: "分部分项" | "单价措施" | "总价措施" | "其他项目";
+  /** 单位工程归属修正 */
+  unitProject?: string;
   /** Receipt restoration and lump-sum amounts; never a material quotation price. */
   totalPrice?: string;
 }
@@ -137,9 +141,14 @@ export async function updateBoqItems(
   const updates: Prisma.PrismaPromise<unknown>[] = [];
   for (const { id, patch } of patches) {
     const cur = existing.find((e) => e.id === id)!;
-    const lumpSum = cur.feeType === "总价措施" || cur.feeType === "其他项目";
+    // 分层以变更后口径为准：分部分项→总价措施后本次即可直改合价，
+    // 总价措施→分部分项后合价回到 量×价 口径（patch.totalPrice 被重算覆盖）
+    const newFeeType = patch.feeType ?? cur.feeType;
+    const lumpSum = newFeeType === "总价措施" || newFeeType === "其他项目";
     if (lumpSum && (patch.quantity !== undefined || patch.unitPrice !== undefined))
       throw new Error("总价措施和其他项目按总额计价，请直接修改合价");
+    if (!lumpSum && patch.totalPrice !== undefined)
+      throw new Error("分部分项和单价措施的合价由工程量×综合单价自动计算");
     const qty = patch.quantity !== undefined ? round3(D(patch.quantity)) : cur.quantity;
     const price =
       patch.unitPrice !== undefined ? round2(D(patch.unitPrice)) : cur.unitPrice;
@@ -181,7 +190,14 @@ export async function updateBoqItems(
         ...(patch.quantity !== undefined ? { quantityExpr: patch.quantityExpr ?? "" } : {}),
         unitPrice: price,
         // Imported lump-sum/other-fee totals survive material and text edits.
-        totalPrice: patch.totalPrice !== undefined ? round2(D(patch.totalPrice)) : patch.quantity !== undefined || patch.unitPrice !== undefined ? lineTotal(qty, price) : cur.totalPrice,
+        // 分层改回可计价类（分部分项/单价措施）时，合价回到 量×价 口径重算。
+        totalPrice: patch.totalPrice !== undefined && lumpSum
+          ? round2(D(patch.totalPrice))
+          : patch.quantity !== undefined || patch.unitPrice !== undefined || (patch.feeType !== undefined && !lumpSum)
+            ? lineTotal(qty, price)
+            : cur.totalPrice,
+        ...(patch.feeType !== undefined ? { feeType: newFeeType } : {}),
+        ...(patch.unitProject !== undefined ? { unitProject: patch.unitProject.trim() } : {}),
         features,
         ...(patch.name !== undefined || patch.rawFeature !== undefined
           ? {

@@ -14,7 +14,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
   const after = fromJson<Snapshot[]>(receipt.after, []);
   if (!Array.isArray(before) || !Array.isArray(after)) return NextResponse.json({ error: "记录中没有可还原的清单数据" }, { status: 400 });
   const current = await listBoq(receipt.projectId);
-  const fields = ["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "pricingPlan", "name", "rawFeature", "totalPrice"] as const;
+  const fields = ["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "pricingPlan", "name", "rawFeature", "totalPrice", "feeType", "unitProject", "code"] as const;
   const patches: { id: string; patch: BoqPatch }[] = [];
   const recreate: Snapshot[] = [];
   const removeIds: string[] = [];
@@ -28,9 +28,13 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
       continue;
     }
     if (!item) return NextResponse.json({ error: "清单数据已变更，无法撤销此记录" }, { status: 409 });
-    const changed = fields.filter(key => b[key] !== undefined && JSON.stringify(b[key]) !== JSON.stringify(a[key]));
+    let changed = fields.filter(key => b[key] !== undefined && JSON.stringify(b[key]) !== JSON.stringify(a[key]));
     // Only restore affected fields; refuse to overwrite a later edit.
     if (changed.some(key => JSON.stringify(item[key]) !== JSON.stringify(a[key]))) return NextResponse.json({ error: `「${item.name}」已有后续修改，请先撤销后续记录` }, { status: 409 });
+    // 非总额计价行的合价是 量×价 的派生值——随量/价字段一起写会被服务端拒绝；
+    // 从补丁里剔除（服务层会按新量价重算出同一合价，差异判定已在 changed 阶段完成）
+    const isLump = b.feeType === "总价措施" || b.feeType === "其他项目";
+    if (!isLump) changed = changed.filter((k) => k !== "totalPrice");
     if (changed.length) patches.push({ id: b.id, patch: Object.fromEntries(changed.map(key => [key, b[key]])) as BoqPatch });
   }
   // 新增类记录：回执 after 有该行、before 没有 → 当时被补录；行未被后续改动才可移除
