@@ -30,6 +30,8 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
     previousQuery.current = view?.filter?.query;
   }, [view?.filter?.query, setBoqQuery]);
   useEffect(() => { setDiscipline(view?.filter?.discipline ?? ""); setOnlyItems(!!view?.filter?.onlyItems); setLimit(300); }, [view?.filter?.discipline, view?.filter?.onlyItems]);
+  // 「只看未定价」是 store 级开关（状态栏按钮同一口径）——会话筛选把 unpriced 写进来两边就同步
+  useEffect(() => { if (view?.filter?.unpriced !== undefined) { useStore.setState({ boqOnlyUnpriced: view.filter.unpriced }); setLimit(300); } }, [view?.filter?.unpriced]);
   const [editing, setEditing] = useState<{ id: string; field: BoqEditField } | null>(null);
   const [draft, setDraft] = useState("");
   const [limit, setLimit] = useState(300);

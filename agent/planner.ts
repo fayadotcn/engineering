@@ -194,6 +194,9 @@ export class RulePlanner implements Planner {
 
     // 清单筛选：「只看电缆项」「筛选给排水的清单」「显示消防专业」→ boq.filter 切视图筛选
     const filterM = m.match(/(?:只看|仅看|筛选|过滤|显示|列出)(?:一下|下)?(?:所有|全部)?([一-龥A-Za-z0-9]{1,15}?)(?:的)?(?:清单|项|条目|行|项目)?\s*$/);
+    // 「只看未定价/没组价的项」——定价状态筛选走 unpriced 标志（「未定价」含「价」会被排除词拦掉，先截）
+    if (filterM && /未定价|未报价|没定价|没组价|未组价|待定价|缺价/.test(filterM[1]))
+      return { steps: [{ tool: "boq.filter", args: { unpriced: true, onlyItems: true }, activity: "正在筛选未定价项" }] };
     if (filterM && !/价格|单价|价|费用|汇总|合计|定额|编码|特征|名称|异常|问题|报告|差异|文件/.test(filterM[1])) {
       const scope = filterM[1].trim();
       const DISC_WORDS: [string, string][] = [
@@ -207,7 +210,7 @@ export class RulePlanner implements Planner {
       const reset = /^全部|所有|完整|原始/.test(scope);
       const compute = async (): Promise<PlanStep | null> => {
         // 「显示全部」= 清筛选复位；专业词走 discipline；其他按名称/编码模糊筛选
-        const filter = reset ? { onlyItems: false } : disc ? { discipline: disc, onlyItems: true } : { query: scope, onlyItems: true };
+        const filter = reset ? { onlyItems: false, unpriced: false } : disc ? { discipline: disc, onlyItems: true } : { query: scope, onlyItems: true };
         if (!reset && !disc) {
           const { listBoq } = await import("@boq/service");
           if (!scopeFilter(await listBoq(ctx.projectId), scope).length) return null;
@@ -223,7 +226,7 @@ export class RulePlanner implements Planner {
     if (undoM) {
       const tail = (undoM[1] ?? "").trim();
       if (/筛选|过滤|全部|显示|完整/.test(tail))
-        return { steps: [{ tool: "boq.filter", args: { onlyItems: false }, activity: "正在恢复完整清单" }] };
+        return { steps: [{ tool: "boq.filter", args: { onlyItems: false, unpriced: false }, activity: "正在恢复完整清单" }] };
       const query = tail.replace(/^(?:刚才|上一次|上次|最近|刚刚|的|把|将)+/, "").replace(/(?:的)?(?:操作|修改|改动|记录|动作|步骤)$/, "").trim() || undefined;
       const compute = async (): Promise<PlanStep | null> => {
         const { prisma } = await import("@database/client");

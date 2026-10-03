@@ -200,7 +200,7 @@ export type WorkspaceView =
       kind: "boqTable";
       id: string;
       title: string;
-      filter?: { discipline?: Discipline; query?: string; onlyItems?: boolean };
+      filter?: { discipline?: Discipline; query?: string; onlyItems?: boolean; unpriced?: boolean };
     }
   | {
       kind: "anomalyTable";

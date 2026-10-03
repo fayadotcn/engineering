@@ -94,6 +94,7 @@ registerTool({
     discipline: z.string().optional(),
     query: z.string().optional(),
     onlyItems: z.boolean().optional(),
+    unpriced: z.boolean().optional().describe("true=只看未定价的可计价项（综合单价为0）"),
   }),
   handler: async (ctx, args) => {
     return {

@@ -494,11 +494,24 @@ describe("清单筛选路由（boq.filter）", () => {
     expect(s).toBeNull();
     expect(p.fallbackMessage).toContain("压力表");
   });
-  it("「显示全部」→ 复位筛选", async () => {
+  it("「显示全部」→ 复位筛选（含 unpriced 复位）", async () => {
     const p = await plan("显示全部");
     const s = await resolve(p.steps[0]);
     expect(s?.tool).toBe("boq.filter");
     expect(s?.args.onlyItems).toBe(false);
+    expect(s?.args.unpriced).toBe(false);
+  });
+  it("「只看未定价的项」→ unpriced 筛选（不被「价」排除词拦掉）", async () => {
+    const p = await plan("只看未定价的项");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
+    expect(s?.args.unpriced).toBe(true);
+  });
+  it("「筛选没组价的清单」→ unpriced 筛选", async () => {
+    const p = await plan("筛选没组价的清单");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
+    expect(s?.args.unpriced).toBe(true);
   });
   it("「显示费用汇总」不落筛选（费用走汇总路由）", async () => {
     const p = await plan("显示费用汇总");
