@@ -21,6 +21,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const usum = (units: Record<string, unknown>[], k: string) =>
     units.reduce((a, u) => a + (typeof u[k] === "number" ? (u[k] as number) : 0), 0);
   let declaredReg = false, declaredMeasure = false, declaredOther = false;
+  // 参与过申报核对的文件数：让 UI 能区分「已核对无差异」和「没有可核对的申报口径」
+  let declaredChecked = 0;
   // 同一文件重导会产生多条「文件汇总:」事实——facts 已倒序，按 key 去重只取最新一版
   const seenSummary = new Set<string>();
   for (const f of facts.filter((x) => x.key.startsWith("文件汇总:") && !seenSummary.has(x.key) && seenSummary.add(x.key))) {
@@ -34,6 +36,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       if (usum(units, "措施项目费") > 0) declaredMeasure = true;
       if (usum(units, "其他项目费") > 0) declaredOther = true;
       const checks = compareDeclared(feeSummary(fileItems, fees).rows, units);
+      declaredChecked++;
       if (checks.length) declaredCheck.push({ file: filename, checks });
     } catch { /* skip malformed fact */ }
   }
@@ -44,5 +47,5 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   if (declaredMeasure && !fees.set.measure && !fees.coeffMeasureFee.gt(0)
     && !items.some(i => i.feeType === "单价措施" || i.feeType === "总价措施")) missing.push("措施费率");
   if (declaredOther && !fees.set.provisional && !items.some(i => i.feeType === "其他项目")) missing.push("暂列金额率");
-  return NextResponse.json({ ...totals, fees: summary, declaredCheck: declaredCheck.length ? declaredCheck : null, disciplines: aggregateByDiscipline(items).slices, missingSettings: missing });
+  return NextResponse.json({ ...totals, fees: summary, declaredCheck: declaredCheck.length ? declaredCheck : null, declaredChecked, disciplines: aggregateByDiscipline(items).slices, missingSettings: missing });
 }

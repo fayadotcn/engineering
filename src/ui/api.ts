@@ -47,6 +47,8 @@ export interface ProjectSummary {
   disciplines: { key: string; label: string; amount: string; share: number; count: number }[];
   missingSettings: string[];
   declaredCheck?: { file: string; checks: { label: string; declared: number; computed: number; diff: number; pct: number; note?: string }[] }[] | null;
+  /** 实际参与申报核对的文件数（>0 且 declaredCheck 为空 = 核对一致） */
+  declaredChecked?: number;
 }
 
 export interface RunRecord {
