@@ -4,14 +4,18 @@ import { describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
   rows: [] as { id: string; projectId: string; name: string }[],
+  boqRows: [] as { id: string; feeType: string; name: string; code: string }[],
   deleted: [] as string[],
   receipts: [] as { id: string; projectId: string; summary: string; reversible: boolean }[],
   revertedIds: [] as string[],
 }));
 
 vi.mock("@boq/service", () => ({
-  listBoq: vi.fn(async () => []),
-  updateBoqItems: vi.fn(),
+  listBoq: vi.fn(async () => db.boqRows),
+  updateBoqItems: vi.fn(async (_p: string, patches: { id: string; patch: Record<string, unknown> }[]) => ({
+    before: patches.map((p) => ({ id: p.id })),
+    after: patches.map((p) => ({ id: p.id, ...p.patch })),
+  })),
   createBoqItem: vi.fn(async (_p: string, input: Record<string, unknown>) => ({
     id: "new1", projectId: "p1", fileId: null, sheetName: "手工补录", rowIndex: -1,
     code: input.code ?? "", name: input.name, rawFeature: input.rawFeature ?? "",
@@ -92,6 +96,18 @@ describe("boq.addItem", () => {
     expect(r.observation.itemId).toBe("new1");
     expect(r.receipts?.[0].before).toEqual([]);
     expect((r.receipts?.[0].after as { name: string }[])[0].name).toBe("灭火器");
+  });
+});
+
+describe("boq.update", () => {
+  it("同 patch 改成分层为总价措施时允许直改合价（口径看变更后）", async () => {
+    db.boqRows = [{ id: "i1", feeType: "分部分项", name: "行", code: "" }];
+    const r = await callTool("boq.update", { patches: [{ id: "i1", feeType: "总价措施", totalPrice: "500" }] });
+    expect(r.observation.updated).toBe(1);
+  });
+  it("未改分层的分部分项行直改合价 → 拒绝", async () => {
+    db.boqRows = [{ id: "i1", feeType: "分部分项", name: "行", code: "" }];
+    await expect(callTool("boq.update", { patches: [{ id: "i1", totalPrice: "500" }] })).rejects.toThrow("合价由工程量");
   });
 });
 

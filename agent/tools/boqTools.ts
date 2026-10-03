@@ -437,7 +437,13 @@ registerTool({
   handler: async (ctx, args: { patches: z.infer<typeof patchSchema>[]; reason?: string }) => {
     if (args.patches.some(p => p.totalPrice !== undefined)) {
       const items = await listBoq(ctx.projectId);
-      if (args.patches.some(p => p.totalPrice !== undefined && items.some(i => i.id === p.id && i.feeType !== "总价措施" && i.feeType !== "其他项目")))
+      // 口径以变更后为准：同 patch 里 feeType→总价措施/其他项目 时本次即可直改合价
+      if (args.patches.some(p => {
+        if (p.totalPrice === undefined) return false;
+        const cur = items.find(i => i.id === p.id);
+        const eff = p.feeType ?? cur?.feeType;
+        return eff !== "总价措施" && eff !== "其他项目";
+      }))
         throw new Error("分部分项和单价措施的合价由工程量×综合单价自动计算");
     }
     const { before, after } = await updateBoqItems(

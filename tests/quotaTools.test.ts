@@ -131,7 +131,7 @@ describe("quota.search 结果序确定性", () => {
 describe("spec.search 定额说明检索", () => {
   const specCall = (args: { query: string }) =>
     getTool("spec.search")!.handler!(ctx as never, args as never) as Promise<{
-      observation: { hits: { title: string }[] };
+      observation: { hits: { title: string; book: string }[] };
       views?: { id: string }[];
       message?: string;
     }>;
