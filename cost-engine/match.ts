@@ -1,4 +1,5 @@
 import type { BoqItemDTO, BoqSemanticFeature, QuotationItemDTO } from "@shared/types";
+import { normUnit } from "./semantic";
 
 // Quotation (询价) <-> BOQ item matching. Deterministic scoring; the agent
 // only decides apply/skip — the score itself is computed here.
@@ -37,7 +38,7 @@ function scorePair(boq: BoqItemDTO, q: QuotationItemDTO): number {
   if (bf.material && qf.material && bf.material === qf.material) score += 10;
   if (bf.system && qf.system && bf.system === qf.system) score += 5;
   if (q.brand && bf.brand && norm(q.brand) === norm(bf.brand)) score += 10;
-  if (boq.unit && q.unit && boq.unit === q.unit) score += 5;
+  if (boq.unit && q.unit && normUnit(boq.unit) === normUnit(q.unit)) score += 5;
 
   // token overlap tiebreaker
   const bt = new Set(bf.tokens ?? []);
