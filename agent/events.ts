@@ -27,8 +27,8 @@ export type Emit = {
   live(type: string, payload: Record<string, unknown>): void;
 };
 
-export function makeEmitter(runId: string): Emit {
-  let seq = 0;
+export function makeEmitter(runId: string, startSeq = 0): Emit {
+  let seq = startSeq;
   const emit = async function (
     type: AgentEventType | string,
     payload: Record<string, unknown>

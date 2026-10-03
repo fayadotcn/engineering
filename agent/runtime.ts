@@ -33,7 +33,10 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
   });
   // fire-and-forget: events stream via subscribeRun
   void executeRun(run.id, input).catch(async (e) => {
-    const emit = makeEmitter(run.id);
+    // 接管发事件必须用「已发事件数之后的 seq」——SSE 按 seq 去重，
+    // 从 0 重起的 error/run_finished 会被当作已见过而丢弃，客户端永远收不到结束信号
+    const last = await prisma.agentEvent.aggregate({ _max: { seq: true }, where: { runId: run.id } }).catch(() => null);
+    const emit = makeEmitter(run.id, (last?._max.seq ?? -1) + 1);
     await emit("error", { text: e instanceof Error ? e.message : String(e) });
     await emit("run_finished", { status: "FAILED" });
     await prisma.agentRun.update({
