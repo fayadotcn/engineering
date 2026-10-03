@@ -178,6 +178,81 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
   return { rows, grandTotal: grandTotal.toFixed(2), preTax: preTax.toFixed(2), unpricedCount };
 }
 
+/** 费用符合性检查的一条问题（不可竞争费漏计、税率口径、暂列金额一致性、限价超限）。 */
+export interface ComplianceIssue {
+  level: "error" | "warn";
+  label: string;
+  detail: string;
+}
+
+/**
+ * 费用符合性检查（清标「不可竞争费无缺漏项」+ 限价口径）：
+ *  - 增值税率未计取 / 非建筑业常规口径（一般计税 9%、简易计税 3%）
+ *  - 规费未计取（不可竞争费）
+ *  - 总价措施表缺安全文明施工费（不可竞争费）
+ *  - 措施费整体缺位（无措施清单、无系数计取、无费率）
+ *  - 台账暂列金额与其他项目表暂列金额行不一致
+ *  - 含税造价超过最高投标限价/招标控制价
+ *  - 清单存在未定价项（总价不完整）
+ */
+export function feeCompliance(
+  items: BoqItemDTO[],
+  params: FeeParams,
+  opts: { ceiling?: Decimal | null; summary?: FeeSummary } = {}
+): ComplianceIssue[] {
+  const s = opts.summary ?? feeSummary(items, params);
+  const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+  const byType = (t: string) => leaf.filter((i) => (i.feeType ?? "分部分项") === t);
+  const taxableParts = byType("分部分项").filter((i) => !i.taxIncluded);
+  const boqTotal = sum(taxableParts.map((i) => i.totalPrice));
+  const issues: ComplianceIssue[] = [];
+  const push = (level: "error" | "warn", label: string, detail: string) =>
+    issues.push({ level, label, detail });
+  if (!boqTotal.gt(0)) return issues;
+
+  const taxRate = params.taxRate;
+  if (taxRate.isZero())
+    push("warn", "增值税未计取", "税率未设置按 0 计——税金是不可竞争费，缺项会导致含税造价偏低");
+  else if (!taxRate.eq(0.09) && !taxRate.eq(0.03))
+    push("warn", "税率口径异常", `当前税率 ${pct(taxRate)}，非常规建筑业口径（一般计税 9%、简易计税 3%），请确认计税方式`);
+
+  if (params.regulationRate.isZero())
+    push("warn", "规费未计取", "规费费率未设置按 0 计——规费是不可竞争费，缺项会被评标扣分或结算核减");
+
+  const lumpMeasures = byType("总价措施");
+  if (lumpMeasures.length) {
+    const hasSafety = lumpMeasures.some((i) => /安全文明|文明施工|环境保护|临时设施/.test(i.name));
+    if (!hasSafety)
+      push("warn", "安全文明施工费缺项", `总价措施表 ${lumpMeasures.length} 项中未见安全文明施工费类行——不可竞争费缺漏`);
+  } else if (params.measureRate.isZero() && params.coeffMeasureFee.lte(0)) {
+    push("warn", "措施费未计取", "既无措施项目清单，也未设置措施费率/系数计取——措施费整体缺位");
+  }
+
+  const provisional = params.provisionalAmount;
+  const otherItems = byType("其他项目");
+  if (provisional.gt(0)) {
+    const provRow = otherItems.find((i) => /暂列金额|暂列金/.test(i.name));
+    if (!provRow)
+      push("warn", "暂列金额未入表", `台账暂列金额 ${provisional.toFixed(2)} 元，但其他项目表无暂列金额行——以台账值计入，请核对招标给定值`);
+    else {
+      const diff = D(provRow.totalPrice).minus(provisional);
+      if (diff.abs().gt(Decimal.max(1, provisional.mul(0.001))))
+        push("warn", "暂列金额不一致", `其他项目表暂列金额 ${D(provRow.totalPrice).toFixed(2)} 元 ≠ 台账给定值 ${provisional.toFixed(2)} 元（差 ${diff.toFixed(2)} 元）——暂列金额应按招标文件给定值填报`);
+    }
+  }
+
+  const ceiling = opts.ceiling ?? null;
+  if (ceiling !== null && ceiling.gt(0)) {
+    const diff = D(s.grandTotal).minus(ceiling);
+    if (diff.gt(0))
+      push("error", "超过最高投标限价", `含税造价 ${s.grandTotal} 元 超最高限价 ${ceiling.toFixed(2)} 元（超 ${diff.toFixed(2)} 元）——按招标文件可能被否决投标`);
+  }
+
+  if (s.unpricedCount > 0)
+    push("warn", "清单未定价", `${s.unpricedCount} 项分部分项/单价措施未报价，总价不完整`);
+  return issues;
+}
+
 /** 申报核对行：源表（表-04 汇总）申报值与本次计算的差异 */
 export interface DeclaredCheck {
   label: string;

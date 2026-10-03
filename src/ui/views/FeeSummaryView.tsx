@@ -17,6 +17,11 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
           还有 {view.unpricedCount} 项未报价，以下总价尚不完整。请先在清单页点击“自动测算”。
         </div>
       )}
+      {view.issues?.filter((i) => i.label !== "清单未定价").map((i) => (
+        <div key={i.label} className={cn("cost-info !mb-3", i.level === "error" ? "error" : "warn")}>
+          <b>{i.label}</b>：{i.detail}
+        </div>
+      ))}
       <div className="xl-sheet mb-3 rounded-lg px-4 pb-2.5 pt-3">
         <FeeWaterfall rows={view.rows} grandTotal={view.grandTotal}
           onFix={() => void send?.("帮我完善计价设置，把还没计取的费用（措施费、规费、税金等）算出来，重新汇总费用")} />

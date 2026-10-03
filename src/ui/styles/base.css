@@ -210,6 +210,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--brand-accent);
 .cost-error, .import-confirm, .cost-info { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 12px; line-height: 1.8; }
 .cost-info { background: var(--brand-soft); color: var(--ink-2); }
 .cost-info.warn { background: var(--warning-soft-bg); color: var(--warning-soft-fg); }
+.cost-info.error { background: var(--danger-soft-bg); color: var(--danger-soft-fg); }
 .cost-error { color: var(--danger-soft-fg); background: var(--danger-soft-bg); justify-content: space-between; flex-wrap: wrap; overflow-wrap: anywhere; }
 .import-confirm { background: var(--warning-soft-bg); color: var(--warning-soft-fg); border: 1px solid color-mix(in srgb, var(--warning-soft-fg) 20%, var(--surface)); border-left: 3px solid var(--warning-soft-fg); }
 .import-confirm > div:first-child { flex: 1; }

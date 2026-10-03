@@ -182,3 +182,61 @@ describe("事实值归一化", () => {
     expect(() => validatePricingFact("建筑面积", "-100")).toThrow();
   });
 });
+
+describe("feeCompliance 费用符合性检查", () => {
+  it("零费率全缺 → 增值税/规费/措施费三条 warn", async () => {
+    const { feeCompliance } = await import("../cost-engine/fees");
+    const issues = feeCompliance([item("100000")], params());
+    const labels = issues.map((x) => x.label);
+    expect(labels).toContain("增值税未计取");
+    expect(labels).toContain("规费未计取");
+    expect(labels).toContain("措施费未计取");
+  });
+
+  it("税率 7% → 非常规口径 warn；9%/3% 不报", async () => {
+    const { feeCompliance } = await import("../cost-engine/fees");
+    const i7 = feeCompliance([item("100000")], params({ taxRate: D(0.07), regulationRate: D(0.02), measureRate: D(0.03) }));
+    expect(i7.map((x) => x.label)).toContain("税率口径异常");
+    for (const t of [0.09, 0.03]) {
+      const ok = feeCompliance([item("100000")], params({ taxRate: D(t), regulationRate: D(0.02), measureRate: D(0.03) }));
+      expect(ok.map((x) => x.label)).not.toContain("税率口径异常");
+      expect(ok.map((x) => x.label)).not.toContain("增值税未计取");
+    }
+  });
+
+  it("总价措施表无安全文明施工费 → 不可竞争费缺项 warn", async () => {
+    const { feeCompliance } = await import("../cost-engine/fees");
+    const m = item("5000", "0", "总价措施"); m.name = "夜间施工增加费";
+    const issues = feeCompliance([item("100000"), m], params({ taxRate: D(0.09), regulationRate: D(0.02) }));
+    expect(issues.map((x) => x.label)).toContain("安全文明施工费缺项");
+    const s = item("3000", "0", "总价措施"); s.name = "安全文明施工费";
+    const ok = feeCompliance([item("100000"), s], params({ taxRate: D(0.09), regulationRate: D(0.02) }));
+    expect(ok.map((x) => x.label)).not.toContain("安全文明施工费缺项");
+  });
+
+  it("台账暂列金额与其他项目表不一致 → warn", async () => {
+    const { feeCompliance } = await import("../cost-engine/fees");
+    const p = item("5000", "0", "其他项目"); p.name = "暂列金额";
+    const issues = feeCompliance(
+      [item("100000"), p],
+      params({ taxRate: D(0.09), regulationRate: D(0.02), measureRate: D(0.03), provisionalAmount: D(8000) })
+    );
+    expect(issues.map((x) => x.label)).toContain("暂列金额不一致");
+    const same = item("8000", "0", "其他项目"); same.name = "暂列金额";
+    const ok = feeCompliance(
+      [item("100000"), same],
+      params({ taxRate: D(0.09), regulationRate: D(0.02), measureRate: D(0.03), provisionalAmount: D(8000) })
+    );
+    expect(ok.map((x) => x.label)).not.toContain("暂列金额不一致");
+  });
+
+  it("含税造价超最高限价 → error；限内不报", async () => {
+    const { feeCompliance } = await import("../cost-engine/fees");
+    const p = params({ taxRate: D(0.09), regulationRate: D(0.02), measureRate: D(0.03) });
+    const over = feeCompliance([item("100000")], p, { ceiling: D(100000) });
+    const e = over.find((x) => x.label === "超过最高投标限价");
+    expect(e?.level).toBe("error");
+    const under = feeCompliance([item("100000")], p, { ceiling: D(200000) });
+    expect(under.map((x) => x.label)).not.toContain("超过最高投标限价");
+  });
+});

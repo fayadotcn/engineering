@@ -5,8 +5,8 @@ import { aggregateByCategory, aggregateByDiscipline, projectTotals } from "@cost
 import { adjustToTarget } from "@cost-engine/adjust";
 import { analyzeCostComposition } from "@cost-engine/costComposition";
 import { D, decStr, fmtMoney, round3, sum, withTax } from "@cost-engine/money";
-import { feeSummary, compareDeclared } from "@cost-engine/fees";
-import { getFact, getFacts, setFact, parseRateValue, parseAreaValue, loadFeeParams } from "@project/facts";
+import { feeSummary, feeCompliance, compareDeclared } from "@cost-engine/fees";
+import { getFact, getFacts, setFact, parseRateValue, parseAreaValue, parseAmountValue, loadFeeParams } from "@project/facts";
 import type { DiffRow } from "@shared/types";
 
 registerTool({
@@ -87,6 +87,12 @@ registerTool({
       })
       .filter(Boolean);
 
+    // 费用符合性检查：不可竞争费漏计/税率口径/暂列金额/最高限价超限
+    const ceilingFact = facts.find((x) => /最高限价|招标控制价|控制价|限价/.test(x.key));
+    const ceilingNum = ceilingFact ? parseAmountValue(ceilingFact.value) : null;
+    const issues = feeCompliance(items, fees, { ceiling: ceilingNum !== null ? D(ceilingNum) : null, summary: r });
+    const errCount = issues.filter((x) => x.level === "error").length;
+
     // 造价指标（单方造价）：台账「建筑面积」>0 时给出 元/㎡ 口径——指标分析的最低骨架
     const areaFact = facts.find((x) => /面积/.test(x.key));
     const area = parseAreaValue(areaFact?.value);
@@ -105,15 +111,16 @@ registerTool({
         rows: r.rows.map((x) => ({ name: x.name, rate: x.rate, amount: x.amount })),
         declaredCheck: declaredCheck.length ? declaredCheck : undefined,
         indicators,
+        issues: issues.length ? issues : undefined,
       },
       views: [
         {
           kind: "feeSummary", id: `view:fees:${ctx.runId}`, title: "费用汇总表",
           rows: r.rows, grandTotal: r.grandTotal, unpricedCount: r.unpricedCount,
-          indicators,
+          indicators, issues,
         },
       ],
-      message: `含税工程造价 ${fmtMoney(r.grandTotal)} 元（税前 ${fmtMoney(r.preTax)} 元）${indicators ? `；单方造价 ${D(r.grandTotal).div(area!).toFixed(2)} 元/㎡` : ""}${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}${driftNotes.length ? `；${driftNotes.join("；")}` : ""}`,
+      message: `含税工程造价 ${fmtMoney(r.grandTotal)} 元（税前 ${fmtMoney(r.preTax)} 元）${indicators ? `；单方造价 ${D(r.grandTotal).div(area!).toFixed(2)} 元/㎡` : ""}${r.unpricedCount ? `；注意 ${r.unpricedCount} 项未定价` : ""}${issues.length ? `；费用符合性：${issues.length} 项问题${errCount ? `（含 ${errCount} 项错误）` : ""}` : ""}${driftNotes.length ? `；${driftNotes.join("；")}` : ""}`,
     };
   },
 });

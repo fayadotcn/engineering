@@ -290,6 +290,8 @@ export type WorkspaceView =
       unpricedCount: number;
       /** 造价指标（单方造价等）；建筑面积事实缺省时不出 */
       indicators?: { label: string; value: string }[];
+      /** 费用符合性检查问题（不可竞争费漏计/税率口径/暂列金额/限价超限） */
+      issues?: { level: "error" | "warn"; label: string; detail: string }[];
     }
   | {
       kind: "costComposition";
