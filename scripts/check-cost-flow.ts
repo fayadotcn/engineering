@@ -127,10 +127,10 @@ async function main() {
     const feeExportId = (await runTool("report.exportExcel", {})).artifactId as string;
     const feeExport = new ExcelJS.Workbook(); await feeExport.xlsx.load(await fetch(`${base}/api/artifacts/${feeExportId}/download`).then(r => r.arrayBuffer()));
     assert.deepEqual(feeExport.worksheets.map(s => s.name), ["费用汇总", "数据", "数据 (2)"]);
-    // 导出列序：…工程量(F) 计算式(G) 综合单价(H) 合价(I) 定价状态(J) 费用类别(K) 源文件(L)
+    // 导出列序：…工程量(F) 计算式(G) 综合单价(H) 合价(I) 定价状态(J) 费用类别(K) 单位工程(L) 源文件(M)
     assert.equal(feeExport.worksheets[2].getCell("I2").value, 1400);
     assert.equal(feeExport.worksheets[2].getCell("K2").value, "总价措施");
-    assert.equal(feeExport.worksheets[2].getCell("L2").value, "措施清单.xlsx");
+    assert.equal(feeExport.worksheets[2].getCell("M2").value, "措施清单.xlsx");
     console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、Agent 工具执行、总额编辑与撤销、同名源表 Excel 导出");
     console.log(`隔离验收工程：${checkDir}`);
   } finally { await prisma.$disconnect(); server.kill(); }

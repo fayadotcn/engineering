@@ -86,10 +86,12 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
     const src = (files ?? []).find((f) => f.id === it.fileId)?.filename
       ? `来源：${files!.find((f) => f.id === it.fileId)!.filename} · ${it.sheetName} · 第 ${it.rowIndex + 1} 行`
       : it.sheetName === "手工补录" ? "来源：手工补录" : "";
+    const up = it.unitProject ? `单位工程：${it.unitProject}` : "";
     const audit = rowAudit.get(it.id);
-    if (!audit?.length) return src || undefined;
+    const head = [up, src].filter(Boolean).join("\n");
+    if (!audit?.length) return head || undefined;
     const lines = audit.map((a) => `· ${a.time} ${a.text}${a.reverted ? "（已撤销）" : ""}`).join("\n");
-    return `${src ? src + "\n" : ""}改动痕迹：\n${lines}`;
+    return `${head ? head + "\n" : ""}改动痕迹：\n${lines}`;
   };
   const beginEdit = (item: BoqItemDTO, field: BoqEditField) => {
     if (running || agentRunning || importRunning || saving || committing.current || editRef.current) return;
