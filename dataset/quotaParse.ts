@@ -84,7 +84,9 @@ export function parseQuotaWorkbook(buffer: Buffer): ParsedQuotaRow[] {
       if (/^(定额|子目)?编号|名称|说明|注[:：]/.test(name)) continue;
 
       const unit = (row[cols.unit] ?? "").trim();
-      const scale = unitScale(unit);
+      // unit 解析出 0/负倍数（异常单位文本）时按 1 处理——不能除零出 Infinity 入库
+      const scaleRaw = unitScale(unit);
+      const scale = scaleRaw > 0 ? scaleRaw : 1;
       // 消耗量定额惯例：耗量列是"每定额单位"（10m 管 → 10.2），
       // 引擎约定是"每清单单位"（1.02）。耗量 ≥ 倍数时判定为定额单位口径，归一化。
       const rawQty = cols.mainQty !== undefined ? num(row[cols.mainQty] ?? "") : 0;
