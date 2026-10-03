@@ -8,7 +8,7 @@ import { writeBackPrices, buildExportWorkbook, type ColumnMap, type CellPatch } 
 import { ensureInspection, mappingToView } from "@file/inspection";
 import { fromJson } from "@shared/json";
 import { projectTotals } from "@cost-engine/aggregate";
-import { fmtMoney } from "@cost-engine/money";
+import { D, fmtMoney } from "@cost-engine/money";
 
 registerTool({
   name: "excel.read",
@@ -192,7 +192,7 @@ registerTool({
     const { findSameItemDifferentPrice, findPriceAnomalies } = await import("@cost-engine/compare");
     const { analyzeCostComposition } = await import("@cost-engine/costComposition");
     const { feeSummary } = await import("@cost-engine/fees");
-    const { getFacts, loadFeeParams } = await import("@project/facts");
+    const { getFacts, loadFeeParams, parseAreaValue } = await import("@project/facts");
     const ExcelJS = (await import("exceljs")).default;
 
     const totals = projectTotals(items);
@@ -212,6 +212,11 @@ registerTool({
     s1.addRow(["已定价项数", totals.pricedCount]);
     s1.addRow(["合价合计（不含税）", totals.totalAmount]);
     s1.addRow(["含税工程造价", fee.grandTotal]);
+    const area = parseAreaValue(facts.find((f) => /面积/.test(f.key))?.value);
+    if (area !== null && area > 0) {
+      s1.addRow(["建筑面积（㎡）", area]);
+      s1.addRow(["单方造价（元/㎡，含税）", Number(D(fee.grandTotal).div(area).toFixed(2))]);
+    }
 
     // 费用汇总（取费表）
     const sFee = wb.addWorksheet("费用汇总");
@@ -278,6 +283,53 @@ registerTool({
     for (const ci of [4, 5, 6, 7, 8]) tRow.getCell(ci).numFmt = moneyFmt;
     sCost.columns = [{ width: 16 }, { width: 30 }, { width: 10 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 10 }, { width: 10 }];
 
+    // 主要材料表（报告标准交付物）：定额组价主材行 + 主材暂估价两路归集，同名同价合并
+    type MatRow = { name: string; spec: string; unit: string; qty: ReturnType<typeof D>; price: ReturnType<typeof D>; source: string };
+    const matMap = new Map<string, MatRow>();
+    const putMat = (r: MatRow) => {
+      const key = `${r.name}|${r.spec}|${r.unit}|${r.price}|${r.source}`;
+      const cur = matMap.get(key);
+      if (cur) cur.qty = cur.qty.plus(r.qty);
+      else matMap.set(key, { ...r });
+    };
+    for (const it of leaf) {
+      const planMains = (it.pricingPlan ?? []).filter(
+        (l) => !l.suggested && l.mainPrice !== null && D(l.mainPrice).gt(0)
+      );
+      if (planMains.length) {
+        for (const l of planMains)
+          putMat({
+            name: l.mainMaterialName || it.name,
+            spec: it.features?.diameter ?? it.features?.specification ?? it.rawFeature.slice(0, 40),
+            unit: it.unit,
+            qty: D(it.quantity).mul(l.mainQty ?? 1),
+            price: D(l.mainPrice!),
+            source: "定额组价",
+          });
+      } else if (D(it.mainMaterialPrice ?? "0").gt(0)) {
+        putMat({
+          name: it.features?.material ?? it.name,
+          spec: it.features?.diameter ?? it.features?.specification ?? it.rawFeature.slice(0, 40),
+          unit: it.unit,
+          qty: D(it.quantity),
+          price: D(it.mainMaterialPrice),
+          source: "主材暂估价",
+        });
+      }
+    }
+    const matRows = [...matMap.values()].sort(
+      (a, b) => b.qty.mul(b.price).cmp(a.qty.mul(a.price))
+    );
+    if (matRows.length) {
+      const sM = wb.addWorksheet("主要材料表");
+      sM.addRow(["序号", "材料名称", "规格型号", "单位", "数量", "主材单价", "主材合价", "价格口径"]).font = bold.font;
+      matRows.forEach((m, i) => {
+        const row = sM.addRow([i + 1, m.name, m.spec, m.unit, Number(m.qty.toFixed(3)), Number(m.price.toFixed(2)), Number(m.qty.mul(m.price).toFixed(2)), m.source]);
+        for (const ci of [5, 6, 7]) row.getCell(ci).numFmt = ci === 5 ? "#,##0.###" : moneyFmt;
+      });
+      sM.columns = [{ width: 6 }, { width: 30 }, { width: 30 }, { width: 8 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 12 }];
+    }
+
     // 台账
     const s4 = wb.addWorksheet("项目台账");
     s4.addRow(["类型", "键", "值", "来源", "置信度"]).font = bold.font;
@@ -291,20 +343,20 @@ registerTool({
     for (const g of findPriceAnomalies(items))
       s5.addRow(["单价异常", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
 
-    for (const s of [s1, s2, s3, sCost, s4, s5]) s.columns.forEach((c) => { if (!c.width) c.width = 22; });
+    for (const s of wb.worksheets) s.columns.forEach((c) => { if (!c.width) c.width = 22; });
 
     const out = Buffer.from(await wb.xlsx.writeBuffer());
     const filename = args.filename ?? `造价分析报告_${new Date().toISOString().slice(0, 10)}.xlsx`;
     const artifact = await saveArtifact(ctx, out, filename);
     return {
-      observation: { artifactId: artifact.id, sheets: 8, total: totals.totalAmount, grandTotal: fee.grandTotal },
+      observation: { artifactId: artifact.id, sheets: wb.worksheets.length, total: totals.totalAmount, grandTotal: fee.grandTotal },
       views: [{
         kind: "exportResult",
         id: `view:report:${artifact.id}`,
         title: "分析报告",
         artifactId: artifact.id,
         filename: artifact.label,
-        summary: `汇总/取费/清单/专业/材料/成本构成/台账/异常 8 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
+        summary: `汇总/取费/清单/专业/材料/成本构成${matRows.length ? "/主要材料表" : ""}/台账/异常 ${wb.worksheets.length} 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
       }],
       receipts: [{
         actionType: "EXPORT",
