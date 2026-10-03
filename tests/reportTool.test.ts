@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@database/client", () => ({ prisma: { projectFile: { findMany: mocks.files, findUnique: mocks.file }, artifact: { create: mocks.artifact } } }));
 vi.mock("@boq/service", () => ({ listBoq: mocks.items }));
+vi.mock("@material/service", () => ({ listQuotations: vi.fn(async () => []) }));
 vi.mock("@file/storage", () => ({ storage: { put: mocks.put } }));
 vi.mock("@file/inspection", () => ({ ensureInspection: mocks.inspect, mappingToView: vi.fn() }));
 vi.mock("@project/facts", async (importOriginal) => {

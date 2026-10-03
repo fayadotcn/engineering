@@ -363,6 +363,27 @@ registerTool({
       sM.columns = [{ width: 6 }, { width: 30 }, { width: 30 }, { width: 8 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 12 }];
     }
 
+    // 甲供材表（发包人供货清单，结算对账交付物）：有 OWNER_SUPPLIED 文件导入时才出
+    const { listQuotations } = await import("@material/service");
+    const ownerFiles = new Set(
+      (await prisma.projectFile.findMany({
+        where: { projectId: ctx.projectId, kind: "OWNER_SUPPLIED" },
+        select: { id: true },
+      })).map((f) => f.id)
+    );
+    const suppliedRows = ownerFiles.size
+      ? (await listQuotations(ctx.projectId)).filter((q) => q.fileId && ownerFiles.has(q.fileId))
+      : [];
+    if (suppliedRows.length) {
+      const sO = wb.addWorksheet("甲供材表");
+      sO.addRow(["序号", "材料名称", "规格型号", "品牌", "单位", "发包人价格"]).font = bold.font;
+      suppliedRows.forEach((q, i) => {
+        const row = sO.addRow([i + 1, q.materialName, q.spec, q.brand, q.unit, Number(D(q.price).toFixed(2))]);
+        row.getCell(6).numFmt = moneyFmt;
+      });
+      sO.columns = [{ width: 6 }, { width: 30 }, { width: 30 }, { width: 14 }, { width: 8 }, { width: 14 }];
+    }
+
     // 台账
     const s4 = wb.addWorksheet("项目台账");
     s4.addRow(["类型", "键", "值", "来源", "置信度"]).font = bold.font;
@@ -403,7 +424,7 @@ registerTool({
         title: "分析报告",
         artifactId: artifact.id,
         filename: artifact.label,
-        summary: `汇总/取费/清单/专业/材料/成本构成${planned.length ? "/综合单价分析" : ""}${matRows.length ? "/主要材料表" : ""}/台账/异常 ${wb.worksheets.length} 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
+        summary: `汇总/取费/清单/专业/材料/成本构成${planned.length ? "/综合单价分析" : ""}${matRows.length ? "/主要材料表" : ""}${suppliedRows.length ? "/甲供材表" : ""}/台账/异常 ${wb.worksheets.length} 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
       }],
       receipts: [{
         actionType: "EXPORT",

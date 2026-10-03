@@ -64,7 +64,9 @@ registerTool({
         !i.isHeader &&
         (i.name.toLowerCase().includes(q) ||
           i.code.includes(args.query) ||
-          i.rawFeature.toLowerCase().includes(q))
+          i.rawFeature.toLowerCase().includes(q) ||
+          i.sectionPath.toLowerCase().includes(q) ||
+          (i.unitProject ?? "").toLowerCase().includes(q))
     );
     return {
       observation: hits.slice(0, 30).map((i) => ({
@@ -74,6 +76,8 @@ registerTool({
         unit: i.unit,
         quantity: i.quantity,
         unitPrice: i.unitPrice,
+        sectionPath: i.sectionPath || undefined,
+        unitProject: i.unitProject || undefined,
       })),
     };
   },
