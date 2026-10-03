@@ -214,7 +214,8 @@ export type WorkspaceView =
         | "ARITHMETIC"
         | "UNIT_INCONSISTENT"
         | "CODE_MISMATCH"
-        | "INVALID_CODE";
+        | "INVALID_CODE"
+        | "MISSING_CODE";
       rows: AnomalyRow[];
     }
   | {

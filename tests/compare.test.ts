@@ -192,3 +192,20 @@ describe("findInvalidCodes（非标编码）", () => {
     expect(findInvalidCodes(items).length).toBe(0);
   });
 });
+
+describe("findMissingCodes（缺编码）", () => {
+  it("分部分项/单价措施无编码被标出，总价措施不报", async () => {
+    const { findMissingCodes } = await import("@cost-engine/compare");
+    const ok = item("安全文明施工费", "", "项", "1", "12000", "");
+    ok.feeType = "总价措施";
+    const items = [
+      item("镀锌钢管", "DN100", "m", "10", "85", ""),          // 缺编码 → 报
+      item("闸阀", "DN100", "个", "4", "320", "031001001001"), // 有编码
+      ok,                                                    // 总价措施无编码 → 不报
+    ];
+    const rows = findMissingCodes(items);
+    expect(rows.length).toBe(1);
+    expect(rows[0].items.length).toBe(1);
+    expect(rows[0].items[0].name).toBe("镀锌钢管");
+  });
+});

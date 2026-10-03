@@ -250,6 +250,24 @@ export function findCodeNameMismatch(items: BoqItemDTO[]): AnomalyRow[] {
 }
 
 /**
+ * 缺编码检查：分部分项/单价措施（量×价计价的可计价行）编码为空。
+ * GB50500 清单项目必须有编码；总价措施/其他项目本就常无编码，不报。
+ */
+export function findMissingCodes(items: BoqItemDTO[]): AnomalyRow[] {
+  const missing = items.filter(
+    (it) => isPricableItem(it) && !it.isHeader && it.name.trim() && !it.code.trim()
+  );
+  if (!missing.length) return [];
+  return [{
+    groupKey: "MISSING_CODE",
+    label: "缺编码",
+    items: missing.map(toRowItem),
+    prices: [...new Set(missing.map((g) => decStr(D(g.unitPrice))))],
+    reason: `${missing.length} 项可计价清单缺项目编码——GB50500 要求逐项编码，对审/评标无法按码对量`,
+  }];
+}
+
+/**
  * 编码格式校验：GB50500 清单项目编码应为 12 位数字（附录 9 位 + 顺序码 3 位）。
  * 非空但非 12 位纯数字的编码（自编补码、缺位、混入字母）单列提示——
  * 对审/评标按编码对量时非标编码对不上，应人工确认是否为约定补码。

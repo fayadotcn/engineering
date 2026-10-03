@@ -256,3 +256,18 @@ describe("非标编码检查路由", () => {
     }
   );
 });
+
+describe("缺编码检查路由", () => {
+  it.each(["哪些项缺编码", "有没有没编码的清单项", "检查编码是否缺失"])(
+    "「%s」→ boq.findMissingCodes", async (m) => {
+      const p = await plan(m);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("boq.findMissingCodes");
+    }
+  );
+  it("「有没有非标编码」仍走非标编码而非缺编码", async () => {
+    const p = await plan("有没有非标编码");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.findInvalidCodes");
+  });
+});

@@ -551,6 +551,10 @@ export class RulePlanner implements Planner {
       return {
         steps: [{ tool: "boq.findInvalidCodes", args: {}, activity: "正在查非标编码" }],
       };
+    if (/(缺|没|未|无).{0,3}编码|编码.{0,3}(缺|空|漏)/.test(m))
+      return {
+        steps: [{ tool: "boq.findMissingCodes", args: {}, activity: "正在查缺编码项" }],
+      };
     if (/编码.{0,4}(重复|错用|不一致|不同|错|唯一)|一码多/.test(m))
       return {
         steps: [{ tool: "boq.findCodeNameMismatch", args: {}, activity: "正在查一码多名" }],
