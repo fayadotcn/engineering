@@ -406,9 +406,9 @@ export class RulePlanner implements Planner {
     // 「XX的编码/单价/费率改为…」各有专用路由——scope 尾词在这些字段上时不应落入定额改派
     const quotaFieldTail = /编码|单价|价格|合价|工程量|数量|费率|税率|名称|特征$/;
     if ((quotaM || appendM || clearM) && !(quotaM && quotaFieldTail.test(quotaM[1])) && !(appendM && quotaFieldTail.test(appendM[1])) && !(clearM && quotaFieldTail.test(clearM[1]))) {
-      const mm = (quotaM ?? appendM ?? clearM)!;
+      const mm = (quotaM ?? appendM ?? clearM) as RegExpMatchArray;
       const scope = mm[1].replace(/^(把|将|对|请|所有|全部|整个|清单项?|各项|项目)+/, "").trim();
-      const code = mm[2];
+      const code = clearM ? undefined : mm[2];
       const mode = appendM ? "append" : "replace";
       const clear = !!clearM;
       const compute = async (): Promise<PlanStep | null> => {

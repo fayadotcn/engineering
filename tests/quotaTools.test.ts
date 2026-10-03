@@ -90,7 +90,7 @@ describe("quota.setItemQuota", () => {
     const plan = db.updates[0].patch.pricingPlan as PricingPlanLine[];
     expect(plan.length).toBe(1);
     expect(plan[0].mainPrice).toBeNull();
-    expect(r.observation.items[0].unitPrice).toBeTruthy();
+    expect((r.observation.items as { unitPrice: string }[])[0].unitPrice).toBeTruthy();
   });
   it("replace 替换主项 / append 增列", async () => {
     await call({ itemId: "i1", quotaCode: "5H0332", mode: "replace" });
