@@ -54,7 +54,10 @@ export async function buildCompareReport(
     return { error: "需要两份清单文件才能对审，请再上传一版" };
   const [autoA, autoB] = files.length >= 2 ? pickComparePair(files) : [files[0], files[0]];
   const fileA = opts.fileAId ? files.find((f) => f.id === opts.fileAId) : autoA;
-  const fileB = opts.fileBId ? files.find((f) => f.id === opts.fileBId) : autoB;
+  let fileB = opts.fileBId ? files.find((f) => f.id === opts.fileBId) : autoB;
+  // 只指定了一侧时，另一侧若恰好撞上，自动换一份——用户给了方向就不该报「选择无效」
+  if (fileA && fileB && fileA.id === fileB.id && (!opts.fileAId || !opts.fileBId))
+    fileB = files.find((f) => f.id !== fileA.id) ?? fileB;
   if (!fileA || !fileB || fileA.id === fileB.id) return { error: "文件选择无效" };
 
   const items = await listBoq(projectId);
