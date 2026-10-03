@@ -130,3 +130,35 @@ describe("组价写回路由（autopilot 缺费率后的续接指令）", () => 
   it("「写回源文件」仍走 excel.write", async () =>
     expect(await seq("把结果写回源文件")).toEqual(["excel.write"]));
 });
+
+describe("总价反算路由", () => {
+  const plan = (m: string, facts: { key: string; value: string }[] = []) =>
+    new RulePlanner().plan(ctx(facts), m);
+
+  it("中文金额单位：「500万」= 5,000,000，不是 500", async () => {
+    const p = await plan("总价控制到500万");
+    const step = p.steps[0] as PlanStep;
+    expect(step.tool).toBe("quantity.adjust");
+    expect(step.args.targetTotal).toBe(5_000_000);
+  });
+
+  it("「1.2亿」/「80万」/裸数字", async () => {
+    expect((await plan("总价调整到1.2亿")).steps[0] as PlanStep).toMatchObject({ args: { targetTotal: 120_000_000 } });
+    expect((await plan("把总价降为80万")).steps[0] as PlanStep).toMatchObject({ args: { targetTotal: 800_000 } });
+    expect((await plan("总价控制到450000")).steps[0] as PlanStep).toMatchObject({ args: { targetTotal: 450000 } });
+  });
+
+  it("含税口径：台账税率「9%」走归一化，不产出 NaN", async () => {
+    const p = await plan("含税总价控制到500万", [{ key: "税率", value: "9%" }]);
+    expect((p.steps[0] as PlanStep).args.taxRate).toBeCloseTo(0.09);
+  });
+
+  it("含税但台账无税率/税率非法：默认 9% 且提示", async () => {
+    const p1 = await plan("含税总价控制到500万");
+    expect((p1.steps[0] as PlanStep).args.taxRate).toBeCloseTo(0.09);
+    expect(p1.fallbackMessage).toContain("9%");
+    const p2 = await plan("含税总价控制到500万", [{ key: "税率", value: "待定" }]);
+    expect((p2.steps[0] as PlanStep).args.taxRate).toBeCloseTo(0.09);
+    expect(p2.fallbackMessage).toContain("9%");
+  });
+});

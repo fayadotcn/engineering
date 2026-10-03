@@ -8,6 +8,13 @@ const norm = (s: string) =>
     .toUpperCase()
     .replace(/[^\p{Script=Han}A-Z0-9.X×*+-]/gu, "");
 
+// 规格比对归一化：公称直径前缀与裸数字等价（DN100 ≡ Φ100 ≡ 100），
+// 尺寸分隔符统一 x（4*25 ≡ 4×25 ≡ 4x25 ≡ 4X25）。
+const specNorm = (s: string) =>
+  norm(s)
+    .replace(/^(?:DN|DE|Φ|φ)/, "")
+    .replace(/[*×X]/g, "x");
+
 function scorePair(boq: BoqItemDTO, q: QuotationItemDTO): number {
   const bf = boq.features ?? {};
   const qf = q.features ?? {};
@@ -17,7 +24,7 @@ function scorePair(boq: BoqItemDTO, q: QuotationItemDTO): number {
   const bSpec = bf.diameter ?? bf.specification;
   const qSpec = qf.diameter ?? qf.specification ?? q.spec;
   if (bSpec && qSpec) {
-    if (norm(bSpec) === norm(qSpec)) score += 45;
+    if (specNorm(bSpec) === specNorm(qSpec)) score += 45;
     else return 0; // spec conflict -> different material
   }
 

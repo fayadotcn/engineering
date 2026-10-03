@@ -47,6 +47,9 @@ export function evalExpr(src: string): number {
     else {
       const m = /^[\d.]+/.exec(cleaned.slice(i));
       if (!m) throw new Error(`位置 ${i} 处期望数字`);
+      // 「1.2.3」这类多小数点片段不能静默截成 1.2——造价式里它几乎总是录入错误
+      if ((m[0].match(/\./g) ?? []).length > 1 || !/^\d+(\.\d+)?$/.test(m[0]))
+        throw new Error(`位置 ${i} 处数字「${m[0]}」格式非法`);
       i += m[0].length;
       v = parseFloat(m[0]);
       if (isNaN(v)) throw new Error("非法数字");

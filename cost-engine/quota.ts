@@ -242,7 +242,7 @@ export function calcQuota(
     };
     if (!m.quota) return base;
     const q = m.quota;
-    const perUnit = (v: number) => D(v).div(q.unitScale);
+    const perUnit = (v: number) => D(v).div(q.unitScale || 1);
     const labor = perUnit(q.labor);
     const aux = perUnit(q.material);
     const mach = perUnit(q.machine);

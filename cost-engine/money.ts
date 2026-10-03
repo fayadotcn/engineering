@@ -31,8 +31,11 @@ export const decStr = (v: Decimal.Value): string => D(v).toString();
 export const maxD = (vs: Decimal.Value[]): Decimal =>
   vs.reduce<Decimal>((a, b) => Decimal.max(a, D(b)), new Decimal(0));
 
+// 空数组返回 0 而非 Infinity——调用方拿它做减法会算出 -Infinity 金额
 export const minD = (vs: Decimal.Value[]): Decimal =>
-  vs.reduce<Decimal>((a, b) => Decimal.min(a, D(b)), new Decimal(Infinity));
+  vs.length === 0
+    ? new Decimal(0)
+    : vs.reduce<Decimal>((a, b) => Decimal.min(a, D(b)), D(vs[0]));
 
 export const median = (vs: Decimal.Value[]): Decimal => {
   if (vs.length === 0) return new Decimal(0);

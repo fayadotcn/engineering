@@ -32,10 +32,19 @@ function alignKey(it: BoqItemDTO): string {
 
 export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow[] {
   const leaf = (xs: BoqItemDTO[]) => xs.filter((i) => !i.isHeader && i.name.trim());
+  // 同一文件里编码会重复（多单位工程各自含同一条清单）——按出现序号补键，
+  // 顺序保留对齐语义；否则后写的覆盖先写的，整行静默丢失。
+  const putKeyed = (map: Map<string, BoqItemDTO>, it: BoqItemDTO) => {
+    const base = alignKey(it);
+    if (!map.has(base)) { map.set(base, it); return; }
+    let n = 2;
+    while (map.has(`${base}#${n}`)) n++;
+    map.set(`${base}#${n}`, it);
+  };
   const mapA = new Map<string, BoqItemDTO>();
   const mapB = new Map<string, BoqItemDTO>();
-  for (const it of leaf(a)) mapA.set(alignKey(it), it);
-  for (const it of leaf(b)) mapB.set(alignKey(it), it);
+  for (const it of leaf(a)) putKeyed(mapA, it);
+  for (const it of leaf(b)) putKeyed(mapB, it);
 
   const keys = new Set([...mapA.keys(), ...mapB.keys()]);
   const rows: FileCompareRow[] = [];

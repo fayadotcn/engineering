@@ -97,6 +97,26 @@ describe("compareBoqSets", () => {
     expect(by("C003").qtyOver15).toBe(true);
     expect(compareSummary(rows).qtyOver15).toBe(2);
   });
+
+  it("同编码重复行（多单位工程）按出现序对齐，不静默丢失", () => {
+    const a = [
+      item("配电箱", "AL1", "台", "2", "3500", "C001"),
+      item("配电箱", "AL2", "台", "3", "4200", "C001"), // 同编码第二次出现
+    ];
+    const b = [
+      item("配电箱", "AL1", "台", "2", "3600", "C001", "fB"),
+      item("配电箱", "AL2", "台", "3", "4200", "C001", "fB"),
+      item("配电箱", "AL3", "台", "1", "5000", "C001", "fB"), // B 第三次出现
+    ];
+    const rows = compareBoqSets(a, b);
+    // 3 条配对行：两条对齐 + 一条 ONLY_B，不能塌成一行
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.status === "ONLY_B")).toHaveLength(1);
+    const s = compareSummary(rows);
+    expect(s.onlyB).toBe(1);
+    // A 第一条 3500→3600 差价（2台×100=+200）；B 多出 1×5000
+    expect(s.totalDelta).toBe("5200.00");
+  });
 });
 
 describe("compareDeclaredFees（文件汇总事实两期对审）", () => {

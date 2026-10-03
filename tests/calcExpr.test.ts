@@ -20,4 +20,10 @@ describe("evalExpr", () => {
     expect(() => evalExpr("1/0")).toThrow();
     expect(() => evalExpr("")).toThrow();
   });
+  it("rejects malformed numbers instead of silent truncation", () => {
+    expect(() => evalExpr("1.2.3")).toThrow();
+    expect(() => evalExpr("3.5.2+1")).toThrow();
+    expect(() => evalExpr(".")).toThrow();
+    expect(evalExpr("1.5+2")).toBe(3.5);
+  });
 });

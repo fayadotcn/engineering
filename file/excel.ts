@@ -615,8 +615,17 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     .map((s) => s.trim())
     .filter((s) => s && !/分部分项|清单|计价|措施|汇总|表\s*[-—_]?\s*\d/.test(s))
     .join("‖") || undefined;
-  // 价列表头含「含税」→ 单价含税（「除税价」不含税，不算）
-  const taxIncluded = headerCells.some((h) => /含税/.test(h));
+  // 价列表头含「含税」→ 单价含税。注意「不含税」也含「含税」子串，
+  // 必须排除否定式（不含税/未含税/除税/税前），否则除税价表会被误标含税。
+  // 单价列自己声明「除税/不含税」时优先以它为准（哪怕合价列写着含税）。
+  const saysIncl = (h: string) => /含税/.test(h) && !/不含税|未含税|除税|税前/.test(h);
+  const saysExcl = (h: string) => /不含税|未含税|除税|税前/.test(h);
+  const upHd = columns.unitPrice !== undefined ? headerCells[columns.unitPrice] ?? "" : "";
+  const prHd = columns.price !== undefined ? headerCells[columns.price] ?? "" : "";
+  const taxIncluded =
+    saysExcl(upHd) || saysExcl(prHd)
+      ? false
+      : saysIncl(upHd) || saysIncl(prHd) || headerCells.some(saysIncl);
 
   const fingerprint =
     headerRow >= 0

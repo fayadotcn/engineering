@@ -1,6 +1,7 @@
 import type { RunContext } from "./context";
 import type { ToolResult } from "./tools/registry";
 import { REGION_RE } from "@dataset/priceParse";
+import { parseRateValue } from "@project/facts";
 import { autopilotPlan } from "./autopilot";
 
 // Planner produces steps. A step is either a static {tool,args} or a
@@ -128,17 +129,17 @@ export class RulePlanner implements Planner {
     if (/措施费|脚手架|超高增加|高层.*增加费|檐口|操作物高度|系统调整费|系数.*计取/.test(m))
       return { steps: [{ tool: "cost.measureFees", args: {}, activity: "正在按川标系数计取措施费" }] };
 
-    // 费用汇总/取费（无目标金额时）：分部分项→措施→规费→税金→含税造价
-    if (/费用汇总|取费|造价汇总|汇总表|含税总价|总价是多少|总造价|费用构成/.test(m))
-      return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用" }] };
-
-    // 工程量反算: 总价控制到 X
-    const target = m.match(/(?:控制|调|调整|降|到|为)\D{0,6}([\d,]+\.?\d{0,2})/);
+    // 工程量反算: 总价控制到 X（「500万」「1.2亿」要按中文金额单位放大）。
+    // 必须在「费用汇总」之前——「含税总价控制到500万」含「含税总价」字样，
+    // 但动词+金额决定了它是反算不是汇总。
+    const target = m.match(/(?:控制|调|调整|降|到|为)\D{0,6}([\d,]+(?:\.\d+)?)\s*(亿|万|千)?/);
     if (/总价|含税|总额|造价/.test(m) && target) {
-      const targetTotal = Number(target[1].replace(/,/g, ""));
+      const mult = target[2] === "亿" ? 1e8 : target[2] === "万" ? 1e4 : target[2] === "千" ? 1e3 : 1;
+      const targetTotal = Number(target[1].replace(/,/g, "")) * mult;
       const inclTax = /含税/.test(m);
       const taxFact = ctx.facts.find((f) => f.key === "税率")?.value;
-      const taxRate = inclTax ? Number(taxFact ?? 0.09) : 0;
+      // 台账值须走 parseRateValue 归一化——「9%」直接 Number() 得 NaN
+      const taxRate = inclTax ? (parseRateValue(taxFact) ?? 0.09) : 0;
       return {
         steps: [
           {
@@ -147,11 +148,15 @@ export class RulePlanner implements Planner {
             activity: `正在按目标总价 ${targetTotal} 反算工程量${inclTax ? `（含税，税率 ${taxRate}）` : ""}`,
           },
         ],
-        fallbackMessage: inclTax && !taxFact
+        fallbackMessage: inclTax && parseRateValue(taxFact) === null
           ? `已按含税口径处理，税率取默认 9%（项目台账未记录税率，可用「税率设为x%」写入事实）`
           : undefined,
       };
     }
+
+    // 费用汇总/取费（无目标金额时）：分部分项→措施→规费→税金→含税造价
+    if (/费用汇总|取费|造价汇总|汇总表|含税总价|总价是多少|总造价|费用构成/.test(m))
+      return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用" }] };
 
     // 两版清单对审
     if (/对审|对比.*清单|清单.*对比|中标.*结算|结算.*对比|两个文件|两版/.test(m))

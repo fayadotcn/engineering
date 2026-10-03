@@ -329,4 +329,31 @@ describe("通用清单列映射", () => {
     const raw = JSON.parse(out.rawCells as string);
     expect(raw.__nonNumeric).toContain("quantity");
   });
+
+  it("「含税单价」→ taxIncluded=true；「不含税/除税单价」不误判含税", async () => {
+    const incl = await wb([
+      ["序号", "名称", "单位", "工程量", "含税单价", "合价"],
+      [1, "镀锌钢管", "m", 120, 85.5, 10260],
+      [2, "电缆", "m", 200, 40, 8000],
+      [3, "桥架", "m", 50, 96, 4800],
+    ]);
+    expect(inspectWorkbook(incl)[0].taxIncluded).toBe(true);
+
+    const excl = await wb([
+      ["序号", "名称", "单位", "工程量", "不含税单价", "合价"],
+      [1, "镀锌钢管", "m", 120, 85.5, 10260],
+      [2, "电缆", "m", 200, 40, 8000],
+      [3, "桥架", "m", 50, 96, 4800],
+    ]);
+    expect(inspectWorkbook(excl)[0].taxIncluded).toBe(false);
+
+    // 单价列说「除税」，哪怕另一列写「合价(含税)」也不标含税
+    const mixed = await wb([
+      ["序号", "名称", "单位", "工程量", "除税单价", "合价(含税)"],
+      [1, "镀锌钢管", "m", 120, 76.15, 10260],
+      [2, "电缆", "m", 200, 35.78, 8000],
+      [3, "桥架", "m", 50, 85.71, 4800],
+    ]);
+    expect(inspectWorkbook(mixed)[0].taxIncluded).toBe(false);
+  });
 });
