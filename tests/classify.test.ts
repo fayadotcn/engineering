@@ -31,6 +31,12 @@ describe("classifyFile", () => {
   it("措施表（PENDING_QUOTE 也算 BOQ 侧）", () => {
     expect(classifyFile("待报价清单.xlsx", [sheet("PENDING_QUOTE")], "").kind).toBe("BOQ_TENDER");
   });
+
+  it("甲供材文件名优先：询价形/清单形内容都归 OWNER_SUPPLIED", () => {
+    expect(classifyFile("甲供材报价表.xlsx", [sheet("QUOTATION")], "").kind).toBe("OWNER_SUPPLIED");
+    expect(classifyFile("甲供材清单.xlsx", [sheet("BOQ")], "").kind).toBe("OWNER_SUPPLIED");
+    expect(classifyFile("甲供材料表.xlsx", null, "").kind).toBe("OWNER_SUPPLIED");
+  });
 });
 
 describe("inferFileStage", () => {

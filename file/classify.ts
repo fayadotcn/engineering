@@ -4,8 +4,9 @@ import type { ParsedSheet } from "./excel";
 // File kind classification: content signals beat filename signals.
 
 const FILENAME_RULES: [RegExp, FileKind][] = [
-  [/询价|报价|询回|价格表/, "MATERIAL_QUOTATION"],
+  // 甲供先于询价命中：「甲供材报价表」本质是发包人供货清单，不是询价
   [/甲供|甲供材/, "OWNER_SUPPLIED"],
+  [/询价|报价|询回|价格表/, "MATERIAL_QUOTATION"],
   [/结算/, "BOQ_SETTLEMENT"],
   [/中标|投标/, "BOQ_WINNING"],
   [/招标|清单|财评|送审/, "BOQ_TENDER"],
@@ -53,9 +54,18 @@ export function classifyFile(
       const fromName = FILENAME_RULES.find(([re]) => re.test(filename))?.[1];
       if (fromName && fromName.startsWith("BOQ"))
         return { kind: fromName, confidence: 0.9 };
+      // 甲供材表偶尔排成清单形（编码/量/价列）——文件名意图仍要保留
+      if (fromName === "OWNER_SUPPLIED")
+        return { kind: "OWNER_SUPPLIED", confidence: 0.7 };
       return { kind: "BOQ_TENDER", confidence: 0.85 };
     }
-    if (hasQuote && !hasBoq) return { kind: "MATERIAL_QUOTATION", confidence: 0.9 };
+    if (hasQuote && !hasBoq) {
+      // 甲供材表内容就是询价形（材料名+规格+价）——只能靠文件名区分，
+      // 标成询价会让甲供核对/重复计价检查漏掉整个文件
+      if (/甲供|甲供材/.test(filename))
+        return { kind: "OWNER_SUPPLIED", confidence: 0.8 };
+      return { kind: "MATERIAL_QUOTATION", confidence: 0.9 };
+    }
     if (hasBoq && hasQuote) return { kind: "BOQ_TENDER", confidence: 0.6 };
   }
   const byName = FILENAME_RULES.find(([re]) => re.test(filename));
