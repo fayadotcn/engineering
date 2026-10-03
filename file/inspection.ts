@@ -183,6 +183,8 @@ export function applySheetPatch(
         delete sheet.evidence[role];
         continue;
       }
+      // 列索引必须落在表头范围内——越界/非整数写进去，重导时会静默读出空列
+      if (!Number.isInteger(col) || col < 0 || col >= sheet.headerCells.length) continue;
       // 一列只能一个角色：清掉指向同列的其他角色
       for (const [r, c] of Object.entries(next))
         if (c === col && r !== role) {
