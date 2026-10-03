@@ -12,11 +12,16 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
+  if (!await prisma.project.findUnique({ where: { id: projectId } }))
+    return NextResponse.json({ error: "项目不存在" }, { status: 404 });
   const form = await req.formData();
   const file = form.get("file") as File | null;
   if (!file) return NextResponse.json({ error: "file required" }, { status: 400 });
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (!buffer.length) return NextResponse.json({ error: "空文件" }, { status: 400 });
+  if (buffer.length > 80 * 1024 * 1024)
+    return NextResponse.json({ error: "文件过大（限 80MB）" }, { status: 413 });
   // multipart filename can arrive mojibake from non-UTF8 clients; an explicit
   // `filename` field wins when provided
   const filename = (form.get("filename") as string | null)?.trim() || file.name;

@@ -89,8 +89,9 @@ registerTool({
     if (!mine.length) throw new Error("该源文件没有已导入的清单项，请先完成导入");
     const meta = fromJson<{
       sheets?: { name: string; columns: string[] }[];
+      mapping?: Record<string, { columns?: Record<string, number> }>;
     }>(file.meta, {});
-    // rebuild ColumnMap from stored "key:idx(1-based)" entries
+    // 列映射优先取 meta.mapping（列映射面板的最新口径），再退回 ingest 时沉淀的 meta.sheets
     const colMaps: Record<string, ColumnMap> = {};
     for (const s of meta.sheets ?? []) {
       const m: ColumnMap = {};
@@ -100,6 +101,8 @@ registerTool({
       }
       colMaps[s.name] = m;
     }
+    for (const [name, s] of Object.entries(meta.mapping ?? {}))
+      if (s.columns && Object.keys(s.columns).length) colMaps[name] = { ...s.columns };
     const patches: CellPatch[] = mine.map((i) => ({
       sheetName: i.sheetName,
       rowIndex: i.rowIndex,
@@ -225,13 +228,14 @@ registerTool({
     const sBoq = wb.addWorksheet("分部分项清单");
     const bh = sBoq.addRow(["序号", "项目编码", "项目名称", "项目特征", "单位", "工程量", "综合单价", "合价"]);
     bh.font = bold.font;
-    items.forEach((it, i) => {
+    let boqSeq = 0;
+    items.forEach((it) => {
       if (it.isHeader) {
         const r = sBoq.addRow(["", "", it.name, "", "", "", "", ""]);
         r.font = bold.font;
         return;
       }
-      const r = sBoq.addRow([i + 1, it.code, it.name, it.rawFeature, it.unit, Number(it.quantity), Number(it.unitPrice), Number(it.totalPrice)]);
+      const r = sBoq.addRow([++boqSeq, it.code, it.name, it.rawFeature, it.unit, Number(it.quantity), Number(it.unitPrice), Number(it.totalPrice)]);
       r.getCell(7).numFmt = moneyFmt;
       r.getCell(8).numFmt = moneyFmt;
     });
