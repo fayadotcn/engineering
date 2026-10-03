@@ -70,7 +70,7 @@ const CAPABILITIES = `我可以直接执行这些造价任务：
 • 两版清单对审：招标/中标/结算的价差、量差、独有项与总额差
 • 工程量计算：「算一下 3层×12个+15」直接求值，可写回清单项
 • 报告：生成造价分析报告 Excel（汇总/占比/台账/异常）
-• 修改与导出：改单价/工程量，展示 Diff，导出或写回 Excel
+• 修改与导出：改单价/工程量、删除清单项，展示 Diff，导出或写回 Excel
 直接说出目标即可，例如「检查相同项不同单价」「把询价写回清单」。`;
 
 export class RulePlanner implements Planner {
@@ -158,6 +158,28 @@ export class RulePlanner implements Planner {
           args: { key: fm[1], value: fm[2] },
           activity: `正在写入台账：${fm[1]} = ${fm[2]}`,
         })),
+      };
+    }
+
+    // 删除清单项：先按名称/编码关键词定位，确认门后删除（回执全字段快照可撤销）。
+    // 「删掉重复项/删除文件」不交这条路——删谁有歧义，留给人工或显式清单项关键词。
+    const delM = m.match(/(?:删除|删掉|去除|去掉)(?:把|将|一下)?([一-龥A-Za-z0-9]{2,12}?)(?:的)?(?:清单|项目|条目|行|项)?\s*(?:清单项|项|行|条目)?\s*$/);
+    if (delM && !/重复|文件|记录|回执|台账|事实|项目$/.test(delM[1])) {
+      const kw = delM[1];
+      return {
+        steps: [
+          { tool: "boq.search", args: { query: kw }, activity: `正在定位「${kw}」清单项` },
+          (results: ToolResult[]) => {
+            const hits = (results.at(-1)?.observation ?? []) as { id: string }[];
+            if (!hits.length) return null;
+            return {
+              tool: "boq.deleteItems",
+              args: { ids: hits.slice(0, 50).map((h) => h.id), reason: `删除「${kw}」相关项` },
+              activity: `正在删除 ${Math.min(hits.length, 50)} 个清单项`,
+            };
+          },
+        ],
+        fallbackMessage: `清单中没有找到名称/编码/特征含「${kw}」的项`,
       };
     }
 

@@ -392,3 +392,36 @@ registerTool({
     };
   },
 });
+
+registerTool({
+  name: "boq.deleteItems",
+  description: "删除指定清单项（需确认；回执含全字段快照，可在操作记录里撤销恢复）。删除标题行会连同其子项一起消失的风险由用户确认时权衡",
+  implemented: true,
+  schema: z.object({
+    ids: z.array(z.string().min(1)).min(1).max(500).describe("要删除的清单项 id 列表"),
+    reason: z.string().optional(),
+  }),
+  confirm: (a: { ids: string[] }) => `将删除 ${a.ids.length} 个清单项（操作可撤销）`,
+  handler: async (ctx, args: { ids: string[]; reason?: string }) => {
+    const { prisma } = await import("@database/client");
+    const ids = [...new Set(args.ids)];
+    const items = await prisma.boqItem.findMany({
+      where: { id: { in: ids }, projectId: ctx.projectId },
+    });
+    if (items.length !== ids.length)
+      return { observation: { error: "部分清单项不存在或不属于当前项目，请刷新后重试" } };
+    await prisma.boqItem.deleteMany({ where: { id: { in: ids } } });
+    // before 落原始行（非 DTO）：revert 的 recreate 路径按这些字段原样重建
+    return {
+      observation: { deleted: items.length },
+      views: [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }],
+      receipts: [{
+        actionType: "BOQ_DELETE",
+        summary: `删除 ${items.length} 个清单项${args.reason ? `（${args.reason}）` : ""}：${items.slice(0, 5).map((i) => i.name).join("、")}${items.length > 5 ? " 等" : ""}`,
+        before: items,
+        after: [],
+      }],
+      message: `已删除 ${items.length} 个清单项，可在「操作记录」中撤销`,
+    };
+  },
+});

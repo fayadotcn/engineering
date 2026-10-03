@@ -189,3 +189,27 @@ describe("单位工程费用汇总路由", () => {
     },
   );
 });
+
+describe("删除清单项路由", () => {
+  it("「删除配电箱项」→ boq.search 定位 → boq.deleteItems", async () => {
+    const p = await plan("删除配电箱项");
+    const s0 = await resolve(p.steps[0]);
+    expect(s0?.tool).toBe("boq.search");
+    const s1 = await resolve(p.steps[1], [{ observation: [{ id: "x1" }, { id: "x2" }] }]);
+    expect(s1?.tool).toBe("boq.deleteItems");
+    expect(s1?.args.ids).toEqual(["x1", "x2"]);
+  });
+
+  it("搜索无命中 → 不出删除步骤", async () => {
+    const p = await plan("删除不存在的某某项");
+    const s1 = await resolve(p.steps[1], [{ observation: [] }]);
+    expect(s1).toBeNull();
+  });
+
+  it("「删除重复项」不进删除路由（删谁有歧义）", async () => {
+    const p = await plan("删除重复项");
+    const tools = [];
+    for (const s of p.steps) tools.push((await resolve(s, [{ observation: [] }]))?.tool);
+    expect(tools).not.toContain("boq.deleteItems");
+  });
+});
