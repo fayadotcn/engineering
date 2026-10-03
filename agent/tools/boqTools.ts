@@ -329,6 +329,10 @@ const patchSchema = z.object({
   id: z.string(),
   unitPrice: z.string().optional(),
   quantity: z.string().optional(),
+  quantityExpr: z.string().optional().describe("工程量计算式原文，如 3层×12个+15"),
+  mainMaterialPrice: z.string().optional().describe("主材暂估价"),
+  laborUnitPrice: z.string().optional(),
+  machineUnitPrice: z.string().optional(),
   totalPrice: z.string().optional().describe("仅总价措施/其他项目可直接修改合价，其他项请改工程量或综合单价"),
   name: z.string().optional(),
   rawFeature: z.string().optional(),
@@ -361,7 +365,7 @@ registerTool({
     for (const b of before) {
       const a = after.find((x) => x.id === b.id);
       if (!a) continue;
-      for (const field of ["unitPrice", "quantity", "totalPrice", "name", "rawFeature"] as const) {
+      for (const field of ["unitPrice", "quantity", "quantityExpr", "mainMaterialPrice", "laborUnitPrice", "machineUnitPrice", "totalPrice", "name", "rawFeature"] as const) {
         if (b[field] !== a[field])
           diffRows.push({
             itemId: b.id,
