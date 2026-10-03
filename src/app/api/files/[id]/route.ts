@@ -7,6 +7,18 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const file = await prisma.projectFile.findUnique({ where: { id } });
   if (!file) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // 该文件的导入 run 还在跑时禁止删除——解析中写入已删 fileId 会触发外键失败，
+  // 且会把 run 卡死在 FAILED。与上传去重同一条 live 查询口径
+  const live = await prisma.agentRun.findFirst({
+    where: {
+      projectId: file.projectId,
+      status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+      userMessage: { contains: `「${file.filename}」` },
+      createdAt: { gt: new Date(Date.now() - 15 * 60 * 1000) },
+    },
+    select: { id: true },
+  });
+  if (live) return NextResponse.json({ error: "该文件正在导入/待核对，完成或取消后再删除" }, { status: 409 });
   const removed = await prisma.boqItem.count({ where: { fileId: id } });
   const quotes = await prisma.quotationItem.count({ where: { fileId: id } });
   // 数据行+文件记录+回执一个事务：任何一步失败不留半成品删除；
