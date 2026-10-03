@@ -252,8 +252,14 @@ export function calcQuota(
     // 缺主材价时测算价不含主材费，是不完整单价——绝不能与清单综合单价比偏差。
     const ownMain = D(item.mainMaterialPrice ?? 0);
     const mainKey = `${f2m(item)}`;
-    const mainPrice = ownMain.gt(0) ? Number(ownMain) : opts.mainPrices?.[mainKey];
-    const needsMain = mainPrice === undefined;
+    // 定额库的口径分两类：内置参考库（detail 空）综合单价都不含主材，命中即加；
+    // SC2020 导入行（detail 有值）只有写明主材名的子目才另计主材——
+    // 无主材的子目其材料费已在基价里，再加就是重复计
+    const expectsMain = q.detail === undefined || !!q.detail.mainMaterial;
+    const mainPrice = expectsMain
+      ? (ownMain.gt(0) ? Number(ownMain) : opts.mainPrices?.[mainKey])
+      : undefined;
+    const needsMain = expectsMain && mainPrice === undefined;
     const main = needsMain ? D(0) : D(mainPrice!).mul(q.mainQtyPerUnit);
 
     const calc = labor.plus(aux).plus(mach).plus(main).plus(fee);

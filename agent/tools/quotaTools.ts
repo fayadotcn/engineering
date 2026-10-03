@@ -392,11 +392,12 @@ registerTool({
     const mgmtRate = parseRateValue((await getFact(ctx.projectId, "管理费率"))?.value) ?? 0;
     const profitRate = parseRateValue((await getFact(ctx.projectId, "利润率"))?.value) ?? 0;
 
-    // 主材价沿用清单项主材暂估价
+    // 主材价沿用清单项主材暂估价；该子目本身没有主材（材料费已含基价）时不加，防重复计
     const ownMain = Number(it.mainMaterialPrice ?? 0);
+    const expectsMain = q.detail === undefined || !!q.detail.mainMaterial;
     const line = lineFromQuota(it, q, {
       mgmtRate, profitRate,
-      mainPrice: ownMain > 0 ? ownMain : undefined,
+      mainPrice: ownMain > 0 && expectsMain ? ownMain : undefined,
       manual: true,
     });
 

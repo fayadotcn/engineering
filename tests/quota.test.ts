@@ -65,7 +65,7 @@ describe("组价方案：工作内容缺口的配套子目建议", () => {
     {
       code: "5H0001", name: "给水管道安装 DN100", unit: "10m", unitScale: 10,
       labor: 150, material: 30, machine: 5, mainQtyPerUnit: 1.015,
-      detail: { gcnr: "切管、套丝、管道安装、水压试验。" }, // 含试压，不含冲洗/支架
+      detail: { gcnr: "切管、套丝、管道安装、水压试验。", mainMaterial: "镀锌钢管" }, // 含试压，不含冲洗/支架
       match: { category: "管道" },
     },
     {
