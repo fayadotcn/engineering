@@ -87,4 +87,22 @@ describe("parseWorkbook 真实导出容错", () => {
     expect(s.rows.some((r) => r.raw.join("").includes("第2页"))).toBe(false);
     expect(s.rows.some((r) => r.raw.join("").includes("编制人"))).toBe(false);
   });
+
+  it("带序号锚点的合计行同样跳过——措施表合计不落成清单项", async () => {
+    // 表-11 总价措施表：合计行有序号时旧逻辑把它当 lump-sum 条目导入，
+    // feeSummary 会把「合计」又加一遍 → 双计
+    const w = new ExcelJS.Workbook();
+    const s = w.addWorksheet("表-11 总价措施项目清单");
+    [
+      ["序号", "项目编码", "项目名称", "计算基础", "费率", "金额（元）"],
+      ["1", "031301001", "安全文明施工费", "分部分项", "5.8", "23500"],
+      ["2", "031302001", "夜间施工增加费", "", "", "3200"],
+      ["3", "", "合计", "", "", "26700"],
+    ].forEach((r) => s.addRow(r));
+    const buf = Buffer.from(await w.xlsx.writeBuffer());
+    const sheet = parseWorkbook(buf)[0];
+    const items = sheet.rows.filter((r) => r.isItem);
+    expect(items.map((r) => r.cells.name)).toEqual(["安全文明施工费", "夜间施工增加费"]);
+    expect(sheet.rows.some((r) => /合计/.test(r.cells.name ?? ""))).toBe(false);
+  });
 });

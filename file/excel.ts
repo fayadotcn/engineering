@@ -806,8 +806,10 @@ export function parseWorkbook(
         (columns.price !== undefined && cells[columns.price]?.trim()) ||
         (columns.unitPrice !== undefined && cells[columns.unitPrice]?.trim());
       // 汇总/小计行：不导入也不合并（分部合计由系统自己算）。
+      // 带锚点（序号/编码）的合计行同样跳过——否则表-11/12 里「序号|合计|金额」
+      // 会被当 lump-sum 条目导入，feeSummary 把合计行当真费用又算一遍。
       // FACTS 表例外——表-04 的「合计/总计」行正是 factsExtract 要取的真值，不能丢。
-      if (!hasAnchor && SUBTOTAL_RE.test(nameCell) && type !== "FACTS") continue;
+      if (SUBTOTAL_RE.test(nameCell) && type !== "FACTS") continue;
       if (
         !hasAnchor && merged.length && cells.some((c) => c.trim()) &&
         !nameCell // 真续行：名称列为空，只有特征/规格列有延续文本
