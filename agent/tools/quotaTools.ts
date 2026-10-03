@@ -387,17 +387,18 @@ registerTool({
     for (const key of ["管理费率", "利润率"]) {
       if (parseRateValue((await getFact(ctx.projectId, key))?.value) === null) throw new Error(`${key}尚未确认，请先填写计价设置再人工组价`);
     }
-    if (Number(it.mainMaterialPrice ?? 0) <= 0 && q.detail?.mainMaterial) throw new Error(`主材「${q.detail.mainMaterial}」缺价，请先补主材暂估价再写回完整综合单价`);
+    const ownMainD = D(it.mainMaterialPrice ?? "0");
+    const hasMain = ownMainD.isFinite() && ownMainD.gt(0);
+    if (!hasMain && q.detail?.mainMaterial) throw new Error(`主材「${q.detail.mainMaterial}」缺价，请先补主材暂估价再写回完整综合单价`);
 
     const mgmtRate = parseRateValue((await getFact(ctx.projectId, "管理费率"))?.value) ?? 0;
     const profitRate = parseRateValue((await getFact(ctx.projectId, "利润率"))?.value) ?? 0;
 
     // 主材价沿用清单项主材暂估价；该子目本身没有主材（材料费已含基价）时不加，防重复计
-    const ownMain = Number(it.mainMaterialPrice ?? 0);
     const expectsMain = q.detail === undefined || !!q.detail.mainMaterial;
     const line = lineFromQuota(it, q, {
       mgmtRate, profitRate,
-      mainPrice: ownMain > 0 && expectsMain ? ownMain : undefined,
+      mainPrice: hasMain && expectsMain ? ownMainD.toNumber() : undefined,
       manual: true,
     });
 
@@ -414,7 +415,7 @@ registerTool({
       observation: {
         itemId: it.id, quota: `${q.code} ${q.name}`, mode: args.mode ?? "replace",
         planLines: plan.length, unitPrice: price.toFixed(2),
-        needsMainPrice: ownMain <= 0 && !!q.detail?.mainMaterial,
+        needsMainPrice: !hasMain && !!q.detail?.mainMaterial,
       },
       views: [
         {
@@ -432,7 +433,7 @@ registerTool({
         before, after,
       }],
       message: `「${it.name}」组价方案已更新（${plan.length} 条子目），综合单价 ${fmtMoney(it.unitPrice)} → ${fmtMoney(price)}` +
-        (ownMain <= 0 && q.detail?.mainMaterial ? `；注意该子目主材「${q.detail.mainMaterial}」暂无暂估价` : ""),
+        (!hasMain && q.detail?.mainMaterial ? `；注意该子目主材「${q.detail.mainMaterial}」暂无暂估价` : ""),
     };
   },
 });
