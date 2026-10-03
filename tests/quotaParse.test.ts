@@ -41,4 +41,25 @@ describe("parseQuotaWorkbook", () => {
     const buf = await wb([["名称", "单价"], ["水泥", 400]]);
     expect(parseQuotaWorkbook(buf)).toHaveLength(0);
   });
+
+  it("有耗量列但无主材名称列时占位标记，让 expectsMain 生效", async () => {
+    const buf = await wb([
+      ["定额编号", "子目名称", "单位", "人工费", "材料费", "机械费", "主材耗量"],
+      ["C8-1-23", "镀锌钢管 DN100", "10m", 156.2, 42.8, 18.6, 10.2],
+      ["C8-9-9", "管道冲洗", "100m", 20, 5, 0, 0], // 耗量 0 不应标主材
+    ]);
+    const rows = parseQuotaWorkbook(buf);
+    expect(rows[0].raw.mainMaterial).toBe("主材");
+    expect(rows[1].raw.mainMaterial).toBeUndefined();
+  });
+
+  it("显式主材名称列优先于占位；且不被误当耗量列", async () => {
+    const buf = await wb([
+      ["定额编号", "子目名称", "单位", "人工费", "材料费", "机械费", "主材名称", "主材耗量"],
+      ["C8-1-23", "镀锌钢管 DN100", "10m", 156.2, 42.8, 18.6, "内外涂塑钢管 DN100", 10.2],
+    ]);
+    const rows = parseQuotaWorkbook(buf);
+    expect(rows[0].raw.mainMaterial).toBe("内外涂塑钢管 DN100");
+    expect(rows[0].mainQtyPerUnit).toBeCloseTo(1.02); // 耗量列仍是 10.2/10
+  });
 });

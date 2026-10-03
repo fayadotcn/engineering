@@ -25,7 +25,8 @@ const COL_PATTERNS: Record<string, RegExp> = {
   labor: /人工费|人工/,
   material: /材料费|辅材费|材料/,
   machine: /机械费|机械/,
-  mainQty: /主材耗量|主材含量|耗量|含量|主材/,
+  mainQty: /主材耗量|主材含量|耗量|含量|主材(?!名称|型号|规格)/,
+  mainName: /主材名称|主要材料|未计价材料|主材型号|主材规格/,
   basePrice: /基价|综合单价|合价/,
 };
 
@@ -91,6 +92,11 @@ export function parseQuotaWorkbook(buffer: Buffer): ParsedQuotaRow[] {
       // 引擎约定是"每清单单位"（1.02）。耗量 ≥ 倍数时判定为定额单位口径，归一化。
       const rawQty = cols.mainQty !== undefined ? num(row[cols.mainQty] ?? "") : 0;
       const mainQtyPerUnit = !rawQty ? 1 : rawQty >= scale ? rawQty / scale : rawQty;
+      // 主材名：显式「主材名称」列优先；表里有耗量列且本行耗量>0 但没有名称列时，
+      // 写占位名「主材」——quota.calculate 据此判定 expectsMain，
+      // 否则自建定额库所有子目永远不计主材价且 needsMainPrice 不报警
+      const mainName = (cols.mainName !== undefined ? (row[cols.mainName] ?? "").trim() : "")
+        || (rawQty > 0 ? "主材" : "");
       const f = parseSemanticFeature(`${name} ${unit}`, "");
       const matchKeys: Record<string, string> = {};
       if (f.category) matchKeys.category = f.category;
@@ -110,9 +116,12 @@ export function parseQuotaWorkbook(buffer: Buffer): ParsedQuotaRow[] {
         machine: num(row[cols.machine] ?? ""),
         mainQtyPerUnit,
         matchKeys,
-        raw: Object.fromEntries(
-          Object.entries(cols).map(([k, ci]) => [k, row[ci] ?? ""])
-        ),
+        raw: {
+          ...Object.fromEntries(
+            Object.entries(cols).map(([k, ci]) => [k, row[ci] ?? ""])
+          ),
+          ...(mainName ? { mainMaterial: mainName } : {}),
+        },
       });
     }
   }
