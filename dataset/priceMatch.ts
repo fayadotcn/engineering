@@ -1,4 +1,4 @@
-import { periodKey } from "./priceParse";
+import { periodKey, LABOR_UNIT } from "./priceParse";
 import { normUnit } from "@cost-engine/semantic";
 
 // 价格库候选行打分：名称/规格是基础分（沿用既有阈值 60/80），
@@ -178,6 +178,14 @@ export function pickBestPriceRow(
       s += 12;
     // 价格类型偏好
     if (prefs?.priceType && r.priceType === prefs.priceType) s += 10;
+    // 量纲语义：清单项是人工/台班口径时 LABOR 价应显著优先（同工日单价 vs 材料价）；
+    // 反之材料项遇 LABOR 行降权——人工费不该去填材料暂估价
+    const itemLabor = !!item.unit && LABOR_UNIT.test(normUnit(item.unit) || item.unit.trim());
+    if (itemLabor && r.priceType === "LABOR") s += 15;
+    else if (!itemLabor && r.priceType === "LABOR") {
+      s -= 10;
+      notes.push("人工费价格行，用于材料项需谨慎");
+    }
 
     // 同分裁决取期次较新者（再退入库时间）——不能让结果依赖候选集迭代顺序
     if (!best || s > best.score || (s === best.score &&

@@ -276,3 +276,29 @@ describe("pickBestPriceRow 稳定性修正", () => {
     expect(pick!.row.name).toBe("热镀锌钢管");
   });
 });
+
+describe("pickBestPriceRow 价格类型语义", () => {
+  const r3 = (over: Partial<PriceCandidate>): PriceCandidate => ({
+    name: "", spec: "", unit: "", brand: "", price: 10,
+    priceType: "MARKET", region: "", period: "", ...over,
+  });
+  it("工日单位的清单项优先取 LABOR 价格行", () => {
+    const pick = pickBestPriceRow(
+      [r3({ name: "普工", priceType: "MARKET", price: 300 }), r3({ name: "普工", priceType: "LABOR", price: 180 })],
+      { name: "普工", unit: "工日" }
+    );
+    expect(pick!.row.priceType).toBe("LABOR");
+  });
+  it("材料项遇 LABOR 行降权并留痕", () => {
+    const pick = pickBestPriceRow(
+      [r3({ name: "综合工日", priceType: "LABOR" }), r3({ name: "综合工日", priceType: "MARKET" })],
+      { name: "综合工日", unit: "m" }
+    );
+    expect(pick!.row.priceType).toBe("MARKET");
+    const labor = pickBestPriceRow(
+      [r3({ name: "综合工日", priceType: "LABOR" })],
+      { name: "综合工日", unit: "m" }
+    );
+    expect(labor!.notes.some((n) => n.includes("人工费"))).toBe(true);
+  });
+});
