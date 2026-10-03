@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findDataIssues, findFeatureMismatch, findSameItemDifferentPrice } from "@cost-engine/compare";
+import { findDataIssues, findDuplicateItems, findFeatureMismatch, findSameItemDifferentPrice } from "@cost-engine/compare";
 import { parseSemanticFeature, inferDiscipline } from "@cost-engine/semantic";
 import type { BoqItemDTO } from "@shared/types";
 
@@ -239,5 +239,24 @@ describe("findDataIssues", () => {
   it("总价措施行负单价不算数据问题（无量价结构）", () => {
     const rows = findDataIssues([mk({ feeType: "总价措施", unitPrice: "-100", unit: "" })]);
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("findDuplicateItems", () => {
+  const code = "030404017001";
+  it("同一单位工程内同编码同特征 → 重复项", () => {
+    const rows = findDuplicateItems([
+      item("配电箱", "AL1", "台", "2", "8500", code),
+      item("配电箱", "AL1", "台", "3", "8500", code),
+    ]);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("不同单位工程各列一条同编码 → 不算重复（多栋楼各自列项）", () => {
+    const a = item("配电箱", "AL1", "台", "2", "8500", code);
+    const b = item("配电箱", "AL1", "台", "3", "8500", code);
+    a.unitProject = "1#楼";
+    b.unitProject = "2#楼";
+    expect(findDuplicateItems([a, b])).toHaveLength(0);
   });
 });

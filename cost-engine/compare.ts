@@ -293,7 +293,8 @@ export function findDuplicateItems(items: BoqItemDTO[]): AnomalyRow[] {
     const exact = new Map<string, BoqItemDTO[]>();
     for (const it of group) {
       if (!it.code) continue;
-      const k = `${it.code}|${key}`;
+      // 同编码在不同单位工程各列一条是正常做法——重复检测限同一单位工程内
+      const k = `${it.unitProject ?? ""}|${it.code}|${key}`;
       const arr = exact.get(k) ?? [];
       arr.push(it);
       exact.set(k, arr);
