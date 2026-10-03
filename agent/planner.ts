@@ -214,6 +214,11 @@ export class RulePlanner implements Planner {
     }
 
     // 导出 / 写回（询价写回走 material 路径，不在此拦截）
+    // 对审报告导出要在通用导出之前：「导出对审报告」也含「导出」
+    if (/导出|生成|下载/.test(m) && /对审|对比报告/.test(m))
+      return {
+        steps: [{ tool: "report.exportCompare", args: {}, activity: "正在导出对审报告" }],
+      };
     if (/写回|回写|更新到源文件|更新到.*文件/.test(m) && !/询价|报价/.test(m))
       return { steps: [{ tool: "excel.write", args: {}, activity: "正在写回源文件" }] };
     if (/导出|生成.*excel|下载/i.test(m))

@@ -418,3 +418,21 @@ describe("定额库检索路由（quota.search）", () => {
     expect(tools).toContain("quota.match");
   });
 });
+
+describe("对审报告导出路由", () => {
+  it("「导出对审报告」→ report.exportCompare 而非通用导出", async () => {
+    const p = await plan("导出对审报告");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("report.exportCompare");
+  });
+  it("「生成两版清单对比报告」→ report.exportCompare", async () => {
+    const p = await plan("生成两版清单对比报告");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("report.exportCompare");
+  });
+  it("「导出清单excel」仍是通用导出", async () => {
+    const p = await plan("导出清单excel");
+    const s = await resolve(p.steps[p.steps.length - 1]);
+    expect(s?.tool).toBe("report.exportExcel");
+  });
+});
