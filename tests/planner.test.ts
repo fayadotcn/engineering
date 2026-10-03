@@ -246,3 +246,13 @@ describe("补录总额计价项", () => {
     expect(s?.args).toMatchObject({ name: "夜间施工增加费", feeType: "总价措施", totalPrice: "8000" });
   });
 });
+
+describe("非标编码检查路由", () => {
+  it.each(["检查清单编码格式", "有没有非标编码", "查一下自编编码", "编码是不是12位"])(
+    "「%s」→ boq.findInvalidCodes", async (m) => {
+      const p = await plan(m);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("boq.findInvalidCodes");
+    }
+  );
+});

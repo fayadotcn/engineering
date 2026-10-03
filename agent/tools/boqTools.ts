@@ -6,6 +6,7 @@ import {
   findCodeNameMismatch,
   findDuplicateItems,
   findFeatureMismatch,
+  findInvalidCodes,
   findPriceAnomalies,
   findSameItemDifferentPrice,
   findUnitInconsistencies,
@@ -21,6 +22,7 @@ const ANOMALY_LABEL: Record<string, string> = {
   ARITHMETIC: "合价算术校验",
   UNIT_INCONSISTENT: "单位不一致",
   CODE_MISMATCH: "一码多名",
+  INVALID_CODE: "非标编码",
 };
 
 function anomalyView(anomalyType: string, rows: AnomalyRow[]): WorkspaceView {
@@ -219,8 +221,25 @@ registerTool({
 });
 
 registerTool({
+  name: "boq.findInvalidCodes",
+  description: "检查清单项目编码格式——GB50500 应为 12 位数字（附录9位+顺序码3位），非标/自编编码对审会漏配",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const rows = findInvalidCodes(items);
+    const n = rows[0]?.items.length ?? 0;
+    return {
+      observation: { count: n },
+      views: [anomalyView("INVALID_CODE", rows)],
+      message: n ? `发现 ${n} 项非标编码` : "未发现非标编码",
+    };
+  },
+});
+
+registerTool({
   name: "boq.compare",
-  description: "对比清单：相同项不同价 + 单价异常 + 特征不一致 + 合价算术校验 + 单位不一致 + 一码多名（一次全查）",
+  description: "对比清单：相同项不同价 + 单价异常 + 特征不一致 + 合价算术校验 + 单位不一致 + 一码多名 + 非标编码（一次全查）",
   implemented: true,
   schema: z.object({}),
   handler: async (ctx) => {
@@ -231,9 +250,11 @@ registerTool({
     const d = findArithmeticMismatches(items);
     const e = findUnitInconsistencies(items);
     const f = findCodeNameMismatch(items);
+    const g = findInvalidCodes(items);
     const arith = d[0]?.items.length ?? 0;
+    const invalid = g[0]?.items.length ?? 0;
     return {
-      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith, unitInconsistent: e.length, codeMismatch: f.length },
+      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith, unitInconsistent: e.length, codeMismatch: f.length, invalidCode: invalid },
       views: [
         anomalyView("SAME_ITEM_DIFF_PRICE", a),
         anomalyView("PRICE_ANOMALY", b),
@@ -241,8 +262,9 @@ registerTool({
         anomalyView("ARITHMETIC", d),
         anomalyView("UNIT_INCONSISTENT", e),
         anomalyView("CODE_MISMATCH", f),
+        anomalyView("INVALID_CODE", g),
       ],
-      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项，单位不一致 ${e.length} 组，一码多名 ${f.length} 组`,
+      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项，单位不一致 ${e.length} 组，一码多名 ${f.length} 组，非标编码 ${invalid} 项`,
     };
   },
 });

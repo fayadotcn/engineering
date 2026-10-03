@@ -70,7 +70,7 @@ const CAPABILITIES = `我可以直接执行这些造价任务：
 • 两版清单对审：招标/中标/结算的价差、量差、独有项与总额差
 • 工程量计算：「算一下 3层×12个+15」直接求值，可写回清单项
 • 报告：生成造价分析报告 Excel（汇总/占比/台账/异常）
-• 修改与导出：改单价/工程量、删除清单项，展示 Diff，导出或写回 Excel
+• 修改与导出：改单价/工程量、补录/删除清单项，展示 Diff，导出或写回 Excel
 直接说出目标即可，例如「检查相同项不同单价」「把询价写回清单」。`;
 
 export class RulePlanner implements Planner {
@@ -546,6 +546,10 @@ export class RulePlanner implements Planner {
     if (/单位.{0,4}(不一致|不符|不统一|不同|错)|量纲/.test(m))
       return {
         steps: [{ tool: "boq.findUnitInconsistencies", args: {}, activity: "正在查单位不一致" }],
+      };
+    if (/编码.{0,4}(格式|规范|非[标国]|缺位|位数)|非标编码|自编(码|编码)|编码.{0,8}\d+位|编码.{0,4}(是|有)(几|多少)位/.test(m))
+      return {
+        steps: [{ tool: "boq.findInvalidCodes", args: {}, activity: "正在查非标编码" }],
       };
     if (/编码.{0,4}(重复|错用|不一致|不同|错|唯一)|一码多/.test(m))
       return {

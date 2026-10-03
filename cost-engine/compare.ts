@@ -249,6 +249,25 @@ export function findCodeNameMismatch(items: BoqItemDTO[]): AnomalyRow[] {
   return rows;
 }
 
+/**
+ * 编码格式校验：GB50500 清单项目编码应为 12 位数字（附录 9 位 + 顺序码 3 位）。
+ * 非空但非 12 位纯数字的编码（自编补码、缺位、混入字母）单列提示——
+ * 对审/评标按编码对量时非标编码对不上，应人工确认是否为约定补码。
+ */
+export function findInvalidCodes(items: BoqItemDTO[]): AnomalyRow[] {
+  const bad = items.filter(
+    (it) => !it.isHeader && it.name.trim() && it.code.trim() && !/^\d{12}$/.test(it.code.trim().replace(/\s+/g, ""))
+  );
+  if (!bad.length) return [];
+  return [{
+    groupKey: "INVALID_CODE",
+    label: "非标编码",
+    items: bad.map(toRowItem),
+    prices: [...new Set(bad.map((g) => decStr(D(g.unitPrice))))],
+    reason: `${bad.length} 项编码非 12 位国标数字编码（GB50500 应为 附录9位+顺序码3位），疑似自编/错录，对审按编码对量时会漏配`,
+  }];
+}
+
 /** 重复项: code+name+unit identical AND semantic features identical. */
 export function findDuplicateItems(items: BoqItemDTO[]): AnomalyRow[] {
   const rows: AnomalyRow[] = [];

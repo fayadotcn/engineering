@@ -24,6 +24,7 @@ const TOOL_LABEL: Record<string, string> = {
   "boq.findArithmeticMismatches": "合价算术校验",
   "boq.findUnitInconsistencies": "查单位不一致",
   "boq.findCodeNameMismatch": "查一码多名",
+  "boq.findInvalidCodes": "查非标编码",
   "boq.findFeatureMismatch": "比对项目特征",
   "boq.compareFiles": "两版清单对审",
   "boq.addItem": "补录清单行",

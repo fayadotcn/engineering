@@ -170,3 +170,25 @@ describe("findCodeNameMismatch（一码多名）", () => {
     expect(findCodeNameMismatch(items).length).toBe(0);
   });
 });
+
+describe("findInvalidCodes（非标编码）", () => {
+  it("非 12 位数字编码被标出（自编补码/缺位）", async () => {
+    const { findInvalidCodes } = await import("@cost-engine/compare");
+    const items = [
+      item("镀锌钢管", "DN100", "m", "10", "85", "031001001001"),
+      item("临时支吊架", "", "项", "1", "500", "补-001"),
+      item("灭火器", "MF/ABC4", "具", "20", "85", "030901"),          // 缺位
+      item("配电箱", "", "台", "2", "8500", ""),                     // 空编码不报（手工补录行常见）
+    ];
+    const rows = findInvalidCodes(items);
+    expect(rows.length).toBe(1);
+    expect(rows[0].items.length).toBe(2);
+    expect(rows[0].reason).toContain("12 位");
+  });
+
+  it("全 12 位编码不报", async () => {
+    const { findInvalidCodes } = await import("@cost-engine/compare");
+    const items = [item("镀锌钢管", "DN100", "m", "10", "85", "031001001001")];
+    expect(findInvalidCodes(items).length).toBe(0);
+  });
+});
