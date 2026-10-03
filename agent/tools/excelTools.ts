@@ -374,6 +374,7 @@ registerTool({
     const suppliedRows = ownerFiles.size
       ? (await listQuotations(ctx.projectId)).filter((q) => q.fileId && ownerFiles.has(q.fileId))
       : [];
+    const ownerConflicts: string[] = [];
     if (suppliedRows.length) {
       // 逐行核对：甲供材对应的清单项若已计主材暂估价 = 重复计价（甲供材不计入承包价）
       const { matchQuotations } = await import("@cost-engine/match");
@@ -382,6 +383,10 @@ registerTool({
       const checkRows = matchQuotations(items, suppliedRows).rows.map((r) => {
         const hits = r.matchedBoqItemIds.map((id) => byItem.get(id)).filter((it): it is typeof items[number] => !!it && isPricableItem(it));
         const priced = hits.filter((it) => D(it.mainMaterialPrice ?? "0").gt(0));
+        if (priced.length)
+          ownerConflicts.push(
+            `甲供材「${r.materialName}${r.spec ? ` ${r.spec}` : ""}」对应 ${priced.length} 项已计主材价：${priced.map((it) => `${it.name}@${it.mainMaterialPrice}`).join("；")}`
+          );
         return {
           status: !hits.length
             ? (r.status === "LOW_CONFIDENCE" ? "疑似相关·低置信" : "未命中清单")
@@ -427,6 +432,7 @@ registerTool({
     const ceilingNum = ceilingFact ? parseAmountValue(ceilingFact.value) : null;
     for (const i of feeCompliance(items, feeParams, { ceiling: ceilingNum !== null ? D(ceilingNum) : null, summary: fee }))
       s5.addRow([i.level === "error" ? "符合性错误" : "符合性提示", i.label, i.detail]);
+    for (const c of ownerConflicts) s5.addRow(["甲供材重复计价", "甲供材表", c]);
 
     for (const s of wb.worksheets) s.columns.forEach((c) => { if (!c.width) c.width = 22; });
 

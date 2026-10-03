@@ -186,6 +186,11 @@ describe("report.generate 甲供材表", () => {
     sO!.eachRow((row) => cells.push(String((row.values as unknown[]).slice(1).join("|"))));
     expect(cells.some((c) => c.includes("重复计价"))).toBe(true);
     expect(String((r.views?.[0] as { summary?: string } | undefined)?.summary)).toContain("甲供材表");
+    // 异常摘要同样留痕
+    const sA = wb.getWorksheet("异常摘要");
+    const aCells: string[] = [];
+    sA!.eachRow((row) => aCells.push(String((row.values as unknown[]).slice(1).join("|"))));
+    expect(aCells.some((c) => c.includes("甲供材重复计价") && c.includes("镀锌钢管"))).toBe(true);
   });
   it("甲供材行未命中清单 → 标「未命中清单」", async () => {
     mocks.items.mockResolvedValue([item({ name: "镀锌钢管" })]);
