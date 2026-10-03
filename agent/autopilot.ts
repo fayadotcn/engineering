@@ -60,6 +60,10 @@ export function autopilotPlan(ctx: RunContext): Plan {
         ? { tool: "cost.measureFees", args: {}, activity: "按川标系数计取措施费" }
         : null,
     { tool: "cost.feeSummary", args: {}, activity: "汇总费用与税金" },
+    // 收尾勾稽：项目里有甲供材表时自动核对——发包人供货又计主材价 = 重复计价红旗
+    ...(ctx.files.some((f) => f.kind === "OWNER_SUPPLIED")
+      ? [{ tool: "material.checkOwnerSupplied", args: {}, activity: "核对甲供材是否被重复计价" }]
+      : []),
   ];
 
   return {

@@ -194,3 +194,19 @@ describe("总价反算路由", () => {
     expect(p2.fallbackMessage).toContain("9%");
   });
 });
+
+describe("autopilot 甲供材收尾", () => {
+  it("有 OWNER_SUPPLIED 文件时管线尾部追加甲供材核对", async () => {
+    const c = ctx([{ key: "管理费率", value: "5%" }, { key: "利润率", value: "3%" }]);
+    c.files = [{ id: "f1", filename: "甲供材表.xlsx", kind: "OWNER_SUPPLIED", status: "PARSED" }];
+    const plan = await new RulePlanner().plan(c, "一键报价", { autopilot: true });
+    const seq = await toolSeq(plan.steps, Array(9).fill({ matched: 1 }));
+    expect(seq.at(-1)).toBe("material.checkOwnerSupplied");
+  });
+  it("无甲供材文件 → 不追加", async () => {
+    const plan = await new RulePlanner().plan(ctx([{ key: "管理费率", value: "5%" }, { key: "利润率", value: "3%" }]), "一键报价", { autopilot: true });
+    const seq = await toolSeq(plan.steps, Array(9).fill({ matched: 1 }));
+    expect(seq).not.toContain("material.checkOwnerSupplied");
+    expect(seq.at(-1)).toBe("cost.feeSummary");
+  });
+});
