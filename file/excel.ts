@@ -912,6 +912,37 @@ export async function writeBackPrices(
     bySheet.set(p.sheetName, arr);
   });
 
+  // 单元格原值文本化（公式取计算结果）——写回留痕用
+  const cellText = (v: ExcelJS.CellValue): string => {
+    if (v === null || v === undefined) return "";
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (typeof v === "object") {
+      const o = v as { text?: string; result?: unknown; richText?: { text: string }[] };
+      if (o.richText) return o.richText.map((t) => t.text).join("");
+      if (o.result !== undefined) return String(o.result);
+      if (o.text !== undefined) return String(o.text);
+      return String(v);
+    }
+    return String(v);
+  };
+  // 原值与新值不同才留痕批注（填空格也记「空→新值」）；同值覆写不打扰。
+  // 已有批注（复核签名/上次写回记录）保留在前面——批注就是审计轨迹。
+  const write = (cell: ExcelJS.Cell, val: number, extra?: string) => {
+    const old = cellText(cell.value);
+    const changed = old === "" || !Number.isFinite(Number(old)) || Number(old) !== val;
+    if (changed) {
+      const prev = typeof cell.note === "string" ? cell.note
+        : (cell.note as { texts?: { text: string }[] } | undefined)?.texts?.map((t) => t.text).join("") ?? "";
+      const lines = [
+        ...(prev ? [prev] : []),
+        `造价工具写回：${old === "" ? "（空）" : old} → ${val}`,
+        ...(extra ? [extra] : []),
+      ];
+      cell.note = lines.join("\n");
+    }
+    cell.value = val;
+  };
+
   for (const [sheetName, ps] of bySheet) {
     const ws = wb.getWorksheet(sheetName);
     if (!ws) throw new Error(`源文件中找不到工作表「${sheetName}」，无法写回`);
@@ -921,15 +952,14 @@ export async function writeBackPrices(
     for (const p of ps) {
       const row = ws.getRow(p.rowIndex);
       if (p.unitPrice !== undefined && (p.priceCol ?? cols.unitPrice) !== undefined) {
-        row.getCell((p.priceCol ?? cols.unitPrice)! + 1).value = Number(p.unitPrice);
+        write(row.getCell((p.priceCol ?? cols.unitPrice)! + 1), Number(p.unitPrice));
       }
       if (p.quantity !== undefined && (p.qtyCol ?? cols.quantity) !== undefined) {
-        const cell = row.getCell((p.qtyCol ?? cols.quantity)! + 1);
-        cell.value = Number(p.quantity);
-        if (p.quantityExpr) cell.note = `工程量计算式：${p.quantityExpr}`;
+        write(row.getCell((p.qtyCol ?? cols.quantity)! + 1), Number(p.quantity),
+          p.quantityExpr ? `工程量计算式：${p.quantityExpr}` : undefined);
       }
       if (p.totalPrice !== undefined && (p.totalCol ?? cols.totalPrice) !== undefined) {
-        row.getCell((p.totalCol ?? cols.totalPrice)! + 1).value = Number(p.totalPrice);
+        write(row.getCell((p.totalCol ?? cols.totalPrice)! + 1), Number(p.totalPrice));
       }
       row.commit();
     }
