@@ -59,16 +59,18 @@ export function BatchAdjustDialog({ adjRows, saving, adjForm, setAdjForm, onClos
           />
         </label>
         {adjForm.mode === "percent" && adjForm.value.trim() && Number.isFinite(Number(adjForm.value)) && (
-          <p className="text-[11.5px] text-neutral-400">
-            即 {ADJ_FIELD[adjForm.field]} ×{(1 + Number(adjForm.value) / 100).toFixed(4)}
-            {adjRows?.length ? `，以首行「${adjRows[0].name}」为例：${fmtMoney(Number(adjRows[0][adjForm.field]))} → ${fmtMoney(Number(adjRows[0][adjForm.field]) * (1 + Number(adjForm.value) / 100))} 元` : ""}
-          </p>
+          Number(adjForm.value) <= -100
+            ? <p className="text-[11.5px] text-[var(--danger)]">下浮不能超过 100%（会得到负值）</p>
+            : <p className="text-[11.5px] text-neutral-400">
+                即 {ADJ_FIELD[adjForm.field]} ×{(1 + Number(adjForm.value) / 100).toFixed(4)}
+                {adjRows?.length ? `，以首行「${adjRows[0].name}」为例：${fmtMoney(Number(adjRows[0][adjForm.field]))} → ${fmtMoney(Number(adjRows[0][adjForm.field]) * (1 + Number(adjForm.value) / 100))} 元` : ""}
+              </p>
         )}
         <div className="dlg-actions">
           <button type="button" className="cost-btn" disabled={saving} onClick={() => onClose()}>取消</button>
           <button
             type="submit"
-            disabled={saving || !adjForm.value.trim() || !Number.isFinite(Number(adjForm.value))}
+            disabled={saving || !adjForm.value.trim() || !Number.isFinite(Number(adjForm.value)) || (adjForm.mode === "percent" && Number(adjForm.value) <= -100)}
             className="cost-btn primary"
           >
             {saving ? "应用中…" : `应用到 ${adjRows?.length ?? 0} 行`}
