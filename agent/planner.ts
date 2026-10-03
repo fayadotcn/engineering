@@ -491,6 +491,28 @@ export class RulePlanner implements Planner {
       return { steps };
     }
 
+    // 主材暂估价设值：「电缆主材暂估价设为45元」「桥架主材价统一为32」——写 mainMaterialPrice 不动综合单价
+    const mainPriceM = m.match(/(?:暂估价|主材价)/) && m.match(/(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)/);
+    if (mainPriceM) {
+      const scope = m.match(/([一-龥A-Za-z]{2,12}?)(?:的)?(?:暂估价|主材价)/)?.[1]
+        ?.replace(/^(把|将|对|请|所有|全部|整个|统一|清单项?|各项|项目)+/, "") ?? "";
+      const v = Number(mainPriceM[1].replace(/,/g, ""));
+      if (!Number.isFinite(v) || v < 0) return { steps: [], fallbackMessage: "主材暂估价必须是非负数值" };
+      const compute = async (): Promise<PlanStep | null> => {
+        const { listBoq } = await import("@boq/service");
+        const { isPricableItem } = await import("@shared/types");
+        const items = (await listBoq(ctx.projectId)).filter((i) => !i.isHeader && i.name.trim() && isPricableItem(i));
+        const pool = scopeFilter(items, scope);
+        if (!pool.length) return null;
+        return {
+          tool: "boq.update",
+          args: { patches: pool.map((i) => ({ id: i.id, mainMaterialPrice: v.toFixed(2) })), reason: `主材暂估价设为 ${v.toFixed(2)}${scope ? `（范围：${scope}）` : ""}` },
+          activity: "正在写回主材暂估价",
+        };
+      };
+      return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的可计价清单项` : "没有可写主材价的清单项" };
+    }
+
     // 改价/统一单价: 「电缆单价改为5元」（范围+指定值）、「相同项统一为最低价/均价」
     if (/统一|改为|调成|调整为|调到|调为|设为/.test(m) && /单价|价格|综合单价/.test(m)) {
       const setM = m.match(/(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)/);

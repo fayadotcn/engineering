@@ -327,3 +327,19 @@ describe("编码修正路由", () => {
     expect(s?.tool).toBe("boq.findInvalidCodes");
   });
 });
+
+describe("主材暂估价设值路由", () => {
+  it("「电缆主材暂估价设为45」→ boq.update 写 mainMaterialPrice 不动综合单价", async () => {
+    const p = await plan("电力电缆的主材暂估价设为45");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    expect(s?.args.patches).toEqual([{ id: "i1", mainMaterialPrice: "45.00" }]);
+  });
+
+  it("「把电缆单价改为5元」仍走 unitPrice 不被截胡", async () => {
+    const p = await plan("电力电缆单价改为5元");
+    const s = await resolve(p.steps[p.steps.length - 1]);
+    expect(s?.tool).toBe("boq.update");
+    expect((s?.args.patches as { unitPrice?: string }[] | undefined)?.[0]?.unitPrice).toBe("5.00");
+  });
+});
