@@ -39,19 +39,31 @@ export async function setFact(
   }
 ): Promise<CostFactDTO> {
   validatePricingFact(input.key, input.value);
-  const row = await prisma.costFact.create({
-    data: {
-      projectId,
-      factType: pricingFactType(input.key) ?? input.factType,
-      key: input.key,
-      // 价格期归一化落库：「2024年6月」「2024.6」→「2024-06」，季度→「2024-Q2」，期次排序/偏好匹配才有统一口径
-      value: input.key === "价格期" ? normalizePeriod(input.value) : input.value,
-      source: input.source,
-      sourceFileId: input.sourceFileId,
-      confidence: input.confidence ?? (input.source === "INFERRED" ? 0.6 : 1),
-      createdBy: input.createdBy ?? "agent",
-      agentRunId: input.agentRunId,
-    },
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.costFact.create({
+      data: {
+        projectId,
+        factType: pricingFactType(input.key) ?? input.factType,
+        key: input.key,
+        // 价格期归一化落库：「2024年6月」「2024.6」→「2024-06」，季度→「2024-Q2」，期次排序/偏好匹配才有统一口径
+        value: input.key === "价格期" ? normalizePeriod(input.value) : input.value,
+        source: input.source,
+        sourceFileId: input.sourceFileId,
+        confidence: input.confidence ?? (input.source === "INFERRED" ? 0.6 : 1),
+        createdBy: input.createdBy ?? "agent",
+        agentRunId: input.agentRunId,
+      },
+    });
+    // 台账历史封顶：同项目只保留最近 300 条（审计链足够长），防重导/循环写入无限膨胀
+    const stale = await tx.costFact.findMany({
+      where: { projectId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: 300,
+      select: { id: true },
+    });
+    if (stale.length)
+      await tx.costFact.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
+    return created;
   });
   return toFactDTO(row);
 }

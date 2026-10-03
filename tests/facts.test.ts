@@ -1,5 +1,32 @@
-import { describe, expect, it } from "vitest";
-import { parseRateValue, parseAmountValue, parseAreaValue, validatePricingFact } from "../project/facts";
+import { describe, expect, it, vi } from "vitest";
+import { parseRateValue, parseAmountValue, parseAreaValue, validatePricingFact, setFact } from "../project/facts";
+
+// setFact 封顶测试：mock costFact 表，验证超过 300 条时剪掉最旧行
+const db = vi.hoisted(() => ({ rows: [] as { id: string; projectId: string; createdAt: Date }[], seq: 0 }));
+vi.mock("@database/client", () => ({
+  prisma: {
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({
+      costFact: {
+        create: vi.fn(async ({ data }: { data: { projectId: string } }) => {
+          const r = { id: `f${++db.seq}`, ...data, createdAt: new Date(db.seq) };
+          db.rows.push(r as never);
+          return r;
+        }),
+        findMany: vi.fn(async (q: { where: { projectId: string }; skip?: number; select?: unknown }) => {
+          const rows = db.rows.filter((r) => r.projectId === q.where.projectId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (b.id < a.id ? -1 : 1));
+          return (q.skip ? rows.slice(q.skip) : rows).map((r) => ({ id: r.id }));
+        }),
+        deleteMany: vi.fn(async (q: { where: { id: { in: string[] } } }) => {
+          const gone = new Set(q.where.id.in);
+          db.rows = db.rows.filter((r) => !gone.has(r.id));
+          return { count: gone.size };
+        }),
+      },
+    }),
+    costFact: {},
+  },
+}));
+vi.mock("@database/serialize", () => ({ toFactDTO: (r: unknown) => r }));
 
 describe("台账事实数值归一化", () => {
   it("parseRateValue：9% / 9 / 0.09 都归一为 0.09", () => {
@@ -38,5 +65,18 @@ describe("台账事实数值归一化", () => {
     expect(() => validatePricingFact("檐口高度", "25m")).not.toThrow();
     expect(() => validatePricingFact("操作物高度", "三层")).toThrow();
     expect(() => validatePricingFact("檐口高度", "-5")).toThrow();
+  });
+});
+
+describe("setFact 台账历史封顶", () => {
+  it("超过 300 条时剪掉最旧行，最新行保留", async () => {
+    db.rows = Array.from({ length: 299 }, (_, i) => ({ id: `old${i}`, projectId: "p1", createdAt: new Date(i) }));
+    db.seq = 999;
+    await setFact("p1", { factType: "RATE", key: "税率", value: "9%", source: "USER_PROVIDED" });
+    expect(db.rows.length).toBe(300); // 299 + 新行 = 300，未越界
+    await setFact("p1", { factType: "RATE", key: "税率", value: "10%", source: "USER_PROVIDED" });
+    expect(db.rows.length).toBe(300); // 301 → 剪掉最旧的 1 条
+    expect(db.rows.some((r) => r.id === "old0")).toBe(false); // 最旧被剪
+    expect(db.rows.some((r) => r.id === `f${db.seq}`)).toBe(true); // 最新保留
   });
 });
