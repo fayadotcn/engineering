@@ -83,5 +83,8 @@ describe("parseSemanticFeature", () => {
   it("infers discipline", () => {
     expect(inferDiscipline("室内消火栓钢管", "", "")).toBe("FIRE");
     expect(inferDiscipline("电力电缆", "", "电气设备安装工程")).toBe("ELECTRICAL");
+    // 燃气/采暖在川标 5H 给排水·采暖·燃气册，归 PLUMBING 不丢 OTHER
+    expect(inferDiscipline("燃气管道 DN50", "", "")).toBe("PLUMBING");
+    expect(inferDiscipline("散热器", "", "采暖工程")).toBe("PLUMBING");
   });
 });

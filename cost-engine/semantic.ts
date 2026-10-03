@@ -194,7 +194,7 @@ export function inferDiscipline(
 ): Discipline {
   const text = norm(`${sectionPath} ${name} ${rawFeature}`);
   if (/消火栓|喷淋|消防|火灾报警|灭火/.test(text)) return "FIRE";
-  if (/给排水|给水|排水|污水|雨水|废水|中水/.test(text)) return "PLUMBING";
+  if (/给排水|给水|排水|污水|雨水|废水|中水|燃气|煤气|采暖|供暖|地暖/.test(text)) return "PLUMBING";
   if (/暖通|空调|通风|防排烟|风管|风机/.test(text)) return "HVAC";
   if (/弱电|智能化|安防|监控|网络|广播|综合布线/.test(text)) return "WEAK_CURRENT";
   if (/电气|强电|照明|动力|配电|防雷|接地|电缆|电线|桥架|母线|灯具|插座/.test(text))

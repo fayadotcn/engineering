@@ -19,6 +19,8 @@ export function evalExpr(src: string): number {
   if (!/^[\d+\-*/().%]+$/.test(cleaned)) throw new Error(`无法识别的表达式片段`);
 
   let i = 0;
+  let depth = 0; // 括号嵌套深度上限：超长算式抛明确错误而不是栈溢出
+  const MAX_DEPTH = 200;
   const peek = () => cleaned[i];
   const eat = (ch?: string) => {
     if (ch !== undefined && cleaned[i] !== ch) throw new Error(`期望 ${ch}，遇到 ${cleaned[i] ?? "结尾"}`);
@@ -43,7 +45,10 @@ export function evalExpr(src: string): number {
     if (peek() === "-") { eat("-"); return -factor(); }
     if (peek() === "+") { eat("+"); return factor(); }
     let v: number;
-    if (peek() === "(") { eat("("); v = expr(); eat(")"); }
+    if (peek() === "(") {
+      if (++depth > MAX_DEPTH) throw new Error("括号嵌套过深");
+      eat("("); v = expr(); eat(")"); depth--;
+    }
     else {
       const m = /^[\d.]+/.exec(cleaned.slice(i));
       if (!m) throw new Error(`位置 ${i} 处期望数字`);

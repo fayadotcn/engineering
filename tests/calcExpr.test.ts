@@ -26,4 +26,8 @@ describe("evalExpr", () => {
     expect(() => evalExpr(".")).toThrow();
     expect(evalExpr("1.5+2")).toBe(3.5);
   });
+  it("深括号嵌套抛明确错误而非栈溢出", () => {
+    expect(() => evalExpr("(".repeat(500) + "1" + ")".repeat(500))).toThrow("嵌套过深");
+    expect(evalExpr("((2+3)×4)")).toBe(20);
+  });
 });
