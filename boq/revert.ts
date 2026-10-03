@@ -71,24 +71,26 @@ export async function revertReceipt(id: string, opts: { createdBy?: string } = {
       : []
   );
   const orphanCount = recreate.filter((r) => r.fileId && !liveFileIds.has(r.fileId as string)).length;
-  const result = patches.length ? await updateBoqItems(receipt.projectId, patches) : { before: [] as never[], after: [] as never[] };
-  const txResult = await prisma.$transaction([
-    ...(recreate.length
-      ? [prisma.boqItem.createMany({
-          data: recreate.map((r) => {
-            const { createdAt: _c, updatedAt: _u, ...row } = r as Record<string, unknown> & { createdAt?: unknown; updatedAt?: unknown };
-            if (typeof row.fileId === "string" && row.fileId && !liveFileIds.has(row.fileId)) row.fileId = null;
-            return row as Prisma.BoqItemCreateManyInput;
-          }),
-        })]
-      : []),
-    ...(removeIds.length ? [prisma.boqItem.deleteMany({ where: { projectId: receipt.projectId, id: { in: removeIds } } })] : []),
+  // 原子化：字段还原 + 重建 + 移除 + 回执必须在同一事务——分两段提交时
+  // 第二段失败会留下「补丁已生效、原回执仍可撤销」的死锁状态（重试必撞 409）
+  const { result, revert } = await prisma.$transaction(async (tx) => {
+    const result = patches.length ? await updateBoqItems(receipt.projectId, patches, tx) : { before: [] as never[], after: [] as never[] };
+    if (recreate.length)
+      await tx.boqItem.createMany({
+        data: recreate.map((r) => {
+          const { createdAt: _c, updatedAt: _u, ...row } = r as Record<string, unknown> & { createdAt?: unknown; updatedAt?: unknown };
+          if (typeof row.fileId === "string" && row.fileId && !liveFileIds.has(row.fileId)) row.fileId = null;
+          return row as Prisma.BoqItemCreateManyInput;
+        }),
+      });
+    if (removeIds.length)
+      await tx.boqItem.deleteMany({ where: { projectId: receipt.projectId, id: { in: removeIds } } });
     // toolCallId 复用为「指向被撤销回执」的链接，面板据此把原记录标为已撤销；
     // after 并入重建的行：该回执的 affectedIds 也能指到撤销恢复出来的行
-    prisma.actionReceipt.create({ data: { projectId: receipt.projectId, actionType: "REVERT", summary: `撤销：${receipt.summary}${orphanCount ? `（${orphanCount} 行源文件已删，恢复为无源文件行）` : ""}`, before: toJson(result.before), after: toJson([...result.after, ...recreate]), reversible: false, createdBy: opts.createdBy ?? "user", toolCallId: id } }),
-    prisma.actionReceipt.update({ where: { id }, data: { reversible: false } }),
-  ]);
-  const revert = txResult[txResult.length - 2] as { id: string };
+    const revert = await tx.actionReceipt.create({ data: { projectId: receipt.projectId, actionType: "REVERT", summary: `撤销：${receipt.summary}${orphanCount ? `（${orphanCount} 行源文件已删，恢复为无源文件行）` : ""}`, before: toJson(result.before), after: toJson([...result.after, ...recreate]), reversible: false, createdBy: opts.createdBy ?? "user", toolCallId: id } });
+    await tx.actionReceipt.update({ where: { id }, data: { reversible: false } });
+    return { result, revert };
+  });
   // 受影响行 id 回给前端：撤销落地的行短暂高亮，用户能看清数据回到了哪里；
   // restored/removedIds 让前端立即合并行数据，不必等后台整表刷新才看到撤销结果
   const affectedIds = [...patches.map((p) => p.id), ...recreate.map((r) => r.id)];

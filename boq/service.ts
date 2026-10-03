@@ -129,10 +129,12 @@ export interface BoqPatch {
 
 export async function updateBoqItems(
   projectId: string,
-  patches: { id: string; patch: BoqPatch }[]
+  patches: { id: string; patch: BoqPatch }[],
+  tx?: Prisma.TransactionClient
 ): Promise<{ before: BoqItemDTO[]; after: BoqItemDTO[] }> {
+  const db = tx ?? prisma;
   const ids = patches.map((p) => p.id);
-  const existing = await prisma.boqItem.findMany({
+  const existing = await db.boqItem.findMany({
     where: { projectId, id: { in: ids } },
   });
   const before = existing.map(toBoqDTO);
@@ -174,7 +176,7 @@ export async function updateBoqItems(
             )
           )
         : cur.features;
-    updates.push(prisma.boqItem.update({
+    updates.push(db.boqItem.update({
       where: { id },
       data: {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
@@ -221,8 +223,11 @@ export async function updateBoqItems(
       },
     }));
   }
-  await prisma.$transaction(updates);
-  const after = (await prisma.boqItem.findMany({ where: { projectId, id: { in: ids } } })).map(
+  // 传入 tx 时处于外层交互事务内——直接逐个执行（已在同一事务语境），
+  // 否则独立成事务保证多行更新同生共死
+  if (tx) await Promise.all(updates);
+  else await prisma.$transaction(updates);
+  const after = (await db.boqItem.findMany({ where: { projectId, id: { in: ids } } })).map(
     toBoqDTO
   );
   return { before, after };

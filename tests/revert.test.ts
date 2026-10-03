@@ -10,8 +10,8 @@ const db = vi.hoisted(() => ({
   updateCalls: [] as { id: string; patch: Record<string, unknown> }[],
 }));
 
-vi.mock("@database/client", () => ({
-  prisma: {
+vi.mock("@database/client", () => {
+  const client = {
     actionReceipt: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
         db.receipts.find((r) => r.id === where.id) ?? null),
@@ -26,6 +26,11 @@ vi.mock("@database/client", () => ({
     },
     boqItem: {
       findMany: vi.fn(async () => db.items),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        const i = db.items.findIndex((x) => x.id === where.id);
+        if (i >= 0) db.items[i] = { ...db.items[i], ...data };
+        return db.items[i];
+      }),
       createMany: vi.fn(async ({ data }: { data: Record<string, unknown>[] }) => {
         db.items.push(...data);
         return { count: data.length };
@@ -36,9 +41,14 @@ vi.mock("@database/client", () => ({
         return { count: gone.size };
       }),
     },
-    $transaction: async (ops: unknown[]) => Promise.all(ops as Promise<unknown>[]),
-  },
-}));
+    // 数组形态与交互事务形态都支持；交互事务的 tx 就是同一 mock client
+    $transaction: async (arg: unknown) =>
+      typeof arg === "function"
+        ? (arg as (tx: unknown) => Promise<unknown>)(client)
+        : Promise.all(arg as Promise<unknown>[]),
+  };
+  return { prisma: client };
+});
 
 vi.mock("@boq/service", async () => {
   const orig = await vi.importActual<typeof import("@boq/service")>("@boq/service");
