@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
-import { D, decStr, maxD, median, minD } from "./money";
+import { D, decStr, lineTotal, maxD, median, minD } from "./money";
 import { featureCompatible, groupKey } from "./semantic";
-import type { AnomalyRow, BoqItemDTO } from "@shared/types";
+import { isPricableItem, type AnomalyRow, type BoqItemDTO } from "@shared/types";
 
 // Candidate Grouping -> Feature Comparison -> Price Comparison.
 // Never plain string matching.
@@ -153,6 +153,42 @@ export function findFeatureMismatch(items: BoqItemDTO[]): AnomalyRow[] {
     });
   }
   return rows;
+}
+
+/**
+ * 算术校验（清标第一查）：可计价行的「合价」应等于 工程量×综合单价。
+ * 导入时源表合价按原值保留（可能是暂估/让利率后的数），与量×价不符说明
+ * 源表公式断链、改量忘改价或抄写错误——清标时必须逐条曝光。
+ * 容差取 max(0.02 元, 期望值的 0.1%)：分分钱舍入噪声不报。
+ */
+export function findArithmeticMismatches(
+  items: BoqItemDTO[],
+  opts: { relTol?: number; absTol?: number } = {}
+): AnomalyRow[] {
+  const rel = D(opts.relTol ?? 0.001);
+  const abs = D(opts.absTol ?? 0.02);
+  const bad: { it: BoqItemDTO; expected: Decimal; diff: Decimal }[] = [];
+  for (const it of items) {
+    if (!isPricableItem(it)) continue;
+    const qty = D(it.quantity), price = D(it.unitPrice);
+    if (qty.isZero() || price.isZero()) continue; // 未报价/零量行不是算术错误
+    const expected = lineTotal(qty, price);
+    const diff = D(it.totalPrice).minus(expected);
+    if (diff.abs().gt(Decimal.max(abs, expected.abs().mul(rel))))
+      bad.push({ it, expected, diff });
+  }
+  if (!bad.length) return [];
+  const totalDiff = bad.reduce((a, x) => a.plus(x.diff.abs()), D(0));
+  return [
+    {
+      groupKey: "ARITHMETIC",
+      label: `合价≠量×价（${bad.length} 项）`,
+      items: bad.map((x) => toRowItem(x.it)),
+      prices: bad.map((x) => decStr(x.expected)),
+      spread: totalDiff.toString(),
+      reason: `源表合价与「工程量×综合单价」不符，差异合计 ${totalDiff.toFixed(2)} 元——疑似源表公式断链、改量忘改价或抄写错误，请核对原始 Excel`,
+    },
+  ];
 }
 
 /** 重复项: code+name+unit identical AND semantic features identical. */

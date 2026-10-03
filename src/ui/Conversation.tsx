@@ -21,6 +21,7 @@ const TOOL_LABEL: Record<string, string> = {
   "boq.findSameItemDifferentPrice": "查相同项不同单价",
   "boq.findPriceAnomalies": "查单价异常",
   "boq.findDuplicateItems": "查重复清单项",
+  "boq.findArithmeticMismatches": "合价算术校验",
   "boq.findFeatureMismatch": "比对项目特征",
   "boq.compareFiles": "两版清单对审",
   "material.matchLibrary": "匹配材料库价格",

@@ -52,13 +52,13 @@ describe("report.generate 主要材料表与单方造价", () => {
     mocks.items.mockResolvedValue([
       item({
         pricingPlan: [
-          { quotaCode: "5A0001", quotaName: "钢管安装", quantity: 1, labor: 10, materialAux: 2, machine: 1, mainMaterialName: "镀锌钢管", mainQty: 1.02, mainPrice: 50, suggested: false },
-          { quotaCode: "5A0002", quotaName: "套管", quantity: 1, labor: 5, materialAux: 1, machine: 0, mainMaterialName: "建议项不算", mainQty: 1, mainPrice: 99, suggested: true },
+          { quotaCode: "5A0001", quotaName: "钢管安装", labor: "10", materialAux: "2", machine: "1", fee: "3", subtotal: "67.04", mainMaterialName: "镀锌钢管", mainQty: "1.02", mainPrice: "50", suggested: false },
+          { quotaCode: "5A0002", quotaName: "套管", labor: "5", materialAux: "1", machine: "0", fee: "1", subtotal: "106", mainMaterialName: "建议项不算", mainQty: "1", mainPrice: "99", suggested: true },
         ],
       }),
       item({
         id: "i2", name: "阀门", quantity: "4", totalPrice: "400", unitPrice: "100",
-        pricingPlan: [{ quotaCode: "5A0003", quotaName: "阀门安装", quantity: 1, labor: 8, materialAux: 1, machine: 0, mainMaterialName: "闸阀", mainQty: 1, mainPrice: 80, suggested: false }],
+        pricingPlan: [{ quotaCode: "5A0003", quotaName: "阀门安装", labor: "8", materialAux: "1", machine: "0", fee: "2", subtotal: "91", mainMaterialName: "闸阀", mainQty: "1", mainPrice: "80", suggested: false }],
       }),
     ]);
     const r = await getTool("report.generate")!.handler!(ctx, {});
@@ -74,7 +74,7 @@ describe("report.generate 主要材料表与单方造价", () => {
     expect(rows[1][7]).toBe("定额组价");
     expect(rows[2][1]).toBe("闸阀");
     expect(rows.some((x) => x.includes("建议项不算"))).toBe(false);
-    expect(r.views?.[0] && String(r.views[0].summary)).toContain("主要材料表");
+    expect(String((r.views?.[0] as { summary?: string } | undefined)?.summary)).toContain("主要材料表");
   });
 
   it("无主材价的组价方案退回主材暂估价口径", async () => {
@@ -121,7 +121,7 @@ describe("report.generate 主要材料表与单方造价", () => {
   it("清单为空 → 不生成报告", async () => {
     mocks.items.mockResolvedValue([]);
     const r = await getTool("report.generate")!.handler!(ctx, {});
-    expect(r.observation.error).toContain("清单为空");
+    expect((r.observation as { error?: string }).error).toContain("清单为空");
     expect(mocks.put).not.toHaveBeenCalled();
   });
 });

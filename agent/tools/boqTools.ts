@@ -2,6 +2,7 @@ import { z } from "zod";
 import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import {
+  findArithmeticMismatches,
   findDuplicateItems,
   findFeatureMismatch,
   findPriceAnomalies,
@@ -15,6 +16,7 @@ const ANOMALY_LABEL: Record<string, string> = {
   PRICE_ANOMALY: "综合单价异常",
   FEATURE_MISMATCH: "项目特征不一致",
   DUPLICATE: "重复清单项",
+  ARITHMETIC: "合价算术校验",
 };
 
 function anomalyView(anomalyType: string, rows: AnomalyRow[]): WorkspaceView {
@@ -164,8 +166,25 @@ registerTool({
 });
 
 registerTool({
+  name: "boq.findArithmeticMismatches",
+  description: "清标算术校验：检查可计价行的合价是否等于 工程量×综合单价，不符说明源表算错或公式断链",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const rows = findArithmeticMismatches(items);
+    const n = rows[0]?.items.length ?? 0;
+    return {
+      observation: { count: n, totalDiff: rows[0]?.spread ?? "0" },
+      views: [anomalyView("ARITHMETIC", rows)],
+      message: rows.length ? `发现 ${n} 项合价与量×价不符（差异合计 ${fmtMoney(rows[0].spread ?? 0)} 元）` : "合价算术校验通过",
+    };
+  },
+});
+
+registerTool({
   name: "boq.compare",
-  description: "对比清单：相同项不同价 + 单价异常 + 特征不一致（一次全查）",
+  description: "对比清单：相同项不同价 + 单价异常 + 特征不一致 + 合价算术校验（一次全查）",
   implemented: true,
   schema: z.object({}),
   handler: async (ctx) => {
@@ -173,15 +192,17 @@ registerTool({
     const a = findSameItemDifferentPrice(items);
     const b = findPriceAnomalies(items);
     const c = findFeatureMismatch(items);
-    const total = a.length + b.length + c.length;
+    const d = findArithmeticMismatches(items);
+    const arith = d[0]?.items.length ?? 0;
     return {
-      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length },
+      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith },
       views: [
         anomalyView("SAME_ITEM_DIFF_PRICE", a),
         anomalyView("PRICE_ANOMALY", b),
         anomalyView("FEATURE_MISMATCH", c),
+        anomalyView("ARITHMETIC", d),
       ],
-      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组`,
+      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项`,
     };
   },
 });

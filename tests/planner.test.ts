@@ -168,4 +168,13 @@ describe("类别词修饰造价/费用的范围化比例调整", () => {
     const s1 = await resolve(p.steps[1], [{ observation: { exclTax: "1000.00", inclTax: null } }]);
     expect(s1?.args.allowedItemIds).toBeUndefined();
   });
+
+  it.each(["校验量价合价", "检查合价是否算错", "做一下算术校验", "帮我清标"])(
+    "「%s」→ boq.findArithmeticMismatches",
+    async (text) => {
+      const p = await plan(text);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("boq.findArithmeticMismatches");
+    },
+  );
 });

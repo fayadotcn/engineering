@@ -13,6 +13,7 @@ const ANOMALY_BADGE: Record<string, string> = {
   PRICE_ANOMALY: "warn",
   FEATURE_MISMATCH: "info",
   DUPLICATE: "",
+  ARITHMETIC: "danger",
 };
 
 export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "anomalyTable" }> }) {

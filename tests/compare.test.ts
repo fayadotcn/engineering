@@ -75,3 +75,34 @@ describe("findFeatureMismatch", () => {
     expect(rows[0].reason).toContain("connectionMethod");
   });
 });
+
+describe("findArithmeticMismatches（清标算术校验）", () => {
+  it("flags 合价 ≠ 量×价 的可计价行，差额汇总进 spread", async () => {
+    const { findArithmeticMismatches } = await import("@cost-engine/compare");
+    const a = item("钢管", "DN100", "m", "10", "85");
+    a.totalPrice = "999.99"; // 源表合价错误：应 850
+    const b = item("阀门", "DN50", "个", "4", "100"); // 400 正确
+    const rows = findArithmeticMismatches([a, b]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].items.map((x) => x.id)).toEqual([a.id]);
+    expect(Number(rows[0].spread)).toBeCloseTo(149.99);
+  });
+
+  it("未报价/零量行与总额计价行不算算术错", async () => {
+    const { findArithmeticMismatches } = await import("@cost-engine/compare");
+    const unpriced = item("钢管", "DN100", "m", "10", "0");
+    unpriced.totalPrice = "123"; // 单价 0 的未报价行，合价原值保留不报
+    const lump = item("安全文明施工费", "", "项", "0", "0");
+    lump.feeType = "总价措施"; lump.totalPrice = "5000";
+    expect(findArithmeticMismatches([unpriced, lump])).toHaveLength(0);
+  });
+
+  it("分分钱舍入噪声不报（容差 0.02 元或 0.1%）", async () => {
+    const { findArithmeticMismatches } = await import("@cost-engine/compare");
+    const a = item("电缆", "YJV", "m", "3.333", "10.01");
+    a.totalPrice = "33.36"; // 量×价=33.363→33.36 容差内
+    const b = item("电缆", "YJV", "m", "10000", "0.33");
+    b.totalPrice = "3300.01"; // 差 0.01 < 0.02
+    expect(findArithmeticMismatches([a, b])).toHaveLength(0);
+  });
+});

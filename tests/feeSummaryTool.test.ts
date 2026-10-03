@@ -14,6 +14,8 @@ vi.mock("@project/facts", async (importOriginal) => {
 import "@agent/tools/costTools";
 
 const ctx: ToolContext = { projectId: "p1", runId: "r1", userId: "u", emit: vi.fn() };
+type Obs = { indicators?: { label: string; value: string }[]; grandTotal?: string; error?: string };
+const obs = (r: { observation: unknown }) => r.observation as Obs;
 const item = (patch: Partial<BoqItemDTO>): BoqItemDTO => ({
   id: "i1", projectId: "p1", fileId: "f1", sheetName: "清单", rowIndex: 2,
   code: "030001", name: "镀锌钢管", rawFeature: "DN100", unit: "m", quantity: "1000", unitPrice: "12000",
@@ -39,29 +41,29 @@ describe("cost.feeSummary 单方造价指标", () => {
     mocks.facts.mockResolvedValue([{ key: "建筑面积", value: "12000㎡", source: "USER_PROVIDED" }]);
     const r = await getTool("cost.feeSummary")!.handler!(ctx, {});
     // 税前 1200万 ÷ 12000㎡ = 1000 元/㎡；含税 1308万 ÷ 12000㎡ = 1090 元/㎡
-    expect(r.observation.indicators).toEqual([
+    expect(obs(r).indicators).toEqual([
       { label: "建筑面积", value: "12000 ㎡" },
       { label: "单方造价(含税)", value: "1090.00 元/㎡" },
       { label: "单方造价(税前)", value: "1000.00 元/㎡" },
     ]);
-    expect((r.views?.[0] as { indicators?: unknown }).indicators).toEqual(r.observation.indicators);
+    expect((r.views?.[0] as { indicators?: unknown }).indicators).toEqual(obs(r).indicators);
     expect(r.message).toContain("1090.00 元/㎡");
   });
 
   it("面积事实缺失或非法 → 不出指标", async () => {
     mocks.facts.mockResolvedValue([]);
     const r1 = await getTool("cost.feeSummary")!.handler!(ctx, {});
-    expect(r1.observation.indicators).toBeUndefined();
+    expect(obs(r1).indicators).toBeUndefined();
     expect(r1.message).not.toContain("元/㎡");
 
     mocks.facts.mockResolvedValue([{ key: "建筑面积", value: "待定", source: "USER_PROVIDED" }]);
     const r2 = await getTool("cost.feeSummary")!.handler!(ctx, {});
-    expect(r2.observation.indicators).toBeUndefined();
+    expect(obs(r2).indicators).toBeUndefined();
   });
 
   it("面积接受 万 口径（「1.2万平米」= 12000）", async () => {
     mocks.facts.mockResolvedValue([{ key: "建筑面积", value: "1.2万平米", source: "USER_PROVIDED" }]);
     const r = await getTool("cost.feeSummary")!.handler!(ctx, {});
-    expect(r.observation.indicators?.[1].value).toBe("1090.00 元/㎡");
+    expect(obs(r).indicators?.[1].value).toBe("1090.00 元/㎡");
   });
 });

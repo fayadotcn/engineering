@@ -206,7 +206,7 @@ export type WorkspaceView =
       kind: "anomalyTable";
       id: string;
       title: string;
-      anomalyType: "SAME_ITEM_DIFF_PRICE" | "PRICE_ANOMALY" | "FEATURE_MISMATCH" | "DUPLICATE";
+      anomalyType: "SAME_ITEM_DIFF_PRICE" | "PRICE_ANOMALY" | "FEATURE_MISMATCH" | "DUPLICATE" | "ARITHMETIC";
       rows: AnomalyRow[];
     }
   | {
