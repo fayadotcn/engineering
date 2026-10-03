@@ -170,29 +170,30 @@ export function compareDeclaredFees(
   unitsA: Record<string, unknown>[],
   unitsB: Record<string, unknown>[]
 ): DeclaredCompare {
+  // 金额口径同样走 Decimal——裸 float 累加会在多单位工程求和时积出分位噪声
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-  const sum = (units: Record<string, unknown>[], k: string) => units.reduce((a, u) => a + num(u[k]), 0);
+  const sum = (units: Record<string, unknown>[], k: string) => units.reduce((a, u) => a.plus(num(u[k])), D(0));
   const labels = DECLARED_LABELS.map((label) => {
     const a = sum(unitsA, label);
     const b = sum(unitsB, label);
-    return { label, a, b, diff: b - a };
+    return { label, a: a.toNumber(), b: b.toNumber(), diff: b.minus(a).toNumber() };
   }).filter((r) => r.a !== 0 || r.b !== 0);
 
-  const byName = new Map<string, { a?: number; b?: number }>();
+  const byName = new Map<string, { a?: ReturnType<typeof D>; b?: ReturnType<typeof D> }>();
   const put = (u: Record<string, unknown>, side: "a" | "b") => {
     const name = String(u.unit ?? u.name ?? "").trim();
     if (!name) return;
     const cur = byName.get(name) ?? {};
-    cur[side] = (cur[side] ?? 0) + num(u["合计"]);
+    cur[side] = (cur[side] ?? D(0)).plus(num(u["合计"]));
     byName.set(name, cur);
   };
   for (const u of unitsA) put(u, "a");
   for (const u of unitsB) put(u, "b");
   const units = [...byName.entries()].map(([name, v]) => {
-    const a = v.a ?? 0;
-    const b = v.b ?? 0;
+    const a = v.a ?? D(0);
+    const b = v.b ?? D(0);
     return {
-      name, a, b, diff: b - a,
+      name, a: a.toNumber(), b: b.toNumber(), diff: b.minus(a).toNumber(),
       side: v.a !== undefined && v.b !== undefined ? ("both" as const) : v.a !== undefined ? ("a" as const) : ("b" as const),
     };
   });
