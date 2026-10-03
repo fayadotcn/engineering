@@ -29,7 +29,7 @@ const item = (patch: Partial<BoqItemDTO>): BoqItemDTO => ({
 const fees = () => ({
   measureRate: new Decimal(0), regulationRate: new Decimal(0), provisionalRate: new Decimal(0),
   provisionalAmount: new Decimal(0), taxRate: new Decimal(0.09), addonRate: new Decimal(0),
-  laborBase: null, coeffMeasureFee: new Decimal(0),
+  laborBase: null, laborAdjustRate: new Decimal(0), coeffMeasureFee: new Decimal(0),
   set: { measure: false, regulation: false, provisional: false, tax: true },
 });
 const load = async (buffer: Buffer) => {

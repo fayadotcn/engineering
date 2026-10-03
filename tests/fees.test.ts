@@ -18,7 +18,7 @@ const item = (totalPrice: string, unitPrice = "1", feeType: BoqItemDTO["feeType"
 
 const params = (o: Partial<Parameters<typeof feeSummary>[1]> = {}) => ({
   measureRate: D(0), regulationRate: D(0), provisionalRate: D(0),
-  provisionalAmount: D(0), taxRate: D(0), addonRate: D(0), laborBase: null, coeffMeasureFee: D(0),
+  provisionalAmount: D(0), taxRate: D(0), addonRate: D(0), laborBase: null, laborAdjustRate: D(0), coeffMeasureFee: D(0),
   set: { measure: false, regulation: false, provisional: false, tax: false },
   ...o,
 });
@@ -91,7 +91,7 @@ describe("feeSummary 取费汇总", () => {
   it("规费基数：有定额人工费用真基数，否则退回简化口径并标注", () => {
     const items = [item("100000")];
     const withLabor = feeSummary(items, params({
-      regulationRate: D(0.28), laborBase: D(12000),
+      regulationRate: D(0.28), laborBase: D(12000), laborAdjustRate: D(0),
       set: { measure: false, regulation: true, provisional: false, tax: true },
     }));
     // 12000×28% = 3360（四川安装口径：定额人工费基数）
@@ -238,5 +238,37 @@ describe("feeCompliance 费用符合性检查", () => {
     expect(e?.level).toBe("error");
     const under = feeCompliance([item("100000")], p, { ceiling: D(200000) });
     expect(under.map((x) => x.label)).not.toContain("超过最高投标限价");
+  });
+});
+
+describe("人工费调整（定额人工费×调差系数）", () => {
+  it("系数+定额人工费基数 → 计取并入税前造价", () => {
+    const r = feeSummary(
+      [item("10000")],
+      params({ taxRate: D(0.09), laborBase: D(5000), laborAdjustRate: D(0.15) })
+    );
+    const row = r.rows.find((x) => x.name === "人工费调整");
+    expect(row?.amount).toBe("750.00");
+    expect(row?.rate).toBe("15%");
+    // 税前 = 10000 + 750 = 10750；含税 = 10750 × 1.09 = 11717.5
+    expect(r.rows.find((x) => x.seq === "五")?.amount).toBe("10750.00");
+    expect(r.grandTotal).toBe("11717.50");
+  });
+
+  it("系数未设 → 不产生行，口径与旧版一致", () => {
+    const r = feeSummary([item("10000")], params({ laborBase: D(5000) }));
+    expect(r.rows.some((x) => x.name === "人工费调整")).toBe(false);
+    expect(r.rows.find((x) => x.seq === "五")?.amount).toBe("10000.00");
+  });
+
+  it("系数已设但无定额人工费基数 → 计 0 + 行内注明 + 符合性提示", async () => {
+    const { feeCompliance } = await import("../cost-engine/fees");
+    const p = params({ taxRate: D(0.09), laborAdjustRate: D(0.15) });
+    const r = feeSummary([item("10000")], p);
+    const row = r.rows.find((x) => x.name === "人工费调整");
+    expect(row?.amount).toBe("0.00");
+    expect(row?.note).toContain("定额人工费基数缺失");
+    const issues = feeCompliance([item("10000")], p);
+    expect(issues.map((x) => x.label)).toContain("人工费调整未计取");
   });
 });

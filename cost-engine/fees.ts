@@ -26,6 +26,8 @@ export interface FeeParams {
   addonRate: Decimal;
   /** 定额人工费合计（定额测算写入台账）；null = 未测算，规费退回简化口径 */
   laborBase: Decimal | null;
+  /** 人工费调整系数（省级造价文件的调差系数，基数：定额人工费）；0 = 不计 */
+  laborAdjustRate: Decimal;
   /** 官方系数措施费合计（cost.measureFees 计取写入台账）：脚手架/超高/高层增加费等 */
   coeffMeasureFee: Decimal;
   /** 各费率是否来自台账（false=未设置，行内注明） */
@@ -92,7 +94,14 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
   const regulation = round2(laborBase !== null && laborBase.gt(0)
     ? laborBase.mul(params.regulationRate)
     : boqTotal.mul(params.regulationRate));
-  const preTax = boqTotal.plus(measure).plus(other).plus(regulation);
+  // 人工费调整（人工费调差）：定额人工费 × 调整系数，计税、计入税前造价。
+  // 系数设了但没有定额人工费基数时计 0 并在行内注明（先跑定额测算）。
+  const laborAdjust = round2(
+    params.laborAdjustRate.gt(0) && laborBase !== null && laborBase.gt(0)
+      ? laborBase.mul(params.laborAdjustRate)
+      : D(0)
+  );
+  const preTax = boqTotal.plus(measure).plus(other).plus(regulation).plus(laborAdjust);
   const tax = round2(preTax.mul(params.taxRate));
   // 附加税（城建税+教育费附加+地方教育附加）：基数是增值税额，表-13 明示费率时计取
   const addon = round2(tax.mul(params.addonRate));
@@ -146,8 +155,17 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
           ? "简化口径：以分部分项费为基数；运行「定额测算」后自动改用定额人工费"
           : unset(false, "规费费率设为x%"),
     },
+    ...(params.laborAdjustRate.gt(0)
+      ? [{
+          seq: "四·附", name: "人工费调整", basis: "定额人工费 × 调整系数",
+          rate: pct(params.laborAdjustRate), amount: laborAdjust.toFixed(2), level: "leaf" as const,
+          note: laborBase !== null && laborBase.gt(0)
+            ? "人工费调差（定额人工费为基数），计税计入税前造价"
+            : "定额人工费基数缺失——先运行「定额测算」产生基数后自动计取",
+        }]
+      : []),
     {
-      seq: "五", name: "税前工程造价", basis: "一 + 二 + 三 + 四",
+      seq: "五", name: "税前工程造价", basis: laborAdjust.gt(0) ? "一 + 二 + 三 + 四 + 人工费调整" : "一 + 二 + 三 + 四",
       rate: null, amount: preTax.toFixed(2), level: "subtotal",
     },
     {
@@ -218,6 +236,9 @@ export function feeCompliance(
 
   if (params.regulationRate.isZero())
     push("warn", "规费未计取", "规费费率未设置按 0 计——规费是不可竞争费，缺项会被评标扣分或结算核减");
+
+  if (params.laborAdjustRate.gt(0) && (params.laborBase === null || !params.laborBase.gt(0)))
+    push("warn", "人工费调整未计取", "已设人工费调整系数但没有定额人工费基数——先运行「定额测算」再汇总费用");
 
   const lumpMeasures = byType("总价措施");
   if (lumpMeasures.length) {

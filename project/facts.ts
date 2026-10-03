@@ -66,7 +66,7 @@ export function pricingFactType(key: string): string | null {
 /** Applied at each fact write boundary; consumers only read normalized values. */
 export function validatePricingFact(key: string, value: string): void {
   if (!value.trim()) return;
-  if (/费率|利润率|税率|暂列金额率/.test(key)) {
+  if (/费率|利润率|税率|暂列金额率|调整系数/.test(key)) {
     const rate = parseRateValue(value);
     if (rate === null || rate < 0 || rate > 1) throw new Error(`${key}应为 0%–100% 的有效费率`);
   } else if (key === "暂列金额") {
@@ -129,10 +129,10 @@ export async function loadFeeParams(projectId: string): Promise<import("@cost-en
     const v = parseRateValue(f?.value);
     return { v: D(v ?? 0), set: v !== null };
   };
-  const [measure, regulation, provRate, provFact, taxF, addonF, laborFact, coeffFact] = await Promise.all([
+  const [measure, regulation, provRate, provFact, taxF, addonF, laborFact, coeffFact, laborAdj] = await Promise.all([
     rate("措施费率"), rate("规费费率"), rate("暂列金额率"),
     getFact(projectId, "暂列金额"), getFact(projectId, "税率"), getFact(projectId, "附加税率"),
-    getFact(projectId, "定额人工费"), getFact(projectId, "系数措施费"),
+    getFact(projectId, "定额人工费"), getFact(projectId, "系数措施费"), rate("人工费调整系数"),
   ]);
   const provAmt = parseAmountValue(provFact?.value);
   const tax = parseRateValue(taxF?.value);
@@ -145,6 +145,7 @@ export async function loadFeeParams(projectId: string): Promise<import("@cost-en
     taxRate: D(tax ?? 0),
     addonRate: D(addon ?? 0),
     laborBase: labor !== null && Number.isFinite(labor) && labor > 0 ? D(labor) : null,
+    laborAdjustRate: laborAdj.v,
     coeffMeasureFee: coeff !== null && Number.isFinite(coeff) && coeff > 0 ? D(coeff) : D(0),
     set: { measure: measure.set, regulation: regulation.set, provisional: provRate.set || provAmt !== null, tax: tax !== null },
   };
