@@ -96,7 +96,14 @@ registerTool({
     onlyItems: z.boolean().optional(),
     unpriced: z.boolean().optional().describe("true=只看未定价的可计价项（综合单价为0）"),
   }),
-  handler: async (ctx, args) => {
+  handler: async (ctx, args: { discipline?: string; query?: string; onlyItems?: boolean; unpriced?: boolean }) => {
+    const desc = args.unpriced
+      ? "未定价项"
+      : args.discipline
+        ? `「${args.discipline}」专业`
+        : args.query
+          ? `「${args.query}」`
+          : "";
     return {
       observation: { applied: true },
       views: [
@@ -107,6 +114,7 @@ registerTool({
           filter: args as never,
         },
       ],
+      message: desc ? `已筛选清单：${desc}` : "已恢复完整清单",
     };
   },
 });

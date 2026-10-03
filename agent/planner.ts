@@ -21,8 +21,10 @@ export type StepOrFn =
 
 export interface Plan {
   steps: StepOrFn[];
-  /** final agent message when no steps produced a message */
+  /** final agent message when no step was emitted (动态定位全部落空时的兜底说明) */
   fallbackMessage?: string;
+  /** 恒追加的尾注（如「缺费率跳过写回」「税率取默认」——步骤执行了也要提示） */
+  tailNote?: string;
 }
 
 export interface Planner {
@@ -125,8 +127,9 @@ export class RulePlanner implements Planner {
       );
       return {
         steps: [...prefSteps, ...factSteps, ...p.steps],
-        // 空清单提示永远保留；费率缺失提示在内联写入已补齐时撤下
-        fallbackMessage: !ctx.boq.itemCount || stillMissing ? p.fallbackMessage : undefined,
+        // 空清单走兜底；缺费率是并行尾注（管线照常跑，只跳过写回），内联写入已补齐时撤下
+        fallbackMessage: !ctx.boq.itemCount ? p.fallbackMessage : undefined,
+        tailNote: ctx.boq.itemCount && stillMissing ? p.fallbackMessage : undefined,
       };
     }
 
@@ -337,7 +340,7 @@ export class RulePlanner implements Planner {
             activity: `正在按目标总价 ${targetTotal} 反算工程量${inclTax ? `（含税，税率 ${taxRate}）` : ""}`,
           },
         ],
-        fallbackMessage: inclTax && parseRateValue(taxFact) === null
+        tailNote: inclTax && parseRateValue(taxFact) === null
           ? `已按含税口径处理，税率取默认 9%（项目台账未记录税率，可用「税率设为x%」写入事实）`
           : undefined,
       };

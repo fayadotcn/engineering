@@ -154,7 +154,10 @@ async function runPlan(
     const observation = result.observation as { cancelled?: boolean } | null;
     if (observation?.cancelled) break;
   }
-  if (plan.fallbackMessage) summaries.push(plan.fallbackMessage);
+  // fallbackMessage 只在动态定位全部落空（一个步骤都没产出）时兜底——
+  // 步骤已执行还挂「没有匹配」是自相矛盾的误导；恒显提示走 tailNote。
+  if (plan.tailNote) summaries.push(plan.tailNote);
+  if (!results.length && plan.fallbackMessage) summaries.push(plan.fallbackMessage);
 }
 
 async function ingestFile(

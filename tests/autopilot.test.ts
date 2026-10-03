@@ -94,8 +94,8 @@ describe("autopilot 一键报价管线", () => {
     expect(seq).not.toContain("quota.applyCalc");
     // 测算有匹配时措施费仍计取
     expect(seq).toContain("cost.measureFees");
-    expect(plan.fallbackMessage).toContain("管理费率");
-    expect(plan.fallbackMessage).toContain("写回组价");
+    expect(plan.tailNote).toContain("管理费率");
+    expect(plan.tailNote).toContain("写回组价");
   });
 
   it("测算 0 匹配：跳过措施费（无人工费基数）", async () => {
@@ -136,7 +136,7 @@ describe("autopilot 一键报价管线", () => {
     dbFacts.current = [{ key: "管理费率", value: "30%" }];
     const seq = await toolSeq(plan.steps);
     expect(seq).not.toContain("quota.applyCalc");
-    expect(plan.fallbackMessage).toContain("利润率");
+    expect(plan.tailNote).toContain("利润率");
   });
 
   it("空清单：不排步骤，直接引导上传", async () => {
@@ -188,10 +188,10 @@ describe("总价反算路由", () => {
   it("含税但台账无税率/税率非法：默认 9% 且提示", async () => {
     const p1 = await plan("含税总价控制到500万");
     expect((p1.steps[0] as PlanStep).args.taxRate).toBeCloseTo(0.09);
-    expect(p1.fallbackMessage).toContain("9%");
+    expect(p1.tailNote).toContain("9%");
     const p2 = await plan("含税总价控制到500万", [{ key: "税率", value: "待定" }]);
     expect((p2.steps[0] as PlanStep).args.taxRate).toBeCloseTo(0.09);
-    expect(p2.fallbackMessage).toContain("9%");
+    expect(p2.tailNote).toContain("9%");
   });
 });
 
