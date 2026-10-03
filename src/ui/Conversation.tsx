@@ -26,6 +26,7 @@ const TOOL_LABEL: Record<string, string> = {
   "boq.findCodeNameMismatch": "查一码多名",
   "boq.findInvalidCodes": "查非标编码",
   "boq.findMissingCodes": "查缺编码项",
+  "boq.findDataIssues": "查数据质量",
   "boq.findFeatureMismatch": "比对项目特征",
   "boq.compareFiles": "两版清单对审",
   "boq.addItem": "补录清单行",

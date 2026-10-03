@@ -194,7 +194,7 @@ registerTool({
     const { projectTotals, aggregateByDiscipline, aggregateByCategory, aggregateByUnitProject } = await import("@cost-engine/aggregate");
     const {
       findSameItemDifferentPrice, findPriceAnomalies, findArithmeticMismatches,
-      findFeatureMismatch, findDuplicateItems, findUnitInconsistencies, findCodeNameMismatch, findInvalidCodes, findMissingCodes,
+      findFeatureMismatch, findDuplicateItems, findUnitInconsistencies, findCodeNameMismatch, findInvalidCodes, findMissingCodes, findDataIssues,
     } = await import("@cost-engine/compare");
     const { analyzeCostComposition } = await import("@cost-engine/costComposition");
     const { feeSummary, feeCompliance } = await import("@cost-engine/fees");
@@ -460,6 +460,7 @@ registerTool({
       ["一码多名", findCodeNameMismatch(items)],
       ["非标编码", findInvalidCodes(items)],
       ["缺编码", findMissingCodes(items)],
+      ["数据质量", findDataIssues(items)],
     ];
     for (const [label, groups] of anomalyGroups)
       for (const g of groups)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findFeatureMismatch, findSameItemDifferentPrice } from "@cost-engine/compare";
+import { findDataIssues, findFeatureMismatch, findSameItemDifferentPrice } from "@cost-engine/compare";
 import { parseSemanticFeature, inferDiscipline } from "@cost-engine/semantic";
 import type { BoqItemDTO } from "@shared/types";
 
@@ -207,5 +207,37 @@ describe("findMissingCodes（缺编码）", () => {
     expect(rows.length).toBe(1);
     expect(rows[0].items.length).toBe(1);
     expect(rows[0].items[0].name).toBe("镀锌钢管");
+  });
+});
+
+describe("findDataIssues", () => {
+  const mk = (over: Partial<BoqItemDTO>): BoqItemDTO => ({
+    id: "x", projectId: "p", fileId: "f", sheetName: "s", rowIndex: 1,
+    code: "031001001001", name: "钢管", rawFeature: "", unit: "m",
+    quantity: "10", quantityExpr: null, unitPrice: "50", mainMaterialPrice: null,
+    laborUnitPrice: null, machineUnitPrice: null, pricingPlan: null,
+    totalPrice: "500", feeType: "分部分项", sectionPath: "", unitProject: "",
+    taxIncluded: false, isHeader: false, sortOrder: 0, discipline: "",
+    features: { category: null, material: null, diameter: null, specification: null, power: null, connectionMethod: null, system: null, keywords: [] },
+    rawCells: {},
+    ...over,
+  } as BoqItemDTO);
+
+  it("负单价/负量/缺单位分别成组", () => {
+    const rows = findDataIssues([
+      mk({ id: "a", unitPrice: "-5", totalPrice: "-50" }),
+      mk({ id: "b", quantity: "-3" }),
+      mk({ id: "c", unit: "" }),
+      mk({ id: "ok" }),
+    ]);
+    expect(rows).toHaveLength(3);
+    expect(rows[0].items[0].id).toBe("a");
+    expect(rows[1].items[0].id).toBe("b");
+    expect(rows[2].items[0].id).toBe("c");
+  });
+
+  it("总价措施行负单价不算数据问题（无量价结构）", () => {
+    const rows = findDataIssues([mk({ feeType: "总价措施", unitPrice: "-100", unit: "" })]);
+    expect(rows).toHaveLength(0);
   });
 });

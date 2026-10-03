@@ -18,6 +18,7 @@ const ANOMALY_BADGE: Record<string, string> = {
   CODE_MISMATCH: "warn",
   INVALID_CODE: "warn",
   MISSING_CODE: "warn",
+  DATA_QUALITY: "danger",
   OWNER_SUPPLIED: "danger",
 };
 

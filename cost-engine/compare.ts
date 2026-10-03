@@ -311,3 +311,39 @@ export function findDuplicateItems(items: BoqItemDTO[]): AnomalyRow[] {
   }
   return rows;
 }
+
+/**
+ * 数据质量检查：可计价行上的硬伤——负综合单价（必错）、负工程量（结算核减需确认）、
+ * 缺计量单位（量纲缺失无法计价复核）。总额计价行不在此列（没有量价结构）。
+ */
+export function findDataIssues(items: BoqItemDTO[]): AnomalyRow[] {
+  const negPrice = items.filter((it) => isPricableItem(it) && !it.isHeader && D(it.unitPrice).lt(0));
+  const negQty = items.filter((it) => isPricableItem(it) && !it.isHeader && D(it.quantity).lt(0));
+  const noUnit = items.filter((it) => isPricableItem(it) && !it.isHeader && it.name.trim() && !it.unit.trim());
+  const rows: AnomalyRow[] = [];
+  if (negPrice.length)
+    rows.push({
+      groupKey: "DATA:NEG_PRICE",
+      label: "负综合单价",
+      items: negPrice.map(toRowItem),
+      prices: negPrice.map((g) => decStr(D(g.unitPrice))),
+      reason: `${negPrice.length} 项综合单价为负——综合单价不可能为负，源表数据错误或应改核减口径`,
+    });
+  if (negQty.length)
+    rows.push({
+      groupKey: "DATA:NEG_QTY",
+      label: "负工程量",
+      items: negQty.map(toRowItem),
+      prices: negQty.map((g) => decStr(D(g.unitPrice))),
+      reason: `${negQty.length} 项工程量为负——清单行负量通常是结算核减口径，请确认是否应并入对应正量行`,
+    });
+  if (noUnit.length)
+    rows.push({
+      groupKey: "DATA:NO_UNIT",
+      label: "缺计量单位",
+      items: noUnit.map(toRowItem),
+      prices: noUnit.map((g) => decStr(D(g.unitPrice))),
+      reason: `${noUnit.length} 项可计价清单缺计量单位——GB50500 五项要素必填，缺单位无法复核量纲`,
+    });
+  return rows;
+}

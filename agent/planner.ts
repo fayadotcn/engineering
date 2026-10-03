@@ -573,6 +573,10 @@ export class RulePlanner implements Planner {
       return {
         steps: [{ tool: "boq.findMissingCodes", args: {}, activity: "正在查缺编码项" }],
       };
+    if (/(负|负数).{0,4}(单价|价|工程量|量)|缺.{0,3}单位|单位.{0,3}(缺|空|漏)|数据质量|脏数据/.test(m))
+      return {
+        steps: [{ tool: "boq.findDataIssues", args: {}, activity: "正在查数据质量问题" }],
+      };
     if (/编码.{0,4}(重复|错用|不一致|不同|错|唯一)|一码多/.test(m))
       return {
         steps: [{ tool: "boq.findCodeNameMismatch", args: {}, activity: "正在查一码多名" }],

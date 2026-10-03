@@ -4,6 +4,7 @@ import { listBoq, updateBoqItems } from "@boq/service";
 import {
   findArithmeticMismatches,
   findCodeNameMismatch,
+  findDataIssues,
   findDuplicateItems,
   findFeatureMismatch,
   findInvalidCodes,
@@ -25,6 +26,8 @@ const ANOMALY_LABEL: Record<string, string> = {
   CODE_MISMATCH: "一码多名",
   INVALID_CODE: "非标编码",
   MISSING_CODE: "缺编码",
+  DATA_QUALITY: "数据质量",
+  OWNER_SUPPLIED: "甲供材核对",
 };
 
 function anomalyView(anomalyType: string, rows: AnomalyRow[]): WorkspaceView {
@@ -261,6 +264,23 @@ registerTool({
 });
 
 registerTool({
+  name: "boq.findDataIssues",
+  description: "数据质量检查：可计价清单行上的负综合单价/负工程量/缺计量单位——源表硬伤逐项列出",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const rows = findDataIssues(items);
+    const n = rows.reduce((s, r) => s + r.items.length, 0);
+    return {
+      observation: { count: n, groups: rows.length },
+      views: [anomalyView("DATA_QUALITY", rows)],
+      message: n ? `发现 ${n} 项数据质量问题（${rows.map((r) => r.label).join("、")}）` : "未发现数据质量问题",
+    };
+  },
+});
+
+registerTool({
   name: "boq.compare",
   description: "对比清单：相同项不同价 + 单价异常 + 特征不一致 + 合价算术校验 + 单位不一致 + 一码多名 + 非标编码（一次全查）",
   implemented: true,
@@ -276,12 +296,14 @@ registerTool({
     const g = findInvalidCodes(items);
     const h = findMissingCodes(items);
     const dp = findDuplicateItems(items);
+    const dq = findDataIssues(items);
     const arith = d[0]?.items.length ?? 0;
     const invalid = g[0]?.items.length ?? 0;
     const missing = h[0]?.items.length ?? 0;
     const dup = dp.reduce((n, r) => n + r.items.length, 0);
+    const dataIssues = dq.reduce((n, r) => n + r.items.length, 0);
     return {
-      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith, unitInconsistent: e.length, codeMismatch: f.length, invalidCode: invalid, missingCode: missing, duplicate: dp.length },
+      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith, unitInconsistent: e.length, codeMismatch: f.length, invalidCode: invalid, missingCode: missing, duplicate: dp.length, dataQuality: dq.length },
       views: [
         anomalyView("SAME_ITEM_DIFF_PRICE", a),
         anomalyView("PRICE_ANOMALY", b),
@@ -292,8 +314,9 @@ registerTool({
         anomalyView("INVALID_CODE", g),
         anomalyView("MISSING_CODE", h),
         anomalyView("DUPLICATE", dp),
+        anomalyView("DATA_QUALITY", dq),
       ],
-      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项，单位不一致 ${e.length} 组，一码多名 ${f.length} 组，非标编码 ${invalid} 项，缺编码 ${missing} 项，重复项 ${dup} 项`,
+      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项，单位不一致 ${e.length} 组，一码多名 ${f.length} 组，非标编码 ${invalid} 项，缺编码 ${missing} 项，重复项 ${dup} 项，数据质量 ${dataIssues} 项`,
     };
   },
 });
