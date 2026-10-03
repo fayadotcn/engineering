@@ -1,5 +1,6 @@
 import { prisma } from "@database/client";
 import { toFactDTO } from "@database/serialize";
+import { normalizePeriod } from "@dataset/priceParse";
 import type { CostFactDTO, FactSource } from "@shared/types";
 
 // Cost Fact Ledger: project-level facts the agent reads before every task.
@@ -43,7 +44,8 @@ export async function setFact(
       projectId,
       factType: pricingFactType(input.key) ?? input.factType,
       key: input.key,
-      value: input.value,
+      // 价格期归一化落库：「2024年6月」「2024.6」→「2024-06」，季度→「2024-Q2」，期次排序/偏好匹配才有统一口径
+      value: input.key === "价格期" ? normalizePeriod(input.value) : input.value,
       source: input.source,
       sourceFileId: input.sourceFileId,
       confidence: input.confidence ?? (input.source === "INFERRED" ? 0.6 : 1),
@@ -75,8 +77,8 @@ export function validatePricingFact(key: string, value: string): void {
   } else if (/面积/.test(key)) {
     const area = parseAreaValue(value);
     if (area === null || area < 0) throw new Error(`${key}应为非负平方米数`);
-  } else if (key === "价格期" && !/^20\d{2}-(0[1-9]|1[0-2])$/.test(value)) {
-    throw new Error("价格期请填写 YYYY-MM");
+  } else if (key === "价格期" && !/^20\d{2}-(0[1-9]|1[0-2]|Q[1-4])$/.test(normalizePeriod(value))) {
+    throw new Error("价格期请填写 YYYY-MM 或季度（如 2024-Q2、2024年6月）");
   } else if (key === "价格类型" && !["INFO", "MARKET", "SUPPLY", "LABOR", "信息价", "市场价", "供应价", "人工价"].includes(value)) {
     throw new Error("价格类型应为信息价、市场价、供应价或人工价");
   }
@@ -102,12 +104,13 @@ export function parseRateValue(raw: string | null | undefined): number | null {
   return /[%％]/.test(text) || Math.abs(v) > 1 ? v / 100 : v;
 }
 
-/** 金额事实归一化：「50万」→ 500000，「5000元」→ 5000。 */
+/** 金额事实归一化：「50万」→ 500000，「1.2亿」→ 120000000，「5000元」→ 5000。 */
 export function parseAmountValue(raw: string | null | undefined): number | null {
   if (!raw?.trim()) return null;
   const s = String(raw).replace(/[,，\s元]/g, "");
+  const yi = s.match(/^([\d.]+)亿$/);
   const wan = s.match(/^([\d.]+)万$/);
-  const v = wan ? Number(wan[1]) * 10000 : Number(s);
+  const v = yi ? Number(yi[1]) * 1e8 : wan ? Number(wan[1]) * 10000 : Number(s);
   return Number.isFinite(v) ? v : null;
 }
 
