@@ -8,4 +8,6 @@ export const prisma =
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+// 生产也挂 globalThis：Next 每个路由独立 module graph，不共享的话
+// 同进程会持有多个 PrismaClient——SQLite 上就是多余的文件句柄/锁竞争
+globalForPrisma.prisma = prisma;
