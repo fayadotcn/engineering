@@ -848,6 +848,10 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 文件列表：「有哪些文件/上传了什么/文件里有什么」→ file.read 出 fileList 视图
+    if (/文件/.test(m) && /哪些|什么|列表|所有|全部|看看|几个|多少/.test(m))
+      return { steps: [{ tool: "file.read", args: {}, activity: "正在列出项目文件" }] };
+
     // 事实/台账
     if (/事实|台账|项目信息|已知信息/.test(m))
       return { steps: [{ tool: "project.read", args: {}, activity: "正在读取项目台账" }] };

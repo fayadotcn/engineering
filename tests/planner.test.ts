@@ -584,3 +584,18 @@ describe("工程量修改路由", () => {
     expect((s?.args.patches as { unitPrice?: string }[])[0].unitPrice).toBe("5.00");
   });
 });
+
+describe("文件查询路由", () => {
+  it("「有哪些文件/上传了什么文件」→ file.read", async () => {
+    for (const m of ["有哪些文件", "上传了什么文件", "项目里有几个文件"]) {
+      const p = await plan(m);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("file.read");
+    }
+  });
+  it("「台账里有什么」仍走 project.read 不被文件路由截胡", async () => {
+    const p = await plan("台账里有什么");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("project.read");
+  });
+});
