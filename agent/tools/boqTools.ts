@@ -488,6 +488,7 @@ registerTool({
     totalPrice: z.string().optional().describe("合价（仅总价措施/其他项目直填）"),
     feeType: z.enum(["分部分项", "单价措施", "总价措施", "其他项目"]).optional(),
     rawFeature: z.string().optional().describe("项目特征"),
+    unitProject: z.string().optional().describe("归属单位工程（多单位工程项目）"),
     insertAfter: z.string().optional().describe("插入锚点行 id：新行紧随该行并沿用其文件/分部/专业"),
   }),
   confirm: (a: { name: string }) => `将补录清单项「${a.name}」（操作可撤销）`,

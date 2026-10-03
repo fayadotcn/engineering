@@ -64,6 +64,7 @@ export interface ItemChange { field: string; label: string; from: string | null;
 export type NewItemPayload = {
   name: string; code?: string; unit?: string; quantity?: string; quantityExpr?: string; unitPrice?: string;
   mainMaterialPrice?: string; totalPrice?: string; feeType?: string; insertAfter?: string; rawFeature?: string;
+  unitProject?: string;
   laborUnitPrice?: string; machineUnitPrice?: string; pricingPlan?: string;
 };
 

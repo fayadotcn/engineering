@@ -20,6 +20,7 @@ const create = z.object({
   insertAfter: z.string().optional(),
   /** 复制时透传的原文特征与人材机分解/组价方案，保证复制品与原行一致可复核 */
   rawFeature: z.string().max(4000).optional(),
+  unitProject: z.string().max(200).optional(),
   laborUnitPrice: z.string().optional(),
   machineUnitPrice: z.string().optional(),
   pricingPlan: z.string().max(40000).optional(),

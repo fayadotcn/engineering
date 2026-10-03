@@ -5,13 +5,14 @@ import { cn } from "../shared";
 import type { AddForm } from "./constants";
 
 /** 手工补录清单行弹窗 */
-export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum, addQtyPreview, onClose, onSubmit }: {
+export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum, addQtyPreview, unitProjects, onClose, onSubmit }: {
   addOpen: boolean;
   saving: boolean;
   addForm: AddForm;
   setAddForm: Dispatch<SetStateAction<AddForm>>;
   addLumpSum: boolean;
   addQtyPreview: string | null;
+  unitProjects: string[];
   onClose: () => void;
   onSubmit: () => Promise<void>;
 }) {
@@ -57,6 +58,30 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
             />
           </label>
         </div>
+        <label className="cost-field">
+          <span>项目特征（选填）</span>
+          <input
+            value={addForm.feature}
+            onChange={(e) => setAddForm(f => ({ ...f, feature: e.target.value }))}
+            placeholder="如：DN100 沟槽连接 室内消防——影响定额/询价匹配"
+            className="cost-input lg w-full"
+          />
+        </label>
+        {unitProjects.length > 0 && (
+          <label className="cost-field">
+            <span>单位工程（选填）</span>
+            <input
+              value={addForm.unitProject}
+              onChange={(e) => setAddForm(f => ({ ...f, unitProject: e.target.value }))}
+              placeholder="归属单位工程"
+              list="boq-unitprojects"
+              className="cost-input lg w-full"
+            />
+            <datalist id="boq-unitprojects">
+              {unitProjects.map((u) => <option key={u} value={u} />)}
+            </datalist>
+          </label>
+        )}
         {addLumpSum ? (
           <label className="cost-field">
             <span>金额（元）</span>

@@ -11,7 +11,7 @@ export const MANUAL_GROUP_ROW = { id: MANUAL_GROUP_ID, isHeader: true, name: "�
 export const ADJ_FIELD: Record<string, string> = { unitPrice: "综合单价", quantity: "工程量", mainMaterialPrice: "主材暂估价" };
 
 /** 手工补录弹窗表单 */
-export type AddForm = { name: string; code: string; unit: string; quantity: string; unitPrice: string; totalPrice: string; feeType: string };
+export type AddForm = { name: string; code: string; unit: string; quantity: string; unitPrice: string; totalPrice: string; feeType: string; feature: string; unitProject: string };
 /** 批量调价弹窗表单 */
 export type AdjForm = { field: "unitPrice" | "quantity" | "mainMaterialPrice"; mode: "percent" | "value"; value: string };
 /** Ctrl+V 粘回预览的一行：目标清单行 + 待写入的数字列 */

@@ -206,6 +206,8 @@ export interface BoqCreateInput {
   feeType?: "分部分项" | "单价措施" | "总价措施" | "其他项目";
   insertAfter?: string;
   rawFeature?: string;
+  /** 归属单位工程；缺省沿用 insertAfter 源行 */
+  unitProject?: string;
   laborUnitPrice?: string;
   machineUnitPrice?: string;
   pricingPlan?: string;
@@ -252,7 +254,7 @@ export async function createBoqItem(
         fileId: src?.fileId ?? null,
         sheetName: src?.sheetName ?? "手工补录",
         sectionPath: src?.sectionPath ?? "",
-        unitProject: src?.unitProject ?? "",
+        unitProject: body.unitProject?.trim() || src?.unitProject || "",
         rowIndex: -1,
         code: body.code ?? "",
         name: body.name,

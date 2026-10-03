@@ -46,7 +46,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
   const [adjRows, setAdjRows] = useState<BoqItemDTO[] | null>(null); // 批量调价弹窗的目标行
   const [pastePlan, setPastePlan] = useState<{ it: BoqItemDTO; patch: { quantity?: string; unitPrice?: string; mainMaterialPrice?: string } }[] | null>(null); // Ctrl+V 粘回预览
   const [adjForm, setAdjForm] = useState<{ field: "unitPrice" | "quantity" | "mainMaterialPrice"; mode: "percent" | "value"; value: string }>({ field: "unitPrice", mode: "percent", value: "" });
-  const [addForm, setAddForm] = useState({ name: "", code: "", unit: "", quantity: "", unitPrice: "", totalPrice: "", feeType: "分部分项" });
+  const [addForm, setAddForm] = useState({ name: "", code: "", unit: "", quantity: "", unitPrice: "", totalPrice: "", feeType: "分部分项", feature: "", unitProject: "" });
   const committing = useRef(false);
   const editRef = useRef<typeof editing>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -343,7 +343,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
   })();
   const openAdd = () => {
     if (running || agentRunning || importRunning || saving) return;
-    setAddForm({ name: "", code: "", unit: "", quantity: "", unitPrice: "", totalPrice: "", feeType: "分部分项" });
+    setAddForm({ name: "", code: "", unit: "", quantity: "", unitPrice: "", totalPrice: "", feeType: "分部分项", feature: "", unitProject: "" });
     setAddOpen(true);
   };
   const submitAdd = async () => {
@@ -363,6 +363,8 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
       name,
       code: addForm.code.trim() || undefined,
       unit: addForm.unit.trim() || undefined,
+      rawFeature: addForm.feature.trim() || undefined,
+      unitProject: addForm.unitProject.trim() || undefined,
       feeType: addForm.feeType,
       ...(addLumpSum
         ? { totalPrice: addForm.totalPrice.trim() || undefined }
@@ -797,7 +799,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
         }}
         onCancel={() => setPendingDelRows(null)}
       />
-      <AddRowDialog addOpen={addOpen} saving={saving} addForm={addForm} setAddForm={setAddForm} addLumpSum={addLumpSum} addQtyPreview={addQtyPreview} onClose={() => setAddOpen(false)} onSubmit={submitAdd} />
+      <AddRowDialog addOpen={addOpen} saving={saving} addForm={addForm} setAddForm={setAddForm} addLumpSum={addLumpSum} addQtyPreview={addQtyPreview} unitProjects={[...new Set(items.map((i) => i.unitProject).filter((u): u is string => !!u))]} onClose={() => setAddOpen(false)} onSubmit={submitAdd} />
       <BatchAdjustDialog adjRows={adjRows} saving={saving} adjForm={adjForm} setAdjForm={setAdjForm} onClose={() => setAdjRows(null)} onSubmit={submitAdjust} />
       <PastePreviewDialog pastePlan={pastePlan} saving={saving} onClose={() => setPastePlan(null)} onSubmit={submitPaste} />
     </div>
