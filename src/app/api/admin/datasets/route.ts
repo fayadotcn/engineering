@@ -16,6 +16,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid kind" }, { status: 400 });
 
   const filename = (form.get("filename") as string | null)?.trim() || file.name;
+  // 价格库/定额库只认表格——非表格类型建了档也解析不出列映射（GENERIC 参考资料不限）
+  if (kind !== "GENERIC") {
+    const ext = filename.match(/\.[^.]+$/)?.[0]?.toLowerCase() ?? "";
+    if (![".xls", ".xlsx", ".csv"].includes(ext))
+      return NextResponse.json({ error: `数据集只支持表格文件（.xls/.xlsx/.csv），收到「${ext || "无扩展名"}」` }, { status: 400 });
+  }
   const buffer = Buffer.from(await file.arrayBuffer());
   if (!buffer.length) return NextResponse.json({ error: "空文件" }, { status: 400 });
   if (buffer.length > 80 * 1024 * 1024)
