@@ -490,6 +490,18 @@ export class RulePlanner implements Planner {
       return { steps };
     }
 
+    // 材料/询价检索：「材料库里有没有镀锌钢管」「电缆价格多少」「查一下配电箱的报价」→ material.search
+    if (/价格|单价|报价|多少钱|价格库|材料库|询价表|信息价|市场价/.test(m) &&
+        /查|搜|找|检索|有没有|有哪些|有什么|多少|看看/.test(m) &&
+        !/测算|组价|写回|补价|补全|补齐|改|设|调|汇总|检查|清标|导出|删除|撤销|异常|偏差|符合/.test(m)) {
+      const q = m
+        .replace(/查一下|查|搜|找|检索|看看|看|一下|下|价格库|材料库|询价表|信息价|市场价|有没有|有哪些|有什么|多少|多少钱|的|吗|呢|啊|吧|？|\?|，|,|、|里|中|内|请|帮我|价格|单价|报价|现在|当前|是/g, " ")
+        .replace(/\s+/g, " ").trim();
+      return {
+        steps: [{ tool: "material.search", args: { query: q || m.slice(0, 30) }, activity: "正在检索询价与材料价格库" }],
+      };
+    }
+
     // 材料价格历史
     if (/价格历史|历史价|历次询价|价格走势|价格轨迹/.test(m)) {
       const nameMatch = m.match(

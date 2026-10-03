@@ -436,3 +436,23 @@ describe("对审报告导出路由", () => {
     expect(s?.tool).toBe("report.exportExcel");
   });
 });
+
+describe("材料/询价检索路由（material.search）", () => {
+  it("「材料库里有没有镀锌钢管」→ material.search 剥意图词", async () => {
+    const p = await plan("材料库里有没有镀锌钢管");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("material.search");
+    expect(s?.args.query).toBe("镀锌钢管");
+  });
+  it("「电缆价格多少」→ material.search", async () => {
+    const p = await plan("电力电缆价格多少");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("material.search");
+    expect(s?.args.query).toBe("电力电缆");
+  });
+  it("「电缆单价改为5元」不被检索截胡（含 改）", async () => {
+    const p = await plan("电力电缆单价改为5元");
+    const s = await resolve(p.steps[p.steps.length - 1]);
+    expect(s?.tool).toBe("boq.update");
+  });
+});
