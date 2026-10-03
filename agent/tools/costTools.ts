@@ -69,7 +69,8 @@ registerTool({
       prisma.projectFile.findMany({ where: { projectId: ctx.projectId }, select: { id: true, filename: true } }),
     ]);
     const declaredCheck: { file: string; checks: { label: string; declared: number; computed: number; diff: number; pct: number; note?: string }[] }[] = [];
-    for (const f of facts.filter((x) => x.key.startsWith("文件汇总:"))) {
+    const seenSummary = new Set<string>();
+    for (const f of facts.filter((x) => x.key.startsWith("文件汇总:") && !seenSummary.has(x.key) && seenSummary.add(x.key))) {
       const filename = f.key.slice("文件汇总:".length);
       const fileId = files.find((x) => x.filename === filename)?.id;
       const fileItems = fileId ? items.filter((i) => i.fileId === fileId) : [];

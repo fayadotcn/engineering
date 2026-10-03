@@ -21,7 +21,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const usum = (units: Record<string, unknown>[], k: string) =>
     units.reduce((a, u) => a + (typeof u[k] === "number" ? (u[k] as number) : 0), 0);
   let declaredReg = false, declaredMeasure = false, declaredOther = false;
-  for (const f of facts.filter((x) => x.key.startsWith("文件汇总:"))) {
+  // 同一文件重导会产生多条「文件汇总:」事实——facts 已倒序，按 key 去重只取最新一版
+  const seenSummary = new Set<string>();
+  for (const f of facts.filter((x) => x.key.startsWith("文件汇总:") && !seenSummary.has(x.key) && seenSummary.add(x.key))) {
     const filename = f.key.slice("文件汇总:".length);
     const fileId = files.find((x) => x.filename === filename)?.id;
     const fileItems = fileId ? items.filter((i) => i.fileId === fileId) : [];
