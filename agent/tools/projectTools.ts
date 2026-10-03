@@ -313,7 +313,7 @@ registerTool({
       if (boqLines.length >= 5) {
         await ctx.emit("activity", { text: `识别到 ${boqLines.length} 条清单行，正在导入` });
         const { parseSemanticFeature, inferDiscipline } = await import("@cost-engine/semantic");
-        const { lineTotal, round2, round3 } = await import("@cost-engine/money");
+        const { round2, round3 } = await import("@cost-engine/money");
         const { toJson } = await import("@shared/json");
         await deleteByFile(file.id);
         await prisma.boqItem.createMany({
@@ -328,7 +328,8 @@ registerTool({
             unit: l.unit,
             quantity: round3(l.quantity),
             unitPrice: round2(l.unitPrice),
-            totalPrice: lineTotal(l.quantity, l.unitPrice).toDecimalPlaces(2),
+            // 保留源表合价真值（与 Excel 口径一致）；量×价不符由「合价算术校验」检出
+            totalPrice: round2(l.totalPrice),
             sortOrder: i,
             discipline: inferDiscipline(l.name, l.feature, ""),
             features: toJson(parseSemanticFeature(l.name, l.feature)),
