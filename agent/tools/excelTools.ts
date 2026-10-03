@@ -375,13 +375,30 @@ registerTool({
       ? (await listQuotations(ctx.projectId)).filter((q) => q.fileId && ownerFiles.has(q.fileId))
       : [];
     if (suppliedRows.length) {
-      const sO = wb.addWorksheet("甲供材表");
-      sO.addRow(["序号", "材料名称", "规格型号", "品牌", "单位", "发包人价格"]).font = bold.font;
-      suppliedRows.forEach((q, i) => {
-        const row = sO.addRow([i + 1, q.materialName, q.spec, q.brand, q.unit, Number(D(q.price).toFixed(2))]);
-        row.getCell(6).numFmt = moneyFmt;
+      // 逐行核对：甲供材对应的清单项若已计主材暂估价 = 重复计价（甲供材不计入承包价）
+      const { matchQuotations } = await import("@cost-engine/match");
+      const { isPricableItem } = await import("@shared/types");
+      const byItem = new Map(items.map((it) => [it.id, it]));
+      const checkRows = matchQuotations(items, suppliedRows).rows.map((r) => {
+        const hits = r.matchedBoqItemIds.map((id) => byItem.get(id)).filter((it): it is typeof items[number] => !!it && isPricableItem(it));
+        const priced = hits.filter((it) => D(it.mainMaterialPrice ?? "0").gt(0));
+        return {
+          status: !hits.length
+            ? (r.status === "LOW_CONFIDENCE" ? "疑似相关·低置信" : "未命中清单")
+            : priced.length ? `重复计价（${priced.length}项已计主材价）` : "未计价·正常",
+          names: hits.slice(0, 3).map((it) => it.name).join("、"),
+          risk: priced.length > 0,
+        };
       });
-      sO.columns = [{ width: 6 }, { width: 30 }, { width: 30 }, { width: 14 }, { width: 8 }, { width: 14 }];
+      const sO = wb.addWorksheet("甲供材表");
+      sO.addRow(["序号", "材料名称", "规格型号", "品牌", "单位", "发包人价格", "计价核对", "对应清单项"]).font = bold.font;
+      suppliedRows.forEach((q, i) => {
+        const c = checkRows[i];
+        const row = sO.addRow([i + 1, q.materialName, q.spec, q.brand, q.unit, Number(D(q.price).toFixed(2)), c?.status ?? "", c?.names ?? ""]);
+        row.getCell(6).numFmt = moneyFmt;
+        if (c?.risk) row.getCell(7).font = { color: { argb: "FFDC2626" }, bold: true };
+      });
+      sO.columns = [{ width: 6 }, { width: 30 }, { width: 30 }, { width: 14 }, { width: 8 }, { width: 14 }, { width: 22 }, { width: 36 }];
     }
 
     // 台账

@@ -8,10 +8,11 @@ import type { BoqItemDTO } from "@shared/types";
 const mocks = vi.hoisted(() => ({
   items: vi.fn(), facts: vi.fn(), fact: vi.fn(), fees: vi.fn(),
   files: vi.fn(), file: vi.fn(), put: vi.fn(), artifact: vi.fn(), inspect: vi.fn(),
+  quotes: vi.fn(),
 }));
 vi.mock("@database/client", () => ({ prisma: { projectFile: { findMany: mocks.files, findUnique: mocks.file }, artifact: { create: mocks.artifact } } }));
 vi.mock("@boq/service", () => ({ listBoq: mocks.items }));
-vi.mock("@material/service", () => ({ listQuotations: vi.fn(async () => []) }));
+vi.mock("@material/service", () => ({ listQuotations: mocks.quotes }));
 vi.mock("@file/storage", () => ({ storage: { put: mocks.put } }));
 vi.mock("@file/inspection", () => ({ ensureInspection: mocks.inspect, mappingToView: vi.fn() }));
 vi.mock("@project/facts", async (importOriginal) => {
@@ -46,6 +47,7 @@ beforeEach(() => {
   mocks.artifact.mockImplementation(async ({ data }) => ({ id: "a1", ...data }));
   mocks.fees.mockResolvedValue(fees());
   mocks.facts.mockResolvedValue([]);
+  mocks.quotes.mockResolvedValue([]);
 });
 
 describe("report.generate 主要材料表与单方造价", () => {
@@ -112,6 +114,7 @@ describe("report.generate 主要材料表与单方造价", () => {
     expect(unit).toBeCloseTo(0.11);
 
     mocks.facts.mockResolvedValue([]);
+  mocks.quotes.mockResolvedValue([]);
     await getTool("report.generate")!.handler!(ctx, {});
     wb = await load(mocks.put.mock.calls[1][0]);
     const labels2: string[] = [];
@@ -168,5 +171,36 @@ describe("report.generate 主要材料表与单方造价", () => {
     const r = await getTool("report.generate")!.handler!(ctx, {});
     expect((r.observation as { error?: string }).error).toContain("清单为空");
     expect(mocks.put).not.toHaveBeenCalled();
+  });
+});
+
+describe("report.generate 甲供材表", () => {
+  it("甲供材行命中已计主材价的清单项 → 标「重复计价」", async () => {
+    mocks.items.mockResolvedValue([item({ name: "镀锌钢管", mainMaterialPrice: "80", features: { material: "镀锌钢管", brand: "国标", tokens: ["dn100", "镀锌", "钢管"] } })]);
+    mocks.quotes.mockResolvedValue([{ id: "q1", fileId: "f1", materialName: "镀锌钢管", spec: "DN100", brand: "国标", unit: "m", price: "75", sheetName: "甲供", features: { material: "镀锌钢管", brand: "国标", tokens: ["dn100", "镀锌", "钢管"] } }]);
+    const r = await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    const sO = wb.getWorksheet("甲供材表");
+    expect(sO).toBeTruthy();
+    const cells: string[] = [];
+    sO!.eachRow((row) => cells.push(String((row.values as unknown[]).slice(1).join("|"))));
+    expect(cells.some((c) => c.includes("重复计价"))).toBe(true);
+    expect(String((r.views?.[0] as { summary?: string } | undefined)?.summary)).toContain("甲供材表");
+  });
+  it("甲供材行未命中清单 → 标「未命中清单」", async () => {
+    mocks.items.mockResolvedValue([item({ name: "镀锌钢管" })]);
+    mocks.quotes.mockResolvedValue([{ id: "q1", fileId: "f1", materialName: "橡塑保温管壳", spec: "", brand: "", unit: "m3", price: "900", sheetName: "甲供", features: {} }]);
+    await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    const cells: string[] = [];
+    wb.getWorksheet("甲供材表")!.eachRow((row) => cells.push(String((row.values as unknown[]).slice(1).join("|"))));
+    expect(cells.some((c) => c.includes("未命中清单"))).toBe(true);
+  });
+  it("无甲供材行 → 不出该 sheet", async () => {
+    mocks.items.mockResolvedValue([item({})]);
+    mocks.quotes.mockResolvedValue([]);
+    await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    expect(wb.getWorksheet("甲供材表")).toBeUndefined();
   });
 });
