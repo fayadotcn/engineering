@@ -133,7 +133,7 @@ export function reduceEvent(s: RunState, e: AgentEventDTO, runId: string): Parti
   }
 }
 
-const INGEST_RE = /(?:分析并|重新)导入文件「(.+)」/;
+export const INGEST_RE = /(?:分析并|重新)导入文件「(.+)」/;
 
 /** 把持久化的 run 历史折叠成对话块与工作区视图。 */
 export function replayRuns(runs: RunRecord[]): Pick<RunState, "blocks" | "views" | "lastViewEvent" | "modelDown"> {

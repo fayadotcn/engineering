@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { AgentEventDTO, BoqItemDTO, CostFactDTO, ReceiptDTO, WorkspaceView } from "@shared/types";
 import { toast } from "./primitives";
 import { api, type AdjustSpec, type FileMeta, type NewItemPayload, type PastePatch, type ProjectSummary } from "./api";
-import { reduceEvent, replayRuns, type ConvBlock } from "./runEvents";
+import { INGEST_RE, reduceEvent, replayRuns, type ConvBlock } from "./runEvents";
 import { FIXED_VIEWS, seedViews } from "./sections";
 import { isBusy, isDirty } from "./busy";
 
@@ -69,7 +69,7 @@ interface State {
   createItem(payload: NewItemPayload): Promise<string | null>;
   reloadBoq(): Promise<void>;
   refreshMeta(): Promise<void>;
-  streamRun(runId: string): Promise<void>;
+  streamRun(runId: string, skipSeqs?: Set<number>): Promise<void>;
   confirmImport(runId: string, approve: boolean): Promise<void>;
   setActiveView(id: string): void;
   closeView(id: string, fallbackId?: string): void;
@@ -182,6 +182,23 @@ export const useStore = create<State>((set, get) => ({
         views, lastViewEvent: replay.lastViewEvent, modelDown: replay.modelDown, ready: true, loadingError: null,
         activeViewId: opening.startsWith("empty:") || views.some((v) => v.id === opening) ? opening : "view:overview",
       });
+      // 接管仍存活的任务流：刷新页面或另窗口发起的导入留下的 RUNNING/
+      // AWAITING_CONFIRM run，只回放历史不接流就会永远停在半截状态；
+      // 已回放的事件按 seq 预置去重，只消费增量。
+      const live = [...runs].reverse().find((r) => !r.legacy && (r.status === "RUNNING" || r.status === "AWAITING_CONFIRM"));
+      if (live) {
+        const importRun = INGEST_RE.test(live.userMessage);
+        set({ running: true, agentRunning: !importRun, importRunning: importRun });
+        void (async () => {
+          try {
+            await get().streamRun(live.id, new Set(live.events.map((e) => e.seq)));
+            if (get().projectId !== projectId) return;
+            await Promise.all([get().refreshMeta(), get().reloadBoq()]);
+          } finally {
+            if (get().projectId === projectId) set({ running: false, agentRunning: false, importRunning: false });
+          }
+        })();
+      }
     } catch (error) {
       if (get().projectId === projectId && version === loadVersion) set({ ready: true, loadingError: errText(error, "加载失败") });
     }
@@ -222,10 +239,11 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  async streamRun(runId) {
+  async streamRun(runId, skipSeqs) {
     const projectId = get().projectId;
-    // 事件服务端已持久化并支持重放（seq 递增）——断线重连后按 seq 去重
-    const seen = new Set<number>();
+    // 事件服务端已持久化并支持重放（seq 递增）——断线重连后按 seq 去重；
+    // init 接管存活任务时传入已回放事件的 seq，避免历史块翻倍
+    const seen = skipSeqs ?? new Set<number>();
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await fetch(api.streamUrl(runId));
