@@ -246,6 +246,7 @@ export async function createBoqItem(
         fileId: src?.fileId ?? null,
         sheetName: src?.sheetName ?? "手工补录",
         sectionPath: src?.sectionPath ?? "",
+        unitProject: src?.unitProject ?? "",
         rowIndex: -1,
         code: body.code ?? "",
         name: body.name,

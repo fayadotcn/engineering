@@ -31,7 +31,7 @@ export async function importQuotationsFromSheets(
         spec,
         unit: row.cells.unit ?? "",
         brand: row.cells.brand ?? "",
-        price: round2(Number.isFinite(priceNum) ? priceNum : 0),
+        price: round2(Number.isFinite(priceNum) && priceNum >= 0 ? priceNum : 0),
         sheetName: sheet.sheetName,
         rowIndex: row.rowIndex,
         features: toJson(features),

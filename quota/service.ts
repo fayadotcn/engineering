@@ -1,4 +1,5 @@
 import { QUOTA_LIBRARY, type QuotaEntry } from "./library";
+import { fromJson } from "@shared/json";
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const toRe = (v: unknown) =>
   typeof v === "string" && v ? new RegExp(escapeRe(v), "i") : undefined;
@@ -23,8 +24,9 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
       orderBy: [{ code: "asc" }, { id: "asc" }],
     });
     const db: QuotaEntry[] = rows.map((r) => {
-      const mk = JSON.parse(r.matchKeys || "{}") as Record<string, string>;
-      const raw = JSON.parse(r.raw || "{}") as { gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string };
+      // 脏 JSON 行不拖垮整库匹配——兜底为空对象，该行退化为低分候选
+      const mk = fromJson<Record<string, string>>(r.matchKeys, {});
+      const raw = fromJson<{ gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string }>(r.raw, {});
       return {
         code: r.code,
         name: r.name,

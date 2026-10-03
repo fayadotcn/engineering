@@ -775,7 +775,7 @@ export async function searchMaterialPrices(
     region: r.region,
     period: r.period,
     source: r.dataset?.name ?? "材料库",
-    features: JSON.parse(r.features || "{}"),
+    features: fromJson(r.features, {}),
   }));
   // 排序：适用品牌命中 > 地区命中 > 期次新→旧（无偏好时纯期次排序，「最新优先」恒定生效）
   const brands = applicableBrands(prefs, q);
