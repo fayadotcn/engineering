@@ -320,35 +320,41 @@ registerTool({
       const { extractPdfText, detectBoqLines } = await import("@file/pdf");
       pdfPages = await extractPdfText(buffer);
       const boqLines = detectBoqLines(pdfPages);
-      // 重导幂等与 Excel 路径一致：本轮没识别出清单行时也要清掉旧行，不留陈旧数据
-      await deleteByFile(file.id);
+      // 重导幂等与 Excel 路径一致：清旧行+写新行同事务（本轮没识别出清单行时
+      // 也要清掉旧行，不留陈旧数据；写入失败旧数据不丢）
       if (boqLines.length >= 5) {
         await ctx.emit("activity", { text: `识别到 ${boqLines.length} 条清单行，正在导入` });
         const { parseSemanticFeature, inferDiscipline } = await import("@cost-engine/semantic");
         const { round2, round3 } = await import("@cost-engine/money");
         const { toJson } = await import("@shared/json");
-        await prisma.boqItem.createMany({
-          data: boqLines.map((l, i) => ({
-            projectId: ctx.projectId,
-            fileId: file.id,
-            sheetName: "PDF文本层",
-            rowIndex: l.line,
-            code: l.code,
-            name: l.name,
-            rawFeature: l.feature,
-            unit: l.unit,
-            quantity: round3(l.quantity),
-            unitPrice: round2(l.unitPrice),
-            // 保留源表合价真值（与 Excel 口径一致）；量×价不符由「合价算术校验」检出
-            totalPrice: round2(l.totalPrice),
-            sortOrder: i,
-            discipline: inferDiscipline(l.name, l.feature, ""),
-            features: toJson(parseSemanticFeature(l.name, l.feature)),
-          })),
+        await prisma.$transaction(async (tx) => {
+          await deleteByFile(file.id, tx);
+          await tx.boqItem.createMany({
+            data: boqLines.map((l, i) => ({
+              projectId: ctx.projectId,
+              fileId: file.id,
+              sheetName: "PDF文本层",
+              rowIndex: l.line,
+              code: l.code,
+              name: l.name,
+              rawFeature: l.feature,
+              unit: l.unit,
+              quantity: round3(l.quantity),
+              unitPrice: round2(l.unitPrice),
+              // 保留源表合价真值（与 Excel 口径一致）；量×价不符由「合价算术校验」检出
+              totalPrice: round2(l.totalPrice),
+              sortOrder: i,
+              discipline: inferDiscipline(l.name, l.feature, ""),
+              features: toJson(parseSemanticFeature(l.name, l.feature)),
+            })),
+          });
         });
         imported = boqLines.length;
         kind = "BOQ_TENDER";
         confidence = 0.7;
+      } else {
+        // 识别不出清单行也清掉旧行（重导幂等）
+        await deleteByFile(file.id);
       }
     }
 
