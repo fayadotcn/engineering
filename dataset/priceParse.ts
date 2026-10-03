@@ -171,7 +171,8 @@ export function buildPriceRows(
       if (!row.isItem && !(spec && price)) continue;
       const name = (c.materialName || c.name || spec).trim().replace(/[。；;，,]+$/, "");
       if (!name) continue;
-      if (!price) {
+      // 非正价格（0/负数/面议等非数值）不入库——价格库里零价负价只会污染匹配
+      if (price <= 0) {
         skippedNoPrice++;
         continue;
       }
