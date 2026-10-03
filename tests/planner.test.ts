@@ -397,3 +397,24 @@ describe("人工组价路由（quota.setItemQuota）", () => {
     expect(s?.args.patches).toEqual([{ id: "i2", code: "031001001001" }]);
   });
 });
+
+describe("定额库检索路由（quota.search）", () => {
+  it("「定额库里有什么支吊架子目」→ quota.search，query 剥掉意图词", async () => {
+    const p = await plan("定额库里有什么支吊架子目");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("quota.search");
+    expect(s?.args.query).toContain("支吊架");
+  });
+  it("「查一下DN150的定额」→ quota.search 提取 DN150", async () => {
+    const p = await plan("查一下DN150的定额");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("quota.search");
+    expect(s?.args.query).toBe("DN150");
+  });
+  it("「按定额测算」仍走整单匹配不被检索截胡", async () => {
+    const p = await plan("按定额测算一下");
+    const tools = [];
+    for (const st of p.steps) tools.push((await resolve(st))?.tool);
+    expect(tools).toContain("quota.match");
+  });
+});

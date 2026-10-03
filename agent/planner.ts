@@ -425,6 +425,16 @@ export class RulePlanner implements Planner {
       return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的清单项` : "没有可组价的清单项" };
     }
 
+    // 定额库检索：「定额库里有什么支吊架子目」「查一下DN150的定额」——查子目不走整单匹配
+    if (/定额|子目/.test(m) && /查|搜|找|检索|有没有|有哪些|有什么|列出|看看/.test(m) && !/测算|组价|写回|说明|规则|费率|怎么|改为|增列|清除/.test(m)) {
+      const q = m
+        .replace(/查一下|查|搜|找|检索|看看|看|一下|下|定额库|定额|子目|有没有|有哪些|有什么|列出|的|吗|呢|啊|吧|？|\?|，|,|、|里|中|内|请|帮我/g, " ")
+        .replace(/\s+/g, " ").trim();
+      return {
+        steps: [{ tool: "quota.search", args: { query: q || m.slice(0, 30) }, activity: "正在检索定额库子目" }],
+      };
+    }
+
     // 定额测算: "按四川2020定额测算" / "定额组价" / "测算一下"
     if (/定额|组价|测算/.test(m)) {
       return {
