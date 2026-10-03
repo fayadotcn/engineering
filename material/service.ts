@@ -22,6 +22,8 @@ export async function importQuotationsFromSheets(
       if (!name || !row.isItem) continue;
       const spec = row.cells.spec ?? "";
       const features = parseSemanticFeature(`${name} ${spec}`, "");
+      // 询价单元格容错：「面议/暂估/—」等非数值落 0（等价无报价），不能让 Decimal 抛错拖垮整个文件导入
+      const priceNum = Number((row.cells.price ?? "").replace(/[,，\s]/g, ""));
       data.push({
         projectId,
         fileId,
@@ -29,7 +31,7 @@ export async function importQuotationsFromSheets(
         spec,
         unit: row.cells.unit ?? "",
         brand: row.cells.brand ?? "",
-        price: round2(D(row.cells.price?.replace(/,/g, "") || 0)),
+        price: round2(Number.isFinite(priceNum) ? priceNum : 0),
         sheetName: sheet.sheetName,
         rowIndex: row.rowIndex,
         features: toJson(features),

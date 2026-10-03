@@ -30,6 +30,30 @@ export interface Planner {
   plan(ctx: RunContext, message: string, extra?: Record<string, unknown>): Promise<Plan>;
 }
 
+/** 从消息里提取调价/改价的范围词（「把电缆的单价」→"电缆"）；无范围词返回 "" */
+const scopeWordOf = (m: string): string =>
+  m
+    .match(/([一-龥A-Za-z]{2,12}?)(?:的)?(?:单价|综合单价|工程量|数量|价格)/)?.[1]
+    ?.replace(/^(把|将|对|请|所有|全部|整个|统一|综合|清单项?|各项|项目|相同项?|同项|相同|各)+/, "") ?? "";
+
+/** 范围词过滤清单项：类别词走语义 category（容错「配电箱/配电箱柜」级差异），否则名称/特征子串 */
+const scopeFilter = <T extends { name: string; rawFeature: string; features: { category?: string } }>(
+  items: T[],
+  scope: string
+): T[] => {
+  if (!scope) return items;
+  const cats = MATERIAL_CATEGORIES.filter((c) => scope.includes(c.replace(/柜|设备/, "")));
+  return items.filter(
+    (i) =>
+      cats.some((c) => {
+        const fc = i.features.category ?? "";
+        return !!fc && (fc === c || fc.includes(c) || c.includes(fc));
+      }) ||
+      i.name.includes(scope) ||
+      i.rawFeature.includes(scope)
+  );
+};
+
 const MATERIAL_CATEGORIES = [
   "电缆", "电线", "桥架", "管道", "阀门", "灯具", "配电箱柜", "母线",
   "支架", "设备", "喷淋设备", "消防设备", "开关插座", "套管", "保温",
@@ -154,6 +178,80 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 总价按比例调整：「总价下浮5%」「含税报价整体上浮3个点」——
+    // 先取当前总价算目标值，再走 quantity.adjust（默认调综合单价，合规）。
+    // 必须在「费用汇总」之前：「含税总价下浮5%」也含「含税总价」字样。
+    const pctM = m.match(/(下浮|上浮|下调|上调|降低|提高|优惠|让利)\s*(\d+(?:\.\d+)?)\s*(?:%|％|个点|点)/);
+    if (pctM && /总价|造价|报价|总额|含税|清单/.test(m)) {
+      const dir = /下|降|优惠|让利/.test(pctM[1]) ? -1 : 1;
+      const pct = Number(pctM[2]);
+      const inclTax = /含税/.test(m);
+      const taxFact = ctx.facts.find((f) => f.key === "税率")?.value;
+      const taxRate = inclTax ? (parseRateValue(taxFact) ?? 0.09) : 0;
+      return {
+        steps: [
+          { tool: "cost.calculate", args: {}, activity: "正在取当前总价" },
+          async (results): Promise<PlanStep | null> => {
+            const obs = results[0]?.observation as { exclTax?: string; inclTax?: string | null } | undefined;
+            const excl = Number(obs?.exclTax);
+            const base = inclTax ? (obs?.inclTax ? Number(obs.inclTax) : excl * (1 + taxRate)) : excl;
+            if (!Number.isFinite(base) || !(base > 0)) return null;
+            const targetTotal = Number((base * (1 + (dir * pct) / 100)).toFixed(2));
+            return {
+              tool: "quantity.adjust",
+              args: { targetTotal, taxRate, apply: true },
+              activity: `正在按${pctM[1]} ${pct}% 反算（目标 ${targetTotal}）`,
+            };
+          },
+        ],
+      };
+    }
+
+    // 范围化比例调整：「电缆单价下浮5%」「管道工程量上浮3个点」——
+    // 锁定范围的项按比例调，数学上等价于把目标总价设成 现合计+范围合计×pct，
+    // 复用 quantity.adjust 的残差分分钱吸收与确认门。
+    const scopePctM = m.match(/(下浮|上浮|下调|上调|降低|提高|优惠|让利)\s*(\d+(?:\.\d+)?)\s*(?:%|％|个点|点)/);
+    if (
+      scopePctM &&
+      /单价|综合单价|工程量|数量/.test(m) &&
+      !/总价|造价|总额|含税|控制|调到|调到|到\s*\d/.test(m)
+    ) {
+      const dir = /下|降|优惠|让利/.test(scopePctM[1]) ? -1 : 1;
+      const pct = Number(scopePctM[2]);
+      const modeQty = /工程量|数量/.test(m) && !/单价|价格/.test(m);
+      const scope = scopeWordOf(m);
+      return {
+        steps: [
+          async (): Promise<PlanStep | null> => {
+            const { listBoq } = await import("@boq/service");
+            const { isPricableItem } = await import("@shared/types");
+            const items = await listBoq(ctx.projectId);
+            const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+            const pool = scopeFilter(
+              leaf.filter((i) => isPricableItem(i) && !Number.isNaN(Number(i.totalPrice))),
+              scope
+            );
+            if (!pool.length) return null;
+            const subtotal = pool.reduce((a, i) => a + Number(i.totalPrice), 0);
+            const allTotal = leaf.reduce((a, i) => a + Number(i.totalPrice), 0);
+            const targetTotal = Number((allTotal + (subtotal * dir * pct) / 100).toFixed(2));
+            const allowedItemIds = scope ? pool.map((i) => i.id) : undefined;
+            return {
+              tool: "quantity.adjust",
+              args: {
+                targetTotal,
+                mode: modeQty ? "quantity" : "price",
+                ...(allowedItemIds ? { allowedItemIds } : {}),
+                apply: true,
+              },
+              activity: `正在将${scope ?? "全部"}项${modeQty ? "工程量" : "综合单价"}${scopePctM[1]} ${pct}%`,
+            };
+          },
+        ],
+        fallbackMessage: scope ? `没有找到「${scope}」的可计价清单项` : undefined,
+      };
+    }
+
     // 费用汇总/取费（无目标金额时）：分部分项→措施→规费→税金→含税造价
     if (/费用汇总|取费|造价汇总|汇总表|含税总价|总价是多少|总造价|费用构成/.test(m))
       return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用" }] };
@@ -255,36 +353,57 @@ export class RulePlanner implements Planner {
       return { steps };
     }
 
-    // 统一单价: 相同项统一为最低价/均价/指定价
-    if (/统一|改为|调成|调整为/.test(m) && /单价|价格/.test(m)) {
+    // 改价/统一单价: 「电缆单价改为5元」（范围+指定值）、「相同项统一为最低价/均价」
+    if (/统一|改为|调成|调整为|调到|调为|设为/.test(m) && /单价|价格|综合单价/.test(m)) {
+      const setM = m.match(/(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)/);
       const mode = /最低|最小/.test(m) ? "min" : /平均|均值/.test(m) ? "mean" : "min";
-      return {
-        steps: [
-          { tool: "boq.findSameItemDifferentPrice", args: {}, activity: "正在分组比较" },
-          async (results): Promise<PlanStep | null> => {
-            const obs = results[0]?.observation as { groups?: string[] };
-            if (!obs?.groups?.length) return null;
-            const { listBoq } = await import("@boq/service");
-            const { findSameItemDifferentPrice } = await import("@cost-engine/compare");
-            const items = await listBoq(ctx.projectId);
-            const rows = findSameItemDifferentPrice(items);
-            const patches: { id: string; unitPrice: string }[] = [];
-            for (const r of rows) {
-              const prices = r.items.map((i) => Number(i.unitPrice));
-              const target =
-                mode === "min"
-                  ? Math.min(...prices)
-                  : prices.reduce((a, b) => a + b, 0) / prices.length;
-              for (const it of r.items)
-                patches.push({ id: it.id, unitPrice: target.toFixed(2) });
-            }
-            return {
-              tool: "boq.update",
-              args: { patches, reason: `相同项统一为${mode === "min" ? "最低价" : "平均价"}` },
-              activity: "正在统一单价并生成 Diff",
-            };
+      const scope = scopeWordOf(m);
+      const computePatches = async (): Promise<PlanStep | null> => {
+        const { listBoq } = await import("@boq/service");
+        const { isPricableItem } = await import("@shared/types");
+        const items = (await listBoq(ctx.projectId)).filter(
+          (i) => !i.isHeader && i.name.trim() && isPricableItem(i)
+        );
+        const pool = scopeFilter(items, scope);
+        if (!pool.length) return null;
+        const patches: { id: string; unitPrice: string }[] = [];
+        if (setM) {
+          // 指定值口径：范围内所有可计价项直接设价（不要求先在差异组里）
+          const v = Number(setM[1].replace(/,/g, ""));
+          if (!Number.isFinite(v)) return null;
+          for (const it of pool) patches.push({ id: it.id, unitPrice: v.toFixed(2) });
+        } else {
+          const { findSameItemDifferentPrice } = await import("@cost-engine/compare");
+          const inPool = new Set(pool.map((i) => i.id));
+          for (const r of findSameItemDifferentPrice(items)) {
+            const targetItems = scope ? r.items.filter((i) => inPool.has(i.id)) : r.items;
+            if (!targetItems.length) continue;
+            const prices = r.items.map((i) => Number(i.unitPrice));
+            const target =
+              mode === "min" ? Math.min(...prices) : prices.reduce((a, b) => a + b, 0) / prices.length;
+            for (const it of targetItems) patches.push({ id: it.id, unitPrice: target.toFixed(2) });
+          }
+        }
+        if (!patches.length) return null;
+        return {
+          tool: "boq.update",
+          args: {
+            patches,
+            reason: setM
+              ? `${scope || "全部"}单价设为 ${setM[1]}`
+              : `相同项统一为${mode === "min" ? "最低价" : "平均价"}${scope ? `（范围：${scope}）` : ""}`,
           },
-        ],
+          activity: "正在更新单价并生成 Diff",
+        };
+      };
+      return {
+        steps: setM
+          ? [computePatches]
+          : [
+              { tool: "boq.findSameItemDifferentPrice", args: {}, activity: "正在分组比较" },
+              computePatches,
+            ],
+        fallbackMessage: scope ? `没有可更新的「${scope}」清单项` : undefined,
       };
     }
 

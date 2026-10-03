@@ -135,12 +135,12 @@ export async function updateBoqItems(
     const qty = patch.quantity !== undefined ? round3(D(patch.quantity)) : cur.quantity;
     const price =
       patch.unitPrice !== undefined ? round2(D(patch.unitPrice)) : cur.unitPrice;
-    if (!qty.isFinite() || !price.isFinite() || price.lt(0)) throw new Error("工程量和综合单价必须为有效数字，单价不能为负数");
+    if (!qty.isFinite() || qty.lt(0) || !price.isFinite() || price.lt(0)) throw new Error("工程量和综合单价必须为有效数字，不能为负数");
     if (patch.mainMaterialPrice !== undefined && (!D(patch.mainMaterialPrice).isFinite() || D(patch.mainMaterialPrice).lt(0))) throw new Error("主材暂估价必须为非负有效数字");
     for (const k of ["laborUnitPrice", "machineUnitPrice"] as const)
       if (patch[k] !== undefined && (!D(patch[k]).isFinite() || D(patch[k]).lt(0))) throw new Error("人工/机械单价必须为非负有效数字");
     if (patch.name !== undefined && !patch.name.trim()) throw new Error("项目名称不能为空");
-    if (patch.totalPrice !== undefined && !D(patch.totalPrice).isFinite()) throw new Error("合价必须为有效数字");
+    if (patch.totalPrice !== undefined && (!D(patch.totalPrice).isFinite() || D(patch.totalPrice).lt(0))) throw new Error("合价必须为非负有效数字");
     const features =
       patch.name !== undefined || patch.rawFeature !== undefined
         ? toJson(

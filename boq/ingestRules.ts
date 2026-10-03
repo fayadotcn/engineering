@@ -37,14 +37,17 @@ export function decideRows(sheet: ParsedSheet): RowDecision[] {
   let measureBlock = cur === "单价措施";
   let prevSeq: number | null = null;
   const mixedSheet = cur === "分部分项" && /单价措施/.test(sheet.sheetName);
+  // 序号优先取已映射的 seq 列；空值/未映射回退第一列（序号居 A 列的惯例）
+  const seqOf = (r: (typeof sheet.rows)[number]) =>
+    String(r.cells.seq?.trim() || r.raw?.[0] || "").trim();
   const lumpParentSeqs = new Set(
     sheet.rows
-      .filter((r) => r.isItem && /^\d+$/.test(String(r.raw?.[0] ?? "").trim()))
-      .map((r) => String(r.raw![0]).trim())
+      .filter((r) => r.isItem && /^\d+$/.test(seqOf(r)))
+      .map((r) => seqOf(r))
   );
 
   return sheet.rows.map((row) => {
-    const seqCell = String(row.raw?.[0] ?? "").trim();
+    const seqCell = seqOf(row);
     const name = row.cells.name ?? "";
     if (row.isHeader && !row.isItem) {
       const ft = sectionFeeType(name);

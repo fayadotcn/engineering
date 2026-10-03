@@ -94,6 +94,25 @@ describe("decideRows — 总价措施父子行去重", () => {
     expect(d.every((x) => !x.skip)).toBe(true);
   });
 
+  it("序号列不在 A 列（前置专业列）→ 父子行去重仍生效", () => {
+    const s: ParsedSheet = {
+      type: "BOQ",
+      sheetName: "3.3 表-11 总价措施项目清单与计价表",
+      headerRow: 0,
+      columns: { seq: 1, code: 2, name: 3 },
+      headerLabels: [],
+      feeType: "总价措施",
+      rows: [
+        item(["电气", "1", "031302001001", "安全文明施工费"], { seq: "1", code: "031302001001", name: "安全文明施工费" }),
+        item(["电气", "1.1", "", "基本费"], { seq: "1.1", name: "基本费" }),
+        item(["电气", "1.2", "", "增加费"], { seq: "1.2", name: "增加费" }),
+        item(["电气", "2", "031302002001", "夜间施工"], { seq: "2", code: "031302002001", name: "夜间施工" }),
+      ],
+    };
+    const d = decideRows(s);
+    expect(d.map((x) => x.skip)).toEqual([false, true, true, false]);
+  });
+
   it("分部分项表不去重（1.1 可能是真实清单项）", () => {
     const s = boqSheet("3.2 表-08 分部分项工程和单价措施项目清单与计价表", [
       item(["1", "040501004001", "", "塑料管"], { code: "040501004001", name: "塑料管" }),
