@@ -48,7 +48,9 @@ export async function importQuotationsFromSheets(
 export async function listQuotations(projectId: string): Promise<QuotationItemDTO[]> {
   const rows = await prisma.quotationItem.findMany({
     where: { projectId },
-    orderBy: { rowIndex: "asc" },
+    // 新上传的询价文件优先：多文件同名材料命中时取最新报价口径，
+    // 同文件内按行序（表内排列即报价顺序）
+    orderBy: [{ file: { createdAt: "desc" } }, { rowIndex: "asc" }],
   });
   return rows.map(toQuoteDTO);
 }
