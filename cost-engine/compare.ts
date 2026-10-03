@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { D, decStr, lineTotal, maxD, median, minD } from "./money";
-import { featureCompatible, groupKey } from "./semantic";
+import { featureCompatible, groupKey, normUnit } from "./semantic";
 import { isPricableItem, type AnomalyRow, type BoqItemDTO } from "@shared/types";
 
 // Candidate Grouping -> Feature Comparison -> Price Comparison.
@@ -189,6 +189,64 @@ export function findArithmeticMismatches(
       reason: `源表合价与「工程量×综合单价」不符，差异合计 ${totalDiff.toFixed(2)} 元——疑似源表公式断链、改量忘改价或抄写错误，请核对原始 Excel`,
     },
   ];
+}
+
+/**
+ * 单位不一致：同语义组（名称/类别/材质/规格一致，不计单位）内出现不同量纲，
+ * 如电缆一部分用 m 一部分用 km——量纲错位会让合价差 1000 倍，清标必须曝光。
+ * 同义单位（米≡m、平米≡㎡）经 normUnit 归一，不算不一致。
+ */
+export function findUnitInconsistencies(items: BoqItemDTO[]): AnomalyRow[] {
+  const groups = new Map<string, BoqItemDTO[]>();
+  for (const it of items) {
+    if (it.isHeader || !it.name.trim() || !it.unit.trim()) continue;
+    if (D(it.quantity).isZero()) continue;
+    const key = groupKey(it.name, "", it.features); // 不计单位
+    const arr = groups.get(key) ?? [];
+    arr.push(it);
+    groups.set(key, arr);
+  }
+  const rows: AnomalyRow[] = [];
+  for (const [key, group] of groups) {
+    const units = [...new Set(group.map((g) => normUnit(g.unit)).filter(Boolean))];
+    if (units.length < 2) continue;
+    rows.push({
+      groupKey: key,
+      label: label(group[0]),
+      items: group.map(toRowItem),
+      prices: [...new Set(group.map((g) => decStr(D(g.unitPrice))))],
+      reason: `同语义清单项单位不一致（${units.join(" / ")}），疑似量纲或编制口径错误`,
+    });
+  }
+  return rows;
+}
+
+/**
+ * 一码多名：同一项目编码对应不同名称——GB50500 清单编码应唯一，
+ * 同码异物说明编码错用/复制错行，结算对审会按编码对不上量。
+ */
+export function findCodeNameMismatch(items: BoqItemDTO[]): AnomalyRow[] {
+  const byCode = new Map<string, BoqItemDTO[]>();
+  for (const it of items) {
+    if (it.isHeader || !it.name.trim() || !it.code.trim()) continue;
+    const key = it.code.trim().replace(/\s+/g, "");
+    const arr = byCode.get(key) ?? [];
+    arr.push(it);
+    byCode.set(key, arr);
+  }
+  const rows: AnomalyRow[] = [];
+  for (const [code, group] of byCode) {
+    const names = [...new Set(group.map((g) => g.name.trim().replace(/\s+/g, "")))];
+    if (names.length < 2) continue;
+    rows.push({
+      groupKey: `CODE:${code}`,
+      label: code,
+      items: group.map(toRowItem),
+      prices: [...new Set(group.map((g) => decStr(D(g.unitPrice))))],
+      reason: `同一项目编码对应 ${names.length} 个不同名称（${names.join(" / ")}），清单编码应唯一，疑似编码错用`,
+    });
+  }
+  return rows;
 }
 
 /** 重复项: code+name+unit identical AND semantic features identical. */

@@ -3,10 +3,12 @@ import { registerTool } from "./registry";
 import { listBoq, updateBoqItems } from "@boq/service";
 import {
   findArithmeticMismatches,
+  findCodeNameMismatch,
   findDuplicateItems,
   findFeatureMismatch,
   findPriceAnomalies,
   findSameItemDifferentPrice,
+  findUnitInconsistencies,
 } from "@cost-engine/compare";
 import { fmtMoney } from "@cost-engine/money";
 import type { AnomalyRow, DiffRow, WorkspaceView } from "@shared/types";
@@ -17,6 +19,8 @@ const ANOMALY_LABEL: Record<string, string> = {
   FEATURE_MISMATCH: "项目特征不一致",
   DUPLICATE: "重复清单项",
   ARITHMETIC: "合价算术校验",
+  UNIT_INCONSISTENT: "单位不一致",
+  CODE_MISMATCH: "一码多名",
 };
 
 function anomalyView(anomalyType: string, rows: AnomalyRow[]): WorkspaceView {
@@ -183,8 +187,40 @@ registerTool({
 });
 
 registerTool({
+  name: "boq.findUnitInconsistencies",
+  description: "检查同语义清单项单位不一致（如一部分 m 一部分 km）——量纲错位会让合价数量级出错",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const rows = findUnitInconsistencies(items);
+    return {
+      observation: { count: rows.length },
+      views: [anomalyView("UNIT_INCONSISTENT", rows)],
+      message: rows.length ? `发现 ${rows.length} 组单位不一致` : "未发现单位不一致",
+    };
+  },
+});
+
+registerTool({
+  name: "boq.findCodeNameMismatch",
+  description: "检查一码多名：同一项目编码对应不同名称——GB50500 清单编码应唯一",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const items = await listBoq(ctx.projectId);
+    const rows = findCodeNameMismatch(items);
+    return {
+      observation: { count: rows.length },
+      views: [anomalyView("CODE_MISMATCH", rows)],
+      message: rows.length ? `发现 ${rows.length} 组一码多名` : "未发现一码多名",
+    };
+  },
+});
+
+registerTool({
   name: "boq.compare",
-  description: "对比清单：相同项不同价 + 单价异常 + 特征不一致 + 合价算术校验（一次全查）",
+  description: "对比清单：相同项不同价 + 单价异常 + 特征不一致 + 合价算术校验 + 单位不一致 + 一码多名（一次全查）",
   implemented: true,
   schema: z.object({}),
   handler: async (ctx) => {
@@ -193,16 +229,20 @@ registerTool({
     const b = findPriceAnomalies(items);
     const c = findFeatureMismatch(items);
     const d = findArithmeticMismatches(items);
+    const e = findUnitInconsistencies(items);
+    const f = findCodeNameMismatch(items);
     const arith = d[0]?.items.length ?? 0;
     return {
-      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith },
+      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith, unitInconsistent: e.length, codeMismatch: f.length },
       views: [
         anomalyView("SAME_ITEM_DIFF_PRICE", a),
         anomalyView("PRICE_ANOMALY", b),
         anomalyView("FEATURE_MISMATCH", c),
         anomalyView("ARITHMETIC", d),
+        anomalyView("UNIT_INCONSISTENT", e),
+        anomalyView("CODE_MISMATCH", f),
       ],
-      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项`,
+      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项，单位不一致 ${e.length} 组，一码多名 ${f.length} 组`,
     };
   },
 });

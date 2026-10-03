@@ -203,6 +203,30 @@ export function inferDiscipline(
 }
 
 /**
+ * 单位归一化：同义单位收敛（米≡m、平米≡㎡、公斤≡kg…），
+ * 量纲不同的单位（m vs km、个 vs 台）保持区分——那是「单位不一致」检查的对象。
+ */
+export function normUnit(unit: string): string {
+  const u = unit
+    .trim()
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  const alias: Record<string, string> = {
+    米: "m", 公尺: "m", m: "m",
+    平方米: "㎡", 平米: "㎡", "㎡": "㎡", m2: "㎡", "m²": "㎡",
+    立方米: "m³", 立米: "m³", "m³": "m³", m3: "m³",
+    公里: "km", 千米: "km", km: "km",
+    公斤: "kg", 千克: "kg", kg: "kg",
+    吨: "t", t: "t",
+    克: "g", g: "g",
+    毫米: "mm", mm: "mm",
+    厘米: "cm", cm: "cm",
+  };
+  return alias[u] ?? u;
+}
+
+/**
  * Canonical group key for "same item" candidate grouping.
  * Items that cannot be parsed fall back to normalized name — never raw string equality.
  */
@@ -211,6 +235,7 @@ export function groupKey(
   unit: string,
   f: BoqSemanticFeature
 ): string {
+  const u = normUnit(unit);
   const parts = [
     f.category ?? "",
     f.material ?? "",
@@ -219,10 +244,10 @@ export function groupKey(
     f.power ?? "",
     f.connectionMethod ?? "",
     f.system ?? "",
-    unit,
+    u,
   ].filter(Boolean);
   if (parts.length >= 2) return parts.join("|");
-  return `RAW|${norm(name).replace(/\s+/g, "")}|${unit}`;
+  return `RAW|${norm(name).replace(/\s+/g, "")}|${u}`;
 }
 
 /** Feature-level equality used after grouping (guards false positives). */

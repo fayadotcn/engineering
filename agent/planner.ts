@@ -61,7 +61,7 @@ const MATERIAL_CATEGORIES = [
 ];
 
 const CAPABILITIES = `我可以直接执行这些造价任务：
-• 检查清单：相同项不同单价、综合单价异常、项目特征不一致、重复项、合价算术校验
+• 检查清单：相同项不同单价、综合单价异常、项目特征不一致、重复项、合价算术校验、单位不一致、一码多名
 • 询价处理：把询价文件价格匹配并写回清单，未询到的自动标记
 • 金额分析：各专业占比、电缆/桥架/管道/阀门等材料类别占比
 • 成本构成：人材机费用占比、毛利与成本倒挂项（报价低于成本）
@@ -484,6 +484,14 @@ export class RulePlanner implements Planner {
     if (/单价异常|价格异常|偏高|偏低|偏离/.test(m))
       return {
         steps: [{ tool: "boq.findPriceAnomalies", args: {}, activity: "正在比较组内单价" }],
+      };
+    if (/单位.{0,4}(不一致|不符|不统一|不同|错)|量纲/.test(m))
+      return {
+        steps: [{ tool: "boq.findUnitInconsistencies", args: {}, activity: "正在查单位不一致" }],
+      };
+    if (/编码.{0,4}(重复|错用|不一致|不同|错|唯一)|一码多/.test(m))
+      return {
+        steps: [{ tool: "boq.findCodeNameMismatch", args: {}, activity: "正在查一码多名" }],
       };
     if (/算术|验算|合价.{0,4}(不符|不[等一]致|错|校验|验算)|量.{0,2}价.{0,4}(不符|错|校验|合价)|算错|计算错误|清标/.test(m))
       return {

@@ -106,3 +106,67 @@ describe("findArithmeticMismatches（清标算术校验）", () => {
     expect(findArithmeticMismatches([a, b])).toHaveLength(0);
   });
 });
+
+describe("单位归一化与 findUnitInconsistencies", () => {
+  it("米/m 同义归一：相同项跨表写法不一致仍同组比价", () => {
+    const items = [
+      item("电力电缆", "YJV-4×35+1×16", "m", "100", "120"),
+      item("电力电缆", "YJV-4×35+1×16", "米", "50", "150"),
+    ];
+    const rows = findSameItemDifferentPrice(items);
+    expect(rows.length).toBe(1);
+  });
+
+  it("m vs km（量纲不同）→ 单位不一致报警", async () => {
+    const { findUnitInconsistencies } = await import("@cost-engine/compare");
+    const items = [
+      item("电力电缆", "YJV-4×35+1×16", "m", "100", "120"),
+      item("电力电缆", "YJV-4×35+1×16", "km", "0.1", "120000"),
+    ];
+    const rows = findUnitInconsistencies(items);
+    expect(rows.length).toBe(1);
+    expect(rows[0].reason).toContain("m");
+    expect(rows[0].reason).toContain("km");
+  });
+
+  it("米 vs m 同义 → 不报单位不一致", async () => {
+    const { findUnitInconsistencies } = await import("@cost-engine/compare");
+    const items = [
+      item("电力电缆", "YJV-4×35", "米", "100", "120"),
+      item("电力电缆", "YJV-4×35", "m", "50", "120"),
+    ];
+    expect(findUnitInconsistencies(items).length).toBe(0);
+  });
+
+  it("不同特征不合并：DN100钢管m 与 DN200钢管m 不算单位不一致", async () => {
+    const { findUnitInconsistencies } = await import("@cost-engine/compare");
+    const items = [
+      item("镀锌钢管", "DN100", "m", "100", "85"),
+      item("镀锌钢管", "DN200", "m", "50", "160"),
+    ];
+    expect(findUnitInconsistencies(items).length).toBe(0);
+  });
+});
+
+describe("findCodeNameMismatch（一码多名）", () => {
+  it("同编码不同名称 → 编码错用", async () => {
+    const { findCodeNameMismatch } = await import("@cost-engine/compare");
+    const items = [
+      item("镀锌钢管", "DN100", "m", "10", "85", "031001001001"),
+      item("闸阀", "DN100", "个", "4", "320", "031001001001"),
+    ];
+    const rows = findCodeNameMismatch(items);
+    expect(rows.length).toBe(1);
+    expect(rows[0].items.length).toBe(2);
+    expect(rows[0].reason).toContain("唯一");
+  });
+
+  it("同编码同名称（清单分行正常）不报", async () => {
+    const { findCodeNameMismatch } = await import("@cost-engine/compare");
+    const items = [
+      item("镀锌钢管", "DN100", "m", "10", "85", "031001001001"),
+      item("镀锌钢管", "DN100", "m", "20", "85", "031001001001"),
+    ];
+    expect(findCodeNameMismatch(items).length).toBe(0);
+  });
+});
