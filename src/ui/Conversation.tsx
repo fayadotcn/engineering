@@ -36,6 +36,7 @@ const TOOL_LABEL: Record<string, string> = {
   "material.getPriceHistory": "查询价格走势",
   "material.compareQuotation": "匹配询价材料",
   "material.applyQuotation": "询价写回清单",
+  "material.checkOwnerSupplied": "核对甲供材",
   "cost.calculate": "汇总清单金额",
   "cost.aggregate": "汇总清单金额",
   "cost.feeSummary": "汇总项目费用",

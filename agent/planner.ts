@@ -461,6 +461,12 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 甲供材核对：发包人供货表与清单主材计价勾稽
+    if (/甲供|发包人供|发包人提供|业主供货|甲供材/.test(m))
+      return {
+        steps: [{ tool: "material.checkOwnerSupplied", args: {}, activity: "正在核对甲供材与清单计价" }],
+      };
+
     // 询价: 更新/写回/填价 → compare + apply；只"匹配/看看" → compare
     if (/询价|报价/.test(m)) {
       const apply = /更新|写回|填|套用|应用|代入|填入/.test(m);

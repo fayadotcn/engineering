@@ -271,3 +271,13 @@ describe("缺编码检查路由", () => {
     expect(s?.tool).toBe("boq.findInvalidCodes");
   });
 });
+
+describe("甲供材核对路由", () => {
+  it.each(["核对甲供材", "甲供材有没有重复计价", "发包人供货的材料检查一遍"])(
+    "「%s」→ material.checkOwnerSupplied", async (m) => {
+      const p = await plan(m);
+      const s = await resolve(p.steps[0]);
+      expect(s?.tool).toBe("material.checkOwnerSupplied");
+    }
+  );
+});

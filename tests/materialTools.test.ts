@@ -8,6 +8,16 @@ import type { BoqItemDTO, QuotationItemDTO } from "@shared/types";
 const db = vi.hoisted(() => ({
   items: [] as BoqItemDTO[],
   quotes: [] as QuotationItemDTO[],
+  ownerFiles: [] as { id: string; filename: string }[],
+}));
+
+vi.mock("@database/client", () => ({
+  prisma: {
+    projectFile: {
+      findMany: vi.fn(async ({ where }: { where?: { kind?: string } } = {}) =>
+        where?.kind === "OWNER_SUPPLIED" ? db.ownerFiles.map((f) => ({ id: f.id, filename: f.filename })) : []),
+    },
+  },
 }));
 
 vi.mock("@boq/service", () => ({
@@ -36,8 +46,8 @@ const boq = (name: string, feature: string, unit = "m", qty = "10"): BoqItemDTO 
   feeType: "分部分项", totalPrice: "0", sectionPath: "", isHeader: false,
   sortOrder: n, discipline: "OTHER", features: parseSemanticFeature(name, feature),
 });
-const quote = (materialName: string, spec: string, price: string, unit = "m"): QuotationItemDTO => ({
-  id: `q${++n}`, materialName, spec, unit, brand: "", price, sheetName: "s",
+const quote = (materialName: string, spec: string, price: string, unit = "m", fileId = "f-normal"): QuotationItemDTO => ({
+  id: `q${++n}`, fileId, materialName, spec, unit, brand: "", price, sheetName: "s",
   features: parseSemanticFeature(materialName, spec),
 });
 
@@ -100,5 +110,47 @@ describe("material.compareQuotation", () => {
     db.quotes = [];
     const r = await call("material.compareQuotation");
     expect(String(r.observation.error)).toContain("没有询价数据");
+  });
+});
+
+describe("material.checkOwnerSupplied 甲供材核对", () => {
+  it("甲供材命中清单且该项已计主材暂估价 → 重复计价红旗；未计价项为正常", async () => {
+    const a = boq("镀锌钢管", "DN100");
+    a.mainMaterialPrice = "60";
+    const b = boq("闸阀", "DN100");
+    db.items = [a, b];
+    db.ownerFiles = [{ id: "f-owner", filename: "甲供材表.xlsx" }];
+    db.quotes = [
+      quote("镀锌钢管", "DN100", "60", "m", "f-owner"),
+      quote("闸阀", "DN100", "300", "个", "f-owner"),
+    ];
+    const r = (await call("material.checkOwnerSupplied")) as {
+      observation: { conflicts: number; matchedItems: number };
+      views?: { kind: string; rows: { items: { name: string }[] }[] }[];
+      message?: string;
+    };
+    expect(r.observation.conflicts).toBe(1);
+    expect(r.views?.[0].kind).toBe("anomalyTable");
+    expect(r.views?.[0].rows[0].items[0].name).toBe("镀锌钢管");
+    expect(r.message).toContain("重复计价");
+  });
+
+  it("非甲供材文件的询价行不参与核对", async () => {
+    const a = boq("镀锌钢管", "DN100");
+    a.mainMaterialPrice = "60";
+    db.items = [a];
+    db.ownerFiles = [{ id: "f-owner", filename: "甲供材表.xlsx" }];
+    db.quotes = [quote("镀锌钢管", "DN100", "60", "m", "f-normal")]; // 普通询价文件
+    const r = (await call("material.checkOwnerSupplied")) as { observation: { supplied: number; conflicts: number }; message?: string };
+    expect(r.observation.supplied).toBe(0);
+    expect(r.observation.conflicts ?? 0).toBe(0);
+  });
+
+  it("无甲供材文件 → 提示上传", async () => {
+    db.ownerFiles = [];
+    db.quotes = [quote("镀锌钢管", "DN100", "60", "m", "f-owner")];
+    const r = (await call("material.checkOwnerSupplied")) as { observation: { supplied: number }; message?: string };
+    expect(r.observation.supplied).toBe(0);
+    expect(r.message).toContain("上传");
   });
 });

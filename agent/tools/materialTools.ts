@@ -6,7 +6,7 @@ import { searchMaterialPrices, matchLibraryForItem, getPricePrefs } from "@datas
 import { periodKey } from "@dataset/priceParse";
 import { matchQuotations } from "@cost-engine/match";
 import { isPricableItem } from "@shared/types";
-import type { DiffRow } from "@shared/types";
+import type { AnomalyRow, BoqItemDTO, DiffRow } from "@shared/types";
 
 // 价格偏好提示后缀（matchLibrary / fillFromLibrary 的 message 末尾共用）：
 // 品牌/地区偏好 + 异品牌兜底计数（兜底行已在匹配表 matchedNames 里标出实际品牌）
@@ -348,6 +348,70 @@ registerTool({
       message: `已将询价写入 ${finalPatches.length} 个清单项的主材暂估价（组价输入，未动综合单价）` +
         (multiSource ? `；${multiSource} 项有多条命中询价，已取置信度最高者` : "") +
         `；${skipped.length} 条未匹配的询价已在匹配表中标出`,
+    };
+  },
+});
+
+// 甲供材核对：发包人供货（OWNER_SUPPLIED 文件）里的材料，清单项再计主材暂估价
+// 就是重复计价——结算口径甲供材不计入承包价。命中但未取价的行是正常态，只报红旗项。
+registerTool({
+  name: "material.checkOwnerSupplied",
+  description: "甲供材核对：发包人供货表中的材料若清单项已计主材暂估价，属重复计价（甲供材不计入承包价）",
+  implemented: true,
+  schema: z.object({}),
+  handler: async (ctx) => {
+    const { prisma } = await import("@database/client");
+    const { D } = await import("@cost-engine/money");
+    const ownerFiles = await prisma.projectFile.findMany({
+      where: { projectId: ctx.projectId, kind: "OWNER_SUPPLIED" },
+      select: { id: true, filename: true },
+    });
+    if (!ownerFiles.length)
+      return { observation: { supplied: 0 }, message: "项目里还没有甲供材表——上传发包人供货清单后即可核对" };
+    const ownerIds = new Set(ownerFiles.map((f) => f.id));
+    const supplied = (await listQuotations(ctx.projectId)).filter((q) => q.fileId && ownerIds.has(q.fileId));
+    if (!supplied.length)
+      return {
+        observation: { supplied: 0, files: ownerFiles.map((f) => f.filename) },
+        message: `甲供材文件 ${ownerFiles.map((f) => `「${f.filename}」`).join("")} 已登记但没有材料行（sheet 需识别为询价型表格）`,
+      };
+    const items = await listBoq(ctx.projectId);
+    const { rows: matched } = matchQuotations(items, supplied);
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const seen = new Set<string>();
+    const conflicts: { item: BoqItemDTO; via: string }[] = [];
+    let matchedClean = 0;
+    for (const r of matched) {
+      if (r.status === "UNMATCHED") continue;
+      for (const id of r.matchedBoqItemIds) {
+        const it = byId.get(id);
+        if (!it || !isPricableItem(it) || seen.has(it.id)) continue;
+        seen.add(it.id);
+        if (D(it.mainMaterialPrice ?? "0").gt(0))
+          conflicts.push({ item: it, via: `${r.materialName}${r.spec ? ` ${r.spec}` : ""}` });
+        else matchedClean++;
+      }
+    }
+    const anomalyRows: AnomalyRow[] = conflicts.map((c) => ({
+      groupKey: `OWNER:${c.item.id}`,
+      label: c.via,
+      items: [{
+        id: c.item.id, code: c.item.code, name: c.item.name, feature: c.item.rawFeature,
+        unit: c.item.unit, quantity: c.item.quantity, unitPrice: c.item.unitPrice,
+        sectionPath: c.item.sectionPath,
+      }],
+      prices: [c.item.mainMaterialPrice ?? "0"],
+      reason: `甲供材「${c.via}」对应的清单项已计主材暂估价 ${c.item.mainMaterialPrice} 元——甲供材由发包人供货，不应计入承包价，请核实扣减`,
+    }));
+    return {
+      observation: { supplied: supplied.length, matchedItems: seen.size, conflicts: conflicts.length, clean: matchedClean },
+      views: anomalyRows.length ? [{
+        kind: "anomalyTable" as const, id: "view:owner-supplied", title: "甲供材重复计价核对",
+        anomalyType: "OWNER_SUPPLIED" as const, rows: anomalyRows,
+      }] : [],
+      message: conflicts.length
+        ? `甲供材核对：${conflicts.length} 项清单计了主材价但材料属发包人供货（重复计价），详见核对表`
+        : `甲供材核对通过：${supplied.length} 条甲供材、${matchedClean} 项命中清单均未重复计价`,
     };
   },
 });

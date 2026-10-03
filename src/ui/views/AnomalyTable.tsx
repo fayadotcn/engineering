@@ -18,6 +18,7 @@ const ANOMALY_BADGE: Record<string, string> = {
   CODE_MISMATCH: "warn",
   INVALID_CODE: "warn",
   MISSING_CODE: "warn",
+  OWNER_SUPPLIED: "danger",
 };
 
 export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "anomalyTable" }> }) {

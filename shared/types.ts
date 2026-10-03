@@ -215,7 +215,8 @@ export type WorkspaceView =
         | "UNIT_INCONSISTENT"
         | "CODE_MISMATCH"
         | "INVALID_CODE"
-        | "MISSING_CODE";
+        | "MISSING_CODE"
+        | "OWNER_SUPPLIED";
       rows: AnomalyRow[];
     }
   | {
