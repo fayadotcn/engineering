@@ -90,3 +90,23 @@ describe("executeTool", () => {
     expect(patch.view.receiptId).toBe("rec1");
   });
 });
+
+describe("toolSchemasForLLM", () => {
+  it("describe() 文案透传到参数 schema——LLM 看得到字段语义", async () => {
+    const { registerTool, toolSchemasForLLM } = await import("../agent/tools/registry");
+    registerTool({
+      name: "test.schema",
+      description: "schema 测试",
+      implemented: true,
+      schema: z.object({
+        mode: z.enum(["a", "b"]).optional().describe("a=甲方式；b=乙方式"),
+        ids: z.array(z.string()).describe("目标行 id"),
+      }),
+    });
+    const t = toolSchemasForLLM().find((x) => x.name === "test__schema")!;
+    const props = (t.parameters as { properties: Record<string, { description?: string; enum?: string[] }> }).properties;
+    expect(props.mode.description).toBe("a=甲方式；b=乙方式");
+    expect(props.mode.enum).toEqual(["a", "b"]);
+    expect(props.ids.description).toBe("目标行 id");
+  });
+});

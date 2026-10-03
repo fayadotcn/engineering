@@ -86,6 +86,15 @@ function unwrap(s: z.ZodType<unknown>): z.ZodType<unknown> {
 
 function leafSchema(s: z.ZodType<unknown>): Record<string, unknown> {
   const u = unwrap(s);
+  // .describe() 可能挂在外层 optional 或内层 schema 上——两端都取，
+  // 否则 LLM 只看到类型看不到字段语义（replace/append 之类全靠猜）
+  const desc = (s.description ?? u.description) as string | undefined;
+  const out = leafType(u);
+  if (desc) out.description = desc;
+  return out;
+}
+
+function leafType(u: z.ZodType<unknown>): Record<string, unknown> {
   if (u instanceof z.ZodString) return { type: "string" };
   if (u instanceof z.ZodNumber) return { type: "number" };
   if (u instanceof z.ZodBoolean) return { type: "boolean" };
