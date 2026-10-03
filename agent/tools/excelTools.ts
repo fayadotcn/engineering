@@ -189,15 +189,19 @@ registerTool({
     if (!leaf.length) return { observation: { error: "清单为空，无法生成报告" } };
 
     const { projectTotals, aggregateByDiscipline, aggregateByCategory } = await import("@cost-engine/aggregate");
-    const { findSameItemDifferentPrice, findPriceAnomalies } = await import("@cost-engine/compare");
+    const {
+      findSameItemDifferentPrice, findPriceAnomalies, findArithmeticMismatches,
+      findFeatureMismatch, findDuplicateItems, findUnitInconsistencies, findCodeNameMismatch,
+    } = await import("@cost-engine/compare");
     const { analyzeCostComposition } = await import("@cost-engine/costComposition");
-    const { feeSummary } = await import("@cost-engine/fees");
-    const { getFacts, loadFeeParams, parseAreaValue } = await import("@project/facts");
+    const { feeSummary, feeCompliance } = await import("@cost-engine/fees");
+    const { getFacts, loadFeeParams, parseAreaValue, parseAmountValue } = await import("@project/facts");
     const ExcelJS = (await import("exceljs")).default;
 
     const totals = projectTotals(items);
     const facts = await getFacts(ctx.projectId);
-    const fee = feeSummary(items, await loadFeeParams(ctx.projectId));
+    const feeParams = await loadFeeParams(ctx.projectId);
+    const fee = feeSummary(items, feeParams);
     const wb = new ExcelJS.Workbook();
     const bold = { font: { bold: true } };
     const moneyFmt = "#,##0.00";
@@ -235,6 +239,9 @@ registerTool({
     bh.font = bold.font;
     let boqSeq = 0;
     items.forEach((it) => {
+      // 总额计价行（总价措施/其他项目）没有量×价结构，不进分部分项明细表——
+      // 它们的金额在「费用汇总」sheet 已有归属
+      if (!it.isHeader && (it.feeType === "总价措施" || it.feeType === "其他项目")) return;
       if (it.isHeader) {
         const r = sBoq.addRow(["", "", it.name, "", "", "", "", ""]);
         r.font = bold.font;
@@ -335,13 +342,25 @@ registerTool({
     s4.addRow(["类型", "键", "值", "来源", "置信度"]).font = bold.font;
     for (const f of facts) s4.addRow([f.factType, f.key, f.value, f.source, f.confidence]);
 
-    // 异常
+    // 异常 + 费用符合性（报告交付口径：全部检查维度和清单页/费用页一致）
     const s5 = wb.addWorksheet("异常摘要");
     s5.addRow(["类型", "组/项", "明细"]).font = bold.font;
-    for (const g of findSameItemDifferentPrice(items))
-      s5.addRow(["相同项不同价", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
-    for (const g of findPriceAnomalies(items))
-      s5.addRow(["单价异常", g.label, g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")]);
+    const anomalyGroups: [string, ReturnType<typeof findSameItemDifferentPrice>][] = [
+      ["合价算术不符", findArithmeticMismatches(items)],
+      ["相同项不同价", findSameItemDifferentPrice(items)],
+      ["单价异常", findPriceAnomalies(items)],
+      ["特征不一致", findFeatureMismatch(items)],
+      ["重复项", findDuplicateItems(items)],
+      ["单位不一致", findUnitInconsistencies(items)],
+      ["一码多名", findCodeNameMismatch(items)],
+    ];
+    for (const [label, groups] of anomalyGroups)
+      for (const g of groups)
+        s5.addRow([label, g.label, `${g.reason}：${g.items.map((i) => `${i.name}@${i.unitPrice}`).join("；")}`]);
+    const ceilingFact = facts.find((x) => /最高限价|招标控制价|控制价|限价/.test(x.key));
+    const ceilingNum = ceilingFact ? parseAmountValue(ceilingFact.value) : null;
+    for (const i of feeCompliance(items, feeParams, { ceiling: ceilingNum !== null ? D(ceilingNum) : null, summary: fee }))
+      s5.addRow([i.level === "error" ? "符合性错误" : "符合性提示", i.label, i.detail]);
 
     for (const s of wb.worksheets) s.columns.forEach((c) => { if (!c.width) c.width = 22; });
 

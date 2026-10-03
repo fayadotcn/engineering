@@ -118,6 +118,25 @@ describe("report.generate 主要材料表与单方造价", () => {
     expect(labels2).not.toContain("单方造价（元/㎡，含税）");
   });
 
+  it("异常摘要覆盖全部检查维度 + 费用符合性行", async () => {
+    mocks.items.mockResolvedValue([
+      item({ id: "a1", name: "镀锌钢管", quantity: "10", unitPrice: "85", totalPrice: "999" }), // 算术不符：10×85=850≠999
+      item({ id: "a2", name: "镀锌钢管", quantity: "5", unitPrice: "92", totalPrice: "460" }),  // 相同项不同价（同规格特征空）
+      item({ id: "a3", name: "镀锌钢管", quantity: "8", unitPrice: "85", totalPrice: "680", code: "C1" }),
+      item({ id: "a4", name: "阀门", quantity: "2", unitPrice: "100", totalPrice: "200", code: "C1" }), // 一码多名
+    ]);
+    const r = await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    const s5 = wb.getWorksheet("异常摘要")!;
+    const types: string[] = [];
+    s5.eachRow((row) => types.push(String((row.values as unknown[])[1] ?? "")));
+    expect(types).toContain("合价算术不符");
+    expect(types).toContain("一码多名");
+    // taxRate=0.09 / regulationRate=0 → 规费未计取 + 措施费未计取 出现在符合性提示
+    expect(types).toContain("符合性提示");
+    expect((r.observation as { grandTotal?: string }).grandTotal).toBeTruthy();
+  });
+
   it("清单为空 → 不生成报告", async () => {
     mocks.items.mockResolvedValue([]);
     const r = await getTool("report.generate")!.handler!(ctx, {});
