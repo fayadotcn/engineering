@@ -164,6 +164,8 @@ model AgentRun {
   events      AgentEvent[]
   toolCalls   ToolCall[]
   receipts    ActionReceipt[]
+
+  @@index([projectId])
 }
 
 model AgentEvent {
@@ -189,6 +191,8 @@ model ToolCall {
   projectId  String
   startedAt  DateTime @default(now())
   finishedAt DateTime?
+
+  @@index([runId])
 }
 
 model ActionReceipt {
@@ -217,6 +221,8 @@ model Artifact {
   storageKey  String
   createdByRunId String?
   createdAt   DateTime @default(now())
+
+  @@index([projectId])
 }
 
 /* ---------------- 后台数据管理：全局共享数据集 ---------------- */
