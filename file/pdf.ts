@@ -8,27 +8,32 @@ export async function extractPdfText(buffer: Buffer): Promise<string[]> {
     isEvalSupported: false,
     useSystemFonts: true,
   }).promise;
-  const pages: string[] = [];
-  for (let p = 1; p <= doc.numPages; p++) {
-    const page = await doc.getPage(p);
-    const tc = await page.getTextContent();
-    // group items into lines by rounded y
-    const lines = new Map<number, { x: number; t: string }[]>();
-    for (const it of tc.items as { str?: string; transform?: number[] }[]) {
-      if (!it.str?.trim() || !it.transform) continue;
-      const y = Math.round(it.transform[5] / 2) * 2;
-      const arr = lines.get(y) ?? [];
-      arr.push({ x: it.transform[4], t: it.str });
-      lines.set(y, arr);
+  try {
+    const pages: string[] = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const tc = await page.getTextContent();
+      // group items into lines by rounded y
+      const lines = new Map<number, { x: number; t: string }[]>();
+      for (const it of tc.items as { str?: string; transform?: number[] }[]) {
+        if (!it.str?.trim() || !it.transform) continue;
+        const y = Math.round(it.transform[5] / 2) * 2;
+        const arr = lines.get(y) ?? [];
+        arr.push({ x: it.transform[4], t: it.str });
+        lines.set(y, arr);
+      }
+      const ordered = [...lines.entries()]
+        .sort((a, b) => b[0] - a[0]) // pdf y grows upward
+        .map(([, items]) =>
+          items.sort((a, b) => a.x - b.x).map((i) => i.t).join(" ")
+        );
+      pages.push(ordered.join("\n"));
     }
-    const ordered = [...lines.entries()]
-      .sort((a, b) => b[0] - a[0]) // pdf y grows upward
-      .map(([, items]) =>
-        items.sort((a, b) => a.x - b.x).map((i) => i.t).join(" ")
-      );
-    pages.push(ordered.join("\n"));
+    return pages;
+  } finally {
+    // pdfjs 文档持有整份数据与页面缓存——不销毁会在服务端进程里累积
+    await doc.destroy().catch(() => {});
   }
-  return pages;
 }
 
 // BOQ-ish line: 9-15位编码 + 名称 + (可选特征) + 单位 + 数量 + 单价 + 合价
