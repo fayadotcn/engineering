@@ -53,24 +53,30 @@ export async function POST(req: Request) {
   if (!clean.length)
     return NextResponse.json({ error: "剪贴板内容没有可写入的工程量/综合单价" }, { status: 400 });
 
-  const { before, after } = await updateBoqItems(rows[0].projectId, clean);
-  const changed = after.filter((a) => {
-    const b = before.find((x) => x.id === a.id);
-    const p = clean.find((x) => x.id === a.id)!;
-    return b && Object.keys(p.patch).some((f) => String(b[f as keyof typeof b]) !== String(a[f as keyof typeof a]));
-  });
-  if (!changed.length)
-    return NextResponse.json({ error: "粘贴的值与现有值一致，没有变化" }, { status: 400 });
-
-  const receipt = await prisma.actionReceipt.create({
-    data: {
-      projectId: rows[0].projectId,
-      actionType: "USER_EDIT",
-      summary: `用户在工作区粘贴更新 ${changed.length} 行清单（工程量/综合单价）`,
-      before: toJson(before),
-      after: toJson(after),
-      createdBy: "user",
-    },
-  });
-  return NextResponse.json({ updated: changed.length, receiptId: receipt.id, affectedIds: changed.map((c) => c.id) });
+  // 更新 + 回执单事务：回执失败不留无审计的批量修改
+  try {
+    const { changed, receiptId } = await prisma.$transaction(async (tx) => {
+      const { before, after } = await updateBoqItems(rows[0].projectId, clean, tx);
+      const changed = after.filter((a) => {
+        const b = before.find((x) => x.id === a.id);
+        const p = clean.find((x) => x.id === a.id)!;
+        return b && Object.keys(p.patch).some((f) => String(b[f as keyof typeof b]) !== String(a[f as keyof typeof a]));
+      });
+      if (!changed.length) throw new Error("粘贴的值与现有值一致，没有变化");
+      const receipt = await tx.actionReceipt.create({
+        data: {
+          projectId: rows[0].projectId,
+          actionType: "USER_EDIT",
+          summary: `用户在工作区粘贴更新 ${changed.length} 行清单（工程量/综合单价）`,
+          before: toJson(before),
+          after: toJson(after),
+          createdBy: "user",
+        },
+      });
+      return { changed, receiptId: receipt.id as string };
+    });
+    return NextResponse.json({ updated: changed.length, receiptId, affectedIds: changed.map((c) => c.id) });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "粘贴更新失败" }, { status: 400 });
+  }
 }

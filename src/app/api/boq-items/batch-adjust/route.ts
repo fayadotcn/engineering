@@ -49,26 +49,32 @@ export async function POST(req: Request) {
     const str = field === "quantity" ? round3(next).toString() : round2(next).toString();
     return { id: r.id, patch: { [field]: str } as BoqPatch };
   });
-  const { before, after } = await updateBoqItems(rows[0].projectId, patches);
-  const changed = after.filter((a) => {
-    const b = before.find((x) => x.id === a.id);
-    return b && String(b[field]) !== String(a[field]);
-  });
-  if (!changed.length)
-    return NextResponse.json({ error: "所选行的值已是目标值，没有变化" }, { status: 400 });
-
   const desc = mode === "percent"
     ? `${FIELD_LABEL[field]}统一${num.lt(0) ? "下浮" : "上浮"} ${num.abs()}%`
     : `${FIELD_LABEL[field]}统一设为 ${round2(num)}`;
-  const receipt = await prisma.actionReceipt.create({
-    data: {
-      projectId: rows[0].projectId,
-      actionType: "USER_EDIT",
-      summary: `用户在工作区批量调整 ${changed.length} 行清单：${desc}`,
-      before: toJson(before),
-      after: toJson(after),
-      createdBy: "user",
-    },
-  });
-  return NextResponse.json({ updated: changed.length, receiptId: receipt.id, affectedIds: changed.map((c) => c.id) });
+  // 更新 + 回执单事务：回执失败不留无审计的批量修改
+  try {
+    const { changed, receiptId } = await prisma.$transaction(async (tx) => {
+      const { before, after } = await updateBoqItems(rows[0].projectId, patches, tx);
+      const changed = after.filter((a) => {
+        const b = before.find((x) => x.id === a.id);
+        return b && String(b[field]) !== String(a[field]);
+      });
+      if (!changed.length) throw new Error("所选行的值已是目标值，没有变化");
+      const receipt = await tx.actionReceipt.create({
+        data: {
+          projectId: rows[0].projectId,
+          actionType: "USER_EDIT",
+          summary: `用户在工作区批量调整 ${changed.length} 行清单：${desc}`,
+          before: toJson(before),
+          after: toJson(after),
+          createdBy: "user",
+        },
+      });
+      return { changed, receiptId: receipt.id as string };
+    });
+    return NextResponse.json({ updated: changed.length, receiptId, affectedIds: changed.map((c) => c.id) });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "批量调整失败" }, { status: 400 });
+  }
 }
