@@ -29,7 +29,7 @@ export async function getProject(id: string) {
     where: { id },
     include: {
       files: { orderBy: { createdAt: "desc" } },
-      facts: { orderBy: [{ createdAt: "desc" }, { id: "desc" }] },
+      facts: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 300 },
       artifacts: { orderBy: { createdAt: "desc" } },
     },
   });
