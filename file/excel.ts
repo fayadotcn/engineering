@@ -929,7 +929,8 @@ export async function writeBackPrices(
   // 已有批注（复核签名/上次写回记录）保留在前面——批注就是审计轨迹。
   const write = (cell: ExcelJS.Cell, val: number, extra?: string) => {
     const old = cellText(cell.value);
-    const changed = old === "" || !Number.isFinite(Number(old)) || Number(old) !== val;
+    const oldNum = Number(old.replace(/,/g, ""));
+    const changed = old === "" || !Number.isFinite(oldNum) || oldNum !== val;
     if (changed) {
       const prev = typeof cell.note === "string" ? cell.note
         : (cell.note as { texts?: { text: string }[] } | undefined)?.texts?.map((t) => t.text).join("") ?? "";

@@ -159,12 +159,17 @@ registerTool({
   implemented: true,
   schema: z.object({ query: z.string() }),
   handler: async (ctx, args: { query: string }) => {
+    // 中文标签也要能搜：kind 是英文枚举，「询价」应命中 MATERIAL_QUOTATION
+    const kindHits = Object.entries(FILE_KIND_LABEL)
+      .filter(([, label]) => label.includes(args.query))
+      .map(([k]) => k);
     const files = await prisma.projectFile.findMany({
       where: {
         projectId: ctx.projectId,
         OR: [
           { filename: { contains: args.query } },
           { kind: { contains: args.query.toUpperCase() } },
+          ...(kindHits.length ? [{ kind: { in: kindHits } }] : []),
         ],
       },
     });
@@ -310,12 +315,13 @@ registerTool({
       const { extractPdfText, detectBoqLines } = await import("@file/pdf");
       pdfPages = await extractPdfText(buffer);
       const boqLines = detectBoqLines(pdfPages);
+      // 重导幂等与 Excel 路径一致：本轮没识别出清单行时也要清掉旧行，不留陈旧数据
+      await deleteByFile(file.id);
       if (boqLines.length >= 5) {
         await ctx.emit("activity", { text: `识别到 ${boqLines.length} 条清单行，正在导入` });
         const { parseSemanticFeature, inferDiscipline } = await import("@cost-engine/semantic");
         const { round2, round3 } = await import("@cost-engine/money");
         const { toJson } = await import("@shared/json");
-        await deleteByFile(file.id);
         await prisma.boqItem.createMany({
           data: boqLines.map((l, i) => ({
             projectId: ctx.projectId,
