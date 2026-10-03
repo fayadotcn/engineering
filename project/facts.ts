@@ -108,8 +108,8 @@ export function parseRateValue(raw: string | null | undefined): number | null {
 export function parseAmountValue(raw: string | null | undefined): number | null {
   if (!raw?.trim()) return null;
   const s = String(raw).replace(/[,，\s元]/g, "");
-  const yi = s.match(/^([\d.]+)亿$/);
-  const wan = s.match(/^([\d.]+)万$/);
+  const yi = s.match(/^(-?[\d.]+)亿$/);
+  const wan = s.match(/^(-?[\d.]+)万$/);
   const v = yi ? Number(yi[1]) * 1e8 : wan ? Number(wan[1]) * 10000 : Number(s);
   return Number.isFinite(v) ? v : null;
 }

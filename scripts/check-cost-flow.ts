@@ -99,9 +99,11 @@ async function main() {
     assert.equal(download.status, 200);
     const exportedBook = new ExcelJS.Workbook();
     await exportedBook.xlsx.load(await download.arrayBuffer());
-    // 表头 + 2 行明细 + 表尾「合价合计」复核行
-    assert.equal(exportedBook.worksheets[0].rowCount, 4);
-    assert.equal(exportedBook.worksheets[0].lastRow?.getCell(3).value, "合价合计");
+    // 首页固定「费用汇总」（R68 交付口径），清单明细页从第二页起
+    assert.equal(exportedBook.worksheets[0].name, "费用汇总");
+    // 明细页：表头 + 2 行明细 + 表尾「合价合计」复核行
+    assert.equal(exportedBook.worksheets[1].rowCount, 4);
+    assert.equal(exportedBook.worksheets[1].lastRow?.getCell(3).value, "合价合计");
     const summary = await request(`/api/projects/${id}/summary`);
     assert.equal(summary.fees.preTax, "864.30"); assert.equal(summary.fees.grandTotal, "942.09");
 
@@ -124,11 +126,11 @@ async function main() {
     assert.equal((await request(`/api/projects/${id}/boq`)).find((i: { id: string }) => i.id === feeItem.id).totalPrice, "1400");
     const feeExportId = (await runTool("report.exportExcel", {})).artifactId as string;
     const feeExport = new ExcelJS.Workbook(); await feeExport.xlsx.load(await fetch(`${base}/api/artifacts/${feeExportId}/download`).then(r => r.arrayBuffer()));
-    assert.deepEqual(feeExport.worksheets.map(s => s.name), ["数据", "数据 (2)"]);
+    assert.deepEqual(feeExport.worksheets.map(s => s.name), ["费用汇总", "数据", "数据 (2)"]);
     // 导出列序：…工程量(F) 计算式(G) 综合单价(H) 合价(I) 定价状态(J) 费用类别(K) 源文件(L)
-    assert.equal(feeExport.worksheets[1].getCell("I2").value, 1400);
-    assert.equal(feeExport.worksheets[1].getCell("K2").value, "总价措施");
-    assert.equal(feeExport.worksheets[1].getCell("L2").value, "措施清单.xlsx");
+    assert.equal(feeExport.worksheets[2].getCell("I2").value, 1400);
+    assert.equal(feeExport.worksheets[2].getCell("K2").value, "总价措施");
+    assert.equal(feeExport.worksheets[2].getCell("L2").value, "措施清单.xlsx");
     console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、Agent 工具执行、总额编辑与撤销、同名源表 Excel 导出");
     console.log(`隔离验收工程：${checkDir}`);
   } finally { await prisma.$disconnect(); server.kill(); }

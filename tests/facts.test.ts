@@ -14,6 +14,8 @@ describe("台账事实数值归一化", () => {
     expect(parseAmountValue("50万")).toBe(500000);
     expect(parseAmountValue("1.2亿")).toBe(120000000);
     expect(parseAmountValue("5,000元")).toBe(5000);
+    expect(parseAmountValue("-1.5万")).toBe(-15000);
+    expect(parseAmountValue("-2亿")).toBe(-200000000);
     expect(parseAmountValue("abc")).toBeNull();
   });
 
