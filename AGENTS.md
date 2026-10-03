@@ -82,3 +82,23 @@ DeepSeek Harness 为可选遗留模式：`npm run harness`（3210 官方面板 +
 ## 测试
 
 `tests/` 下 vitest。改 cost-engine/file 解析必须跑 `npm test` + `npx tsx scripts/test-real.ts`（用桌面真实造价文件回归）。
+
+## 清标检查与报告交付（R13+ 建立，勿漂移）
+
+- **异常检查面**（`cost-engine/compare.ts`，全部确定性纯函数，`boq.compare` 一次全查）：
+  相同项不同价 / 综合单价异常（离中位>15%）/ 项目特征不一致 / 合价算术不符（量×价≠合价）/
+  单位不一致（量纲冲突，米≡m 归一后比对）/ 一码多名 / 非标编码（非12位国标）/
+  缺编码（可计价行必填）/ 重复项（码+语义特征全同）/ 数据质量（负单价·负工程量·缺单位）。
+  每个检查都有独立工具（boq.findXxx）出 anomalyTable 视图；planner 按话术路由。
+- **费用符合性**：`feeCompliance`（fees.ts）查不可竞争费漏计（规费/安全文明/税金）、税率口径、
+  暂列金额一致性、最高限价超限——进 `cost.feeSummary` 与报告异常摘要。
+- **甲供材闭环**：OWNER_SUPPLIED 文件 → `material.checkOwnerSupplied` 匹配清单 →
+  已计主材价的标「重复计价」→ `material.clearOwnerSuppliedPrice`（确认门）扣减 →
+  报告「甲供材表」+ 异常摘要；autopilot 末尾自动跑。
+- **报告 sheet**（`report.generate`）：项目汇总/费用汇总/分部分项清单/专业占比/材料占比/
+  成本构成/综合单价分析/主要材料表/甲供材表/措施与其他项目/项目台账/异常摘要。
+- **一键导出**（`assembleExportSheets`）：首页固定「费用汇总」，之后按（源文件×源工作表）
+  分页，表尾「合价合计」复核行，未定价行显式标注+底色；`excel.write` 写回源表时对
+  原值≠新值的单元格记批注（原值→新值+计算式），可审计可复算。
+- **撤销口径**：回执 before/after 全字段快照；删除重建时源文件已删则 fileId 置空并注明。
+  撤销冲突检测「只还原受影响字段」——行被后续改过会 409 拒撤。
