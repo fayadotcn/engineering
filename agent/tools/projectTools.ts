@@ -302,16 +302,19 @@ registerTool({
     let pdfPages: string[] | null = null;
     if (sheets) {
       await ctx.emit("activity", { text: "识别到表格结构，正在导入数据" });
-      // 重导幂等：先清掉该文件已导入数据
-      await deleteByFile(file.id);
-      const r = await importBoqFromSheets(ctx.projectId, file.id, sheets);
-      imported += r.count;
+      // 重导幂等：清旧行与写新行同一事务——写入失败时旧数据也不会丢（否则重导=数据销毁）
+      const r = await prisma.$transaction(async (tx) => {
+        await deleteByFile(file.id, tx);
+        const boq = await importBoqFromSheets(ctx.projectId, file.id, sheets, tx);
+        const quotes = await importQuotationsFromSheets(ctx.projectId, file.id, sheets, tx);
+        return { ...boq, quotes };
+      });
+      imported += r.count + r.quotes;
       headers += r.headers;
       nonNumericQty = r.nonNumericQty;
       derivedUnitPrice = r.derivedUnitPrice;
       arithMismatch = r.arithMismatch;
       laborPriceCol = r.laborPriceCol;
-      imported += await importQuotationsFromSheets(ctx.projectId, file.id, sheets);
     } else if (isPdf) {
       await ctx.emit("activity", { text: "正在提取 PDF 文本层" });
       const { extractPdfText, detectBoqLines } = await import("@file/pdf");

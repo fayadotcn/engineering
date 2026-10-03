@@ -16,7 +16,8 @@ import type { BoqItemDTO } from "@shared/types";
 export async function importBoqFromSheets(
   projectId: string,
   fileId: string,
-  sheets: ParsedSheet[]
+  sheets: ParsedSheet[],
+  tx?: Prisma.TransactionClient
 ): Promise<{
   count: number;
   headers: number;
@@ -72,7 +73,7 @@ export async function importBoqFromSheets(
       if (row.isItem) count++;
     }
   }
-  if (data.length) await prisma.boqItem.createMany({ data });
+  if (data.length) await (tx ?? prisma).boqItem.createMany({ data });
   return { count, headers, nonNumericQty, derivedUnitPrice, arithMismatch, laborPriceCol };
 }
 
@@ -286,7 +287,8 @@ export async function createBoqItem(
   return toBoqDTO(item);
 }
 
-export async function deleteByFile(fileId: string) {
-  await prisma.boqItem.deleteMany({ where: { fileId } });
-  await prisma.quotationItem.deleteMany({ where: { fileId } });
+export async function deleteByFile(fileId: string, tx?: Prisma.TransactionClient) {
+  const db = tx ?? prisma;
+  await db.boqItem.deleteMany({ where: { fileId } });
+  await db.quotationItem.deleteMany({ where: { fileId } });
 }

@@ -10,7 +10,8 @@ import type { QuotationItemDTO } from "@shared/types";
 export async function importQuotationsFromSheets(
   projectId: string,
   fileId: string,
-  sheets: ParsedSheet[]
+  sheets: ParsedSheet[],
+  tx?: Prisma.TransactionClient
 ): Promise<number> {
   let count = 0;
   const data: Prisma.QuotationItemCreateManyInput[] = [];
@@ -40,7 +41,7 @@ export async function importQuotationsFromSheets(
       count++;
     }
   }
-  if (data.length) await prisma.quotationItem.createMany({ data });
+  if (data.length) await (tx ?? prisma).quotationItem.createMany({ data });
   return count;
 }
 
