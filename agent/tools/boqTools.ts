@@ -394,6 +394,43 @@ registerTool({
 });
 
 registerTool({
+  name: "boq.addItem",
+  description: "补录一行清单（导入漏项/零星项补救）。分部分项/单价措施给工程量+综合单价（合价自动算）；总价措施/其他项目直接给合价。生成回执，可撤销",
+  implemented: true,
+  schema: z.object({
+    name: z.string().min(1).describe("项目名称"),
+    code: z.string().optional().describe("项目编码"),
+    unit: z.string().optional().describe("计量单位"),
+    quantity: z.string().optional().describe("工程量"),
+    unitPrice: z.string().optional().describe("综合单价"),
+    totalPrice: z.string().optional().describe("合价（仅总价措施/其他项目直填）"),
+    feeType: z.enum(["分部分项", "单价措施", "总价措施", "其他项目"]).optional(),
+    rawFeature: z.string().optional().describe("项目特征"),
+  }),
+  confirm: (a: { name: string }) => `将补录清单项「${a.name}」（操作可撤销）`,
+  handler: async (ctx, args) => {
+    const { createBoqItem } = await import("@boq/service");
+    let item;
+    try {
+      item = await createBoqItem(ctx.projectId, args);
+    } catch (e) {
+      return { observation: { error: e instanceof Error ? e.message : "补录失败" } };
+    }
+    return {
+      observation: { itemId: item.id, name: item.name, totalPrice: item.totalPrice },
+      views: [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }],
+      receipts: [{
+        actionType: "BOQ_UPDATE",
+        summary: `补录清单项「${item.name}」（${item.unit || "—"} ${item.quantity} × ${item.unitPrice} = ${item.totalPrice}）`,
+        before: [],
+        after: [item],
+      }],
+      message: `已补录「${item.name}」：${item.quantity}${item.unit} × 综合单价 ${item.unitPrice} = 合价 ${item.totalPrice}，可在操作记录撤销`,
+    };
+  },
+});
+
+registerTool({
   name: "boq.deleteItems",
   description: "删除指定清单项（需确认；回执含全字段快照，可在操作记录里撤销恢复）。删除标题行会连同其子项一起消失的风险由用户确认时权衡",
   implemented: true,

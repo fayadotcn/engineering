@@ -193,6 +193,83 @@ export async function updateBoqItems(
   return { before, after };
 }
 
+export interface BoqCreateInput {
+  name: string;
+  code?: string;
+  unit?: string;
+  quantity?: string;
+  quantityExpr?: string;
+  unitPrice?: string;
+  mainMaterialPrice?: string;
+  totalPrice?: string;
+  feeType?: "分部分项" | "单价措施" | "总价措施" | "其他项目";
+  insertAfter?: string;
+  rawFeature?: string;
+  laborUnitPrice?: string;
+  machineUnitPrice?: string;
+  pricingPlan?: string;
+}
+
+/**
+ * 补录一行清单（UI POST 路由与 agent boq.addItem 同一口径）：
+ * 总额计价行（总价措施/其他项目）只取合价；其余按 量×价 算合价。
+ * insertAfter 锚定源行——沿用其文件/表名/分部/专业，落在它下面。
+ */
+export async function createBoqItem(
+  projectId: string,
+  body: BoqCreateInput,
+  tx?: Prisma.TransactionClient
+): Promise<BoqItemDTO> {
+  if (!body.name?.trim()) throw new Error("项目名称不能为空");
+  const lumpSum = body.feeType === "总价措施" || body.feeType === "其他项目";
+  const qty = lumpSum ? D(0) : round3(D(body.quantity ?? "0"));
+  const price = lumpSum ? D(0) : round2(D(body.unitPrice ?? "0"));
+  const mainMat = round2(D(body.mainMaterialPrice ?? "0"));
+  const labor = round2(D(body.laborUnitPrice ?? "0"));
+  const machine = round2(D(body.machineUnitPrice ?? "0"));
+  const total = lumpSum ? round2(D(body.totalPrice ?? "0")) : lineTotal(qty, price);
+  if (!qty.isFinite() || qty.lt(0) || !price.isFinite() || price.lt(0) || !mainMat.isFinite() || mainMat.lt(0)
+    || !labor.isFinite() || labor.lt(0) || !machine.isFinite() || machine.lt(0) || !total.isFinite() || total.lt(0))
+    throw new Error("工程量、单价与金额必须为非负有效数字");
+
+  const db = tx ?? prisma;
+  const src = body.insertAfter ? await db.boqItem.findUnique({ where: { id: body.insertAfter } }) : null;
+  if (body.insertAfter && (!src || src.projectId !== projectId)) throw new Error("源行不存在");
+  const max = src ? null : await db.boqItem.aggregate({ where: { projectId }, _max: { sortOrder: true } });
+  const plan = body.pricingPlan?.trim().startsWith("[") ? body.pricingPlan : "[]";
+  const persist = async (t: typeof db) => {
+    if (src)
+      await t.boqItem.updateMany({ where: { projectId, fileId: src.fileId, sortOrder: { gt: src.sortOrder } }, data: { sortOrder: { increment: 1 } } });
+    return t.boqItem.create({
+      data: {
+        projectId,
+        fileId: src?.fileId ?? null,
+        sheetName: src?.sheetName ?? "手工补录",
+        sectionPath: src?.sectionPath ?? "",
+        rowIndex: -1,
+        code: body.code ?? "",
+        name: body.name,
+        rawFeature: body.rawFeature ?? "",
+        unit: body.unit ?? "",
+        quantity: qty,
+        quantityExpr: body.quantityExpr ?? "",
+        unitPrice: price,
+        mainMaterialPrice: mainMat,
+        laborUnitPrice: labor,
+        machineUnitPrice: machine,
+        pricingPlan: plan,
+        totalPrice: total,
+        feeType: body.feeType ?? "分部分项",
+        features: toJson(parseSemanticFeature(body.name, body.rawFeature ?? "")),
+        discipline: src?.discipline ?? inferDiscipline(body.name, "", ""),
+        sortOrder: src ? src.sortOrder + 1 : (max!._max.sortOrder ?? -1) + 1,
+      },
+    });
+  };
+  const item = tx ? await persist(db) : await prisma.$transaction(persist);
+  return toBoqDTO(item);
+}
+
 export async function deleteByFile(fileId: string) {
   await prisma.boqItem.deleteMany({ where: { fileId } });
   await prisma.quotationItem.deleteMany({ where: { fileId } });

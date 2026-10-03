@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { toJson } from "@shared/json";
-import { toBoqDTO } from "@database/serialize";
-import { D, lineTotal, round2, round3 } from "@cost-engine/money";
-import { inferDiscipline, parseSemanticFeature } from "@cost-engine/semantic";
+import { createBoqItem } from "@boq/service";
 import { z } from "zod";
 
 const create = z.object({
@@ -36,65 +34,26 @@ export async function POST(req: Request) {
   const project = await prisma.project.findUnique({ where: { id: body.projectId }, select: { id: true } });
   if (!project) return NextResponse.json({ error: "工程不存在" }, { status: 404 });
 
-  const lumpSum = body.feeType === "总价措施" || body.feeType === "其他项目";
-  const qty = lumpSum ? D(0) : round3(D(body.quantity ?? "0"));
-  const price = lumpSum ? D(0) : round2(D(body.unitPrice ?? "0"));
-  const mainMat = round2(D(body.mainMaterialPrice ?? "0"));
-  const labor = round2(D(body.laborUnitPrice ?? "0"));
-  const machine = round2(D(body.machineUnitPrice ?? "0"));
-  const total = lumpSum ? round2(D(body.totalPrice ?? "0")) : lineTotal(qty, price);
-  if (!qty.isFinite() || qty.lt(0) || !price.isFinite() || price.lt(0) || !mainMat.isFinite() || mainMat.lt(0)
-    || !labor.isFinite() || labor.lt(0) || !machine.isFinite() || machine.lt(0) || !total.isFinite() || total.lt(0))
-    return NextResponse.json({ error: "工程量、单价与金额必须为非负有效数字" }, { status: 400 });
-
-  // 复制行：insertAfter 锚定源行 —— 列表排序是（文件导入序 → sortOrder），所以新行
-  // 必须带走源行的 fileId 才能落在它下面；后移也只应发生在源行所属文件的范围内。
-  const src = body.insertAfter ? await prisma.boqItem.findUnique({ where: { id: body.insertAfter } }) : null;
-  if (body.insertAfter && (!src || src.projectId !== project.id))
-    return NextResponse.json({ error: "源行不存在" }, { status: 404 });
-  const max = src ? null : await prisma.boqItem.aggregate({ where: { projectId: project.id }, _max: { sortOrder: true } });
-  const plan = body.pricingPlan?.trim().startsWith("[") ? body.pricingPlan : "[]";
-  const txResult = await prisma.$transaction([
-    ...(src ? [prisma.boqItem.updateMany({ where: { projectId: project.id, fileId: src.fileId, sortOrder: { gt: src.sortOrder } }, data: { sortOrder: { increment: 1 } } })] : []),
-    prisma.boqItem.create({
-      data: {
-        projectId: project.id,
-        fileId: src?.fileId ?? null,
-        sheetName: src?.sheetName ?? "手工补录",
-        sectionPath: src?.sectionPath ?? "",
-        rowIndex: -1,
-        code: body.code ?? "",
-        name: body.name,
-        rawFeature: body.rawFeature ?? "",
-        unit: body.unit ?? "",
-        quantity: qty,
-        quantityExpr: body.quantityExpr ?? "",
-        unitPrice: price,
-        mainMaterialPrice: mainMat,
-        laborUnitPrice: labor,
-        machineUnitPrice: machine,
-        pricingPlan: plan,
-        totalPrice: total,
-        feeType: body.feeType ?? "分部分项",
-        features: toJson(parseSemanticFeature(body.name, body.rawFeature ?? "")),
-        discipline: src?.discipline ?? inferDiscipline(body.name, "", ""),
-        sortOrder: src ? src.sortOrder + 1 : (max!._max.sortOrder ?? -1) + 1,
-      },
-    }),
-    prisma.actionReceipt.create({
-      data: {
-        projectId: project.id,
-        actionType: "USER_EDIT",
-        summary: src ? `用户在工作区复制清单行「${body.name}」` : `用户在工作区补录清单行「${body.name}」`,
-        before: toJson([]),
-        createdBy: "user",
-      },
-    }),
-  ]);
-  const item = txResult[txResult.length - 2] as Awaited<ReturnType<typeof prisma.boqItem.create>>;
-  const receipt = txResult[txResult.length - 1] as Awaited<ReturnType<typeof prisma.actionReceipt.create>>;
-  // 回执 after 需要新行 id —— create 与 receipt 同事务写入后补记快照
-  await prisma.actionReceipt.update({ where: { id: receipt.id }, data: { after: toJson([toBoqDTO(item)]) } });
-  // 回执 id 一并返回，前端 toast 可直接给「撤销」入口
-  return NextResponse.json({ item: toBoqDTO(item), receiptId: receipt.id });
+  // 行创建 + 回执同事务——任一步失败不留无审计的孤儿行
+  try {
+    const { item, receipt } = await prisma.$transaction(async (tx) => {
+      const item = await createBoqItem(project.id, body, tx);
+      const receipt = await tx.actionReceipt.create({
+        data: {
+          projectId: project.id,
+          actionType: "USER_EDIT",
+          summary: body.insertAfter ? `用户在工作区复制清单行「${body.name}」` : `用户在工作区补录清单行「${body.name}」`,
+          before: toJson([]),
+          after: toJson([item]),
+          createdBy: "user",
+        },
+      });
+      return { item, receipt };
+    });
+    // 回执 id 一并返回，前端 toast 可直接给「撤销」入口
+    return NextResponse.json({ item, receiptId: receipt.id });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "补录失败";
+    return NextResponse.json({ error: msg }, { status: msg === "源行不存在" ? 404 : 400 });
+  }
 }

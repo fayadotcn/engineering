@@ -26,6 +26,8 @@ const TOOL_LABEL: Record<string, string> = {
   "boq.findCodeNameMismatch": "查一码多名",
   "boq.findFeatureMismatch": "比对项目特征",
   "boq.compareFiles": "两版清单对审",
+  "boq.addItem": "补录清单行",
+  "boq.deleteItems": "删除清单行",
   "material.matchLibrary": "匹配材料库价格",
   "material.fillFromLibrary": "写回主材暂估价",
   "material.search": "查询材料价格",

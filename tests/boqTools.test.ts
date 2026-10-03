@@ -10,6 +10,17 @@ const db = vi.hoisted(() => ({
 vi.mock("@boq/service", () => ({
   listBoq: vi.fn(async () => []),
   updateBoqItems: vi.fn(),
+  createBoqItem: vi.fn(async (_p: string, input: Record<string, unknown>) => ({
+    id: "new1", projectId: "p1", fileId: null, sheetName: "手工补录", rowIndex: -1,
+    code: input.code ?? "", name: input.name, rawFeature: input.rawFeature ?? "",
+    unit: input.unit ?? "", quantity: input.quantity ?? "0", unitPrice: input.unitPrice ?? "0",
+    mainMaterialPrice: "0", laborUnitPrice: "0", machineUnitPrice: "0", pricingPlan: [],
+    feeType: input.feeType ?? "分部分项",
+    totalPrice: input.feeType === "总价措施" || input.feeType === "其他项目"
+      ? input.totalPrice ?? "0"
+      : String(Number(input.quantity ?? 0) * Number(input.unitPrice ?? 0)),
+    sectionPath: "", isHeader: false, sortOrder: 99, discipline: "OTHER", features: {},
+  })),
 }));
 vi.mock("@database/client", () => ({
   prisma: {
@@ -28,6 +39,11 @@ import "../agent/tools/boqTools";
 import { getTool } from "../agent/tools/registry";
 
 const ctx = { projectId: "p1", runId: "r1", userId: "u", emit: vi.fn() };
+const callTool = (tool: string, args: unknown) =>
+  getTool(tool)!.handler!(ctx as never, args as never) as Promise<{
+    observation: Record<string, unknown>;
+    receipts?: { actionType: string; before: unknown; after: unknown }[];
+  }>;
 const call = (args: unknown) =>
   getTool("boq.deleteItems")!.handler!(ctx as never, args as never) as Promise<{
     observation: Record<string, unknown>;
@@ -59,5 +75,14 @@ describe("boq.deleteItems", () => {
     db.deleted = [];
     const r = await call({ ids: ["a", "a"] });
     expect(r.observation.deleted).toBe(1);
+  });
+});
+
+describe("boq.addItem", () => {
+  it("补录产生回执：before 空、after 带新行（revert 走 removeIds 路径）", async () => {
+    const r = await callTool("boq.addItem", { name: "灭火器", quantity: "20", unit: "个", unitPrice: "85" });
+    expect(r.observation.itemId).toBe("new1");
+    expect(r.receipts?.[0].before).toEqual([]);
+    expect((r.receipts?.[0].after as { name: string }[])[0].name).toBe("灭火器");
   });
 });

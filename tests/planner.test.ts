@@ -213,3 +213,17 @@ describe("删除清单项路由", () => {
     expect(tools).not.toContain("boq.deleteItems");
   });
 });
+
+describe("补录清单项路由", () => {
+  it("「补录 灭火器 20个 单价85元」→ boq.addItem", async () => {
+    const p = await plan("补录 灭火器 20个 单价85元");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.addItem");
+    expect(s?.args).toMatchObject({ name: "灭火器", quantity: "20", unit: "个", unitPrice: "85" });
+  });
+  it("缺数量/单价 → 不给步骤只回格式提示", async () => {
+    const p = await plan("补录 灭火器");
+    expect(p.steps).toHaveLength(0);
+    expect(p.fallbackMessage).toContain("补录格式");
+  });
+});
