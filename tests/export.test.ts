@@ -62,15 +62,15 @@ describe("可追溯的清单导出", () => {
     expect(wb.worksheets[1].getCell("G3").value).toBe("3层×12个+5");
     expect(wb.worksheets[1].getCell("G4").value).toBe("");
     expect(wb.worksheets[1].getCell("I4").value).toBe(1250.5);
-    // J=定价状态：可计价行显式标已定价/未定价，非计价行留白；未定价行整行淡琥珀底色
-    expect(wb.worksheets[1].getCell("J3").value).toBe("已定价");
-    expect(wb.worksheets[1].getCell("J4").value).toBe("");
-    expect(wb.worksheets[1].getCell("K4").value).toBe("总价措施");
-    // L=单位工程（无归属留白），M=源文件，N=源工作表
-    expect(wb.worksheets[1].getCell("M4").value).toBe("招标清单.xlsx");
-    expect(wb.worksheets[1].getCell("J5").value).toBe("未定价");
+    // J=主材暂估价（表-08「其中暂估价」口径）；K=定价状态：可计价行显式标已定价/未定价，非计价行留白；未定价行整行淡琥珀底色
+    expect(wb.worksheets[1].getCell("K3").value).toBe("已定价");
+    expect(wb.worksheets[1].getCell("K4").value).toBe("");
+    expect(wb.worksheets[1].getCell("L4").value).toBe("总价措施");
+    // M=单位工程（无归属留白），N=源文件，O=源工作表
+    expect(wb.worksheets[1].getCell("N4").value).toBe("招标清单.xlsx");
+    expect(wb.worksheets[1].getCell("K5").value).toBe("未定价");
     expect((wb.worksheets[1].getRow(5).getCell(1).fill as ExcelJS.FillPattern).fgColor?.argb).toBe("FFFFF7E0");
-    expect(wb.worksheets[2].getCell("M2").value).toBe("结算清单.xlsx");
+    expect(wb.worksheets[2].getCell("N2").value).toBe("结算清单.xlsx");
     expect(wb.worksheets[2].getCell("I2").value).toBe(600);
   });
 

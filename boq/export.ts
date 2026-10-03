@@ -7,7 +7,7 @@ import { isPricableItem } from "@shared/types";
 import { D } from "@cost-engine/money";
 import { listBoq } from "./service";
 
-const HEADER_LABELS = ["序号", "项目编码", "项目名称", "项目特征", "计量单位", "工程量", "工程量计算式", "综合单价", "合价", "定价状态", "费用类别", "单位工程", "源文件", "源工作表"];
+const HEADER_LABELS = ["序号", "项目编码", "项目名称", "项目特征", "计量单位", "工程量", "工程量计算式", "综合单价", "合价", "主材暂估价", "定价状态", "费用类别", "单位工程", "源文件", "源工作表"];
 
 /**
  * 导出工作簿组装（一键导出与 report.exportExcel 同一份口径）：
@@ -58,6 +58,8 @@ export async function assembleExportSheets(projectId: string) {
                     工程量计算式: r.quantityExpr ?? "",
                     综合单价: r.unitPrice,
                     合价: r.totalPrice,
+                    // 表-08 金额栏「其中暂估价」口径：主材暂估价单列便于审价
+                    主材暂估价: r.mainMaterialPrice,
                     // 复核口径：可计价行单价为 0 必须显式标出，不能和已定价行一样留白
                     定价状态: isPricableItem(r) ? (unpriced ? "未定价" : "已定价") : "",
                     费用类别: r.feeType,

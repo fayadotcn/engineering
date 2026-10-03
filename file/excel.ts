@@ -1002,7 +1002,7 @@ export async function buildExportWorkbook(
       const row = ws.addRow(labels.map((l) => {
         const v = r.values[l] ?? "";
         const num = Number(v.replace(/,/g, ""));
-        return v !== "" && !isNaN(num) && /单价|合价|工程量|金额|价格/.test(l)
+        return v !== "" && !isNaN(num) && /单价|合价|工程量|金额|价格|估价/.test(l)
           ? num
           : v;
       }));
