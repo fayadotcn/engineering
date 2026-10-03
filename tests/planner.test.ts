@@ -7,6 +7,18 @@ import type { BoqItemDTO } from "../shared/types";
 // 比例调价路由：「总价下浮5%」「电缆单价下浮5%」「管道工程量上浮3个点」。
 // 动态步需要 listBoq —— mock 出两条可计价行验证范围锁定与目标价换算。
 
+vi.mock("@database/client", () => ({
+  prisma: {
+    actionReceipt: {
+      // 撤销路由取最近可撤销回执（desc 序）：r1 最新
+      findMany: vi.fn(async () => [
+        { id: "r1", summary: "修改 2 个清单项（2 处字段变化）：电力电缆敷设 等" },
+        { id: "r2", summary: "删除 1 个清单项：镀锌钢管" },
+      ]),
+    },
+  },
+}));
+
 vi.mock("@boq/service", () => ({
   listBoq: vi.fn(async () => [
     {
@@ -492,5 +504,37 @@ describe("清单筛选路由（boq.filter）", () => {
     const p = await plan("显示费用汇总");
     const s = await resolve(p.steps[0]);
     expect(s?.tool).not.toBe("boq.filter");
+  });
+});
+
+describe("撤销路由（receipt.undo）", () => {
+  it("「撤销上一次操作」→ 取最近一条可撤销回执", async () => {
+    const p = await plan("撤销上一次操作");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("receipt.undo");
+    expect(s?.args.receiptId).toBe("r1");
+    expect(s?.args.summary).toContain("修改 2 个清单项");
+  });
+  it("「撤销刚才的删除」→ 同义词兜底匹配删除回执", async () => {
+    const p = await plan("撤销刚才的删除");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("receipt.undo");
+    expect(s?.args.receiptId).toBe("r2");
+  });
+  it("「撤销刚才的改价」→ 「改价」命中含「价」的更新回执", async () => {
+    const p = await plan("撤销刚才的改价");
+    const s = await resolve(p.steps[0]);
+    expect(s?.args.receiptId).toBe("r1");
+  });
+  it("「撤销筛选」→ 复位筛选而不是撤销数据操作", async () => {
+    const p = await plan("撤销筛选");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
+    expect(s?.args.onlyItems).toBe(false);
+  });
+  it("「恢复显示全部」→ 复位筛选", async () => {
+    const p = await plan("恢复显示全部");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.filter");
   });
 });

@@ -72,6 +72,7 @@ const CAPABILITIES = `我可以直接执行这些造价任务：
 • 工程量计算：「算一下 3层×12个+15」直接求值，可写回清单项
 • 报告：生成造价分析报告 Excel（汇总/费用/占比/成本构成/综合单价分析/主要材料/甲供材/台账/异常）
 • 修改与导出：改单价/工程量、补录/删除清单项，展示 Diff，导出或写回 Excel（写回留痕可复算）
+• 撤销：「撤销上一次操作」「撤销刚才的改价」回退到操作前状态（确认门）
 直接说出目标即可，例如「检查相同项不同单价」「把询价写回清单」。`;
 
 export class RulePlanner implements Planner {
@@ -214,6 +215,42 @@ export class RulePlanner implements Planner {
         return { tool: "boq.filter", args: filter, activity: reset ? "正在恢复完整清单" : `正在筛选「${scope}」` };
       };
       return { steps: [compute], fallbackMessage: `清单中没有匹配「${scope}」的项` };
+    }
+
+    // 撤销：定位最近一条可撤销回执（可按摘要关键词过滤），确认门后执行回退。
+    // 「撤销筛选/恢复显示全部」是筛选复位，不是数据操作撤销。
+    const undoM = m.match(/(?:撤销|撤回|回退|恢复|undo)(?:一下|了)?(.*)$/i);
+    if (undoM) {
+      const tail = (undoM[1] ?? "").trim();
+      if (/筛选|过滤|全部|显示|完整/.test(tail))
+        return { steps: [{ tool: "boq.filter", args: { onlyItems: false }, activity: "正在恢复完整清单" }] };
+      const query = tail.replace(/^(?:刚才|上一次|上次|最近|刚刚|的|把|将)+/, "").replace(/(?:的)?(?:操作|修改|改动|记录|动作|步骤)$/, "").trim() || undefined;
+      const compute = async (): Promise<PlanStep | null> => {
+        const { prisma } = await import("@database/client");
+        const receipts = await prisma.actionReceipt.findMany({
+          where: { projectId: ctx.projectId, reversible: true },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+          select: { id: true, summary: true },
+        });
+        // 摘要措辞与口语词不同（「改价」对「修改…清单项」）——同义词兜底匹配
+        const SYN: [RegExp, RegExp][] = [
+          [/改价|调价|单价|价格|合价|修改|工程量|补编码|编码/, /修改|暂估价|写回|组价/],
+          [/删除|删掉|去除|恢复删除/, /删除|清除/],
+          [/补录|新增|补项|添加/, /补录|新增/],
+          [/取价|询价|暂估价|材料价|补价/, /暂估价|询价|取价|材料库/],
+          [/组价|定额|测算|套定额/, /组价|定额/],
+          [/写回|回写/, /写回/],
+          [/甲供/, /甲供/],
+        ];
+        const hit = query
+          ? receipts.find((r) => r.summary.includes(query)) ??
+            receipts.find((r) => SYN.some(([q, s]) => q.test(query) && s.test(r.summary)))
+          : receipts[0];
+        if (!hit) return null;
+        return { tool: "receipt.undo", args: { receiptId: hit.id, summary: hit.summary }, activity: `正在撤销「${hit.summary}」` };
+      };
+      return { steps: [compute], fallbackMessage: query ? `没有可撤销的「${query}」操作记录` : "没有可撤销的操作记录" };
     }
 
     // 删除清单项：先按名称/编码关键词定位，确认门后删除（回执全字段快照可撤销）。

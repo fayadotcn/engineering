@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   rows: [] as { id: string; projectId: string; name: string }[],
   deleted: [] as string[],
+  receipts: [] as { id: string; projectId: string; summary: string; reversible: boolean }[],
+  revertedIds: [] as string[],
 }));
 
 vi.mock("@boq/service", () => ({
@@ -24,6 +26,12 @@ vi.mock("@boq/service", () => ({
 }));
 vi.mock("@database/client", () => ({
   prisma: {
+    actionReceipt: {
+      findMany: vi.fn(async (w: { where: { projectId: string; reversible?: boolean } }) =>
+        db.receipts.filter((r) => r.projectId === w.where.projectId && (w.where.reversible === undefined || r.reversible === w.where.reversible))),
+      findFirst: vi.fn(async (w: { where: { id: string; projectId: string } }) =>
+        db.receipts.find((r) => r.id === w.where.id && r.projectId === w.where.projectId) ?? null),
+    },
     boqItem: {
       findMany: vi.fn(async (w: { where: { id: { in: string[] }; projectId: string } }) =>
         db.rows.filter((r) => w.where.id.in.includes(r.id) && r.projectId === w.where.projectId)),
@@ -84,5 +92,49 @@ describe("boq.addItem", () => {
     expect(r.observation.itemId).toBe("new1");
     expect(r.receipts?.[0].before).toEqual([]);
     expect((r.receipts?.[0].after as { name: string }[])[0].name).toBe("灭火器");
+  });
+});
+
+vi.mock("@boq/revert", () => ({
+  revertReceipt: vi.fn(async (id: string) => {
+    db.revertedIds.push(id);
+    return { reverted: 2, receiptId: "rev1", affectedIds: ["a"], restored: [], removedIds: [] };
+  }),
+  RevertError: class RevertError extends Error {
+    constructor(public status: number, message: string) { super(message); }
+  },
+}));
+
+describe("receipt.undo", () => {
+  it("无参数 → 撤销最近一条可撤销回执", async () => {
+    db.receipts = [
+      { id: "r-new", projectId: "p1", summary: "修改 1 个清单项", reversible: true },
+      { id: "r-old", projectId: "p1", summary: "删除 1 个清单项", reversible: true },
+    ];
+    db.revertedIds = [];
+    const r = await callTool("receipt.undo", {});
+    expect(db.revertedIds).toEqual(["r-new"]);
+    expect(r.observation.reverted).toBe(2);
+  });
+
+  it("query 按摘要定位（找不到 → 报错不动数据）", async () => {
+    db.receipts = [
+      { id: "r-new", projectId: "p1", summary: "修改 1 个清单项", reversible: true },
+      { id: "r-del", projectId: "p1", summary: "删除 3 个清单项", reversible: true },
+    ];
+    db.revertedIds = [];
+    const r = await callTool("receipt.undo", { query: "删除" });
+    expect(db.revertedIds).toEqual(["r-del"]);
+    const r2 = await callTool("receipt.undo", { query: "导出" });
+    expect(String(r2.observation.error)).toContain("没有可撤销");
+    expect(db.revertedIds).toEqual(["r-del"]);
+  });
+
+  it("receiptId 跨项目 → 归属守卫拒绝", async () => {
+    db.receipts = [{ id: "r-x", projectId: "other", summary: "x", reversible: true }];
+    db.revertedIds = [];
+    const r = await callTool("receipt.undo", { receiptId: "r-x" });
+    expect(String(r.observation.error)).toContain("不属于当前项目");
+    expect(db.revertedIds).toEqual([]);
   });
 });

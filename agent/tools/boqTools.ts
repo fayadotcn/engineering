@@ -553,3 +553,45 @@ registerTool({
     };
   },
 });
+
+registerTool({
+  name: "receipt.undo",
+  description: "撤销一条可撤销的操作记录（改价/删除/补录/取价写回/组价写回等）。优先按 receiptId 定位，否则按 query 匹配回执摘要取最近一条；行已有后续修改会拒绝并提示先撤销后续记录",
+  implemented: true,
+  schema: z.object({
+    receiptId: z.string().optional().describe("要撤销的回执 id（planner 已定位时传入）"),
+    query: z.string().optional().describe("按回执摘要关键词定位最近的可撤销记录"),
+    summary: z.string().optional().describe("被撤销操作的摘要（仅用于确认文案与活动提示）"),
+  }),
+  confirm: (a: { summary?: string; query?: string }) => `将撤销「${a.summary ?? a.query ?? "最近一次修改"}」，恢复操作前的清单数据`,
+  handler: async (ctx, args: { receiptId?: string; query?: string }) => {
+    const { prisma } = await import("@database/client");
+    const { revertReceipt, RevertError } = await import("@boq/revert");
+    let receiptId = args.receiptId;
+    if (!receiptId) {
+      const receipts = await prisma.actionReceipt.findMany({
+        where: { projectId: ctx.projectId, reversible: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: { id: true, summary: true },
+      });
+      const hit = args.query ? receipts.find((r) => r.summary.includes(args.query!)) : receipts[0];
+      if (!hit) return { observation: { error: args.query ? `没有可撤销的「${args.query}」操作记录` : "没有可撤销的操作记录" } };
+      receiptId = hit.id;
+    } else {
+      const owned = await prisma.actionReceipt.findFirst({ where: { id: receiptId, projectId: ctx.projectId }, select: { id: true } });
+      if (!owned) return { observation: { error: "记录不存在或不属于当前项目" } };
+    }
+    try {
+      const result = await revertReceipt(receiptId, { createdBy: "agent" });
+      return {
+        observation: { reverted: result.reverted, removed: result.removedIds.length },
+        views: [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }],
+        message: `已撤销，还原 ${result.reverted} 个清单项${result.removedIds.length ? `，移除 ${result.removedIds.length} 个补录项` : ""}`,
+      };
+    } catch (e) {
+      if (e instanceof RevertError) return { observation: { error: e.message } };
+      throw e;
+    }
+  },
+});
