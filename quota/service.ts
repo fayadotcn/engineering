@@ -27,15 +27,19 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
       // 脏 JSON 行不拖垮整库匹配——兜底为空对象，该行退化为低分候选
       const mk = fromJson<Record<string, string>>(r.matchKeys, {});
       const raw = fromJson<{ gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string }>(r.raw, {});
+      // 脏数字行兜底为 0——NaN 会沿测算公式传播成 "NaN" 字符串单价；
+      // 负数人材机在定额里无意义；unitScale 必须为正（否则折算翻号）
+      const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; };
+      const pos = (v: unknown, fb: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : fb; };
       return {
         code: r.code,
         name: r.name,
         unit: r.unit,
-        unitScale: r.unitScale || 1,
-        labor: Number(r.labor),
-        material: Number(r.material),
-        machine: Number(r.machine),
-        mainQtyPerUnit: r.mainQtyPerUnit || 1,
+        unitScale: pos(r.unitScale, 1),
+        labor: num(r.labor),
+        material: num(r.material),
+        machine: num(r.machine),
+        mainQtyPerUnit: pos(r.mainQtyPerUnit, 1),
         detail: { gcnr: raw.gcnr, fb: raw.fb, chapter: raw.chapter, jj: raw.jj, mainMaterial: raw.mainMaterial },
         match: {
           category: mk.category,
@@ -51,5 +55,7 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
         },
       };
     });
-    return [...QUOTA_LIBRARY, ...db];
+    // 数据集在前：匹配同分时先迭代者胜出（top2Quota 严格 >），
+    // 真实定额库应优先于内置演示参考值——内置库仅作无数据集时的兜底
+    return [...db, ...QUOTA_LIBRARY];
 }
