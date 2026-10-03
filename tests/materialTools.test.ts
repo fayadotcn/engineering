@@ -56,7 +56,7 @@ const call = (tool: string, args: unknown = {}) =>
   getTool(tool)!.handler!(ctx as never, args as never) as Promise<{
     observation: Record<string, unknown>;
     message?: string;
-    receipts?: { actionType: string }[];
+    receipts?: { actionType: string; summary?: string }[];
   }>;
 
 describe("material.applyQuotation 询价写回", () => {
@@ -169,7 +169,7 @@ describe("material.clearOwnerSuppliedPrice 甲供材扣减", () => {
     expect(getTool("material.clearOwnerSuppliedPrice")!.confirm).toBeTruthy();
     const r = (await call("material.clearOwnerSuppliedPrice")) as {
       observation: { cleared: number };
-      receipts?: { actionType: string }[];
+      receipts?: { actionType: string; summary?: string }[];
       message?: string;
     };
     expect(r.observation.cleared).toBe(1);
