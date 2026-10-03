@@ -364,3 +364,36 @@ describe("名称/项目特征修正路由", () => {
     expect(s?.tool).toBe("boq.findFeatureMismatch");
   });
 });
+
+describe("人工组价路由（quota.setItemQuota）", () => {
+  it("「把镀锌钢管的定额改为5H0332」→ replace 模式批量套用", async () => {
+    const p = await plan("把镀锌钢管的定额改为5H0332");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("quota.setItemQuota");
+    expect(s?.args.quotaCode).toBe("5H0332");
+    expect(s?.args.mode).toBe("replace");
+    expect(s?.args.itemIds).toEqual(["i2"]);
+  });
+
+  it("「电力电缆增列定额5H0999」→ append 模式", async () => {
+    const p = await plan("电力电缆增列定额5H0999");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("quota.setItemQuota");
+    expect(s?.args.quotaCode).toBe("5H0999");
+    expect(s?.args.mode).toBe("append");
+  });
+
+  it("「电力电缆清除组价方案」→ clear", async () => {
+    const p = await plan("电力电缆清除组价方案");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("quota.setItemQuota");
+    expect(s?.args.clear).toBe(true);
+  });
+
+  it("「编码改为031001001001」不被组价路由截胡（编码走专用路由）", async () => {
+    const p = await plan("把镀锌钢管的编码改为031001001001");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    expect(s?.args.patches).toEqual([{ id: "i2", code: "031001001001" }]);
+  });
+});

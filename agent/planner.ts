@@ -398,6 +398,33 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 人工组价：「镀锌钢管 定额改为 5H0332」「消防管 增列定额 5G0110」「XX 清除组价方案」
+    // ——存疑匹配的专业处置出口。必须在「定额测算」之前：这些句式也含「定额」
+    const quotaM = m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(?:定额|组价)?(?:改|换|设)(?:为|成)?\s*[：:=""]?\s*(?:定额|定额编号)?\s*([0-9A-Za-z][\w-]{2,15})\s*$/);
+    const appendM = !quotaM && m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(?:定额|子目|组价方案)?(?:增列|追加|加套|补套|增加)(?:定额|子目)?\s*[：:=""]?\s*([0-9A-Za-z][\w-]{2,15})\s*$/);
+    const clearM = !quotaM && !appendM && m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(?:清除|清空|移除)(?:其|它的)?(?:组价|组价方案|定额方案|定额)\s*$/);
+    // 「XX的编码/单价/费率改为…」各有专用路由——scope 尾词在这些字段上时不应落入定额改派
+    const quotaFieldTail = /编码|单价|价格|合价|工程量|数量|费率|税率|名称|特征$/;
+    if ((quotaM || appendM || clearM) && !(quotaM && quotaFieldTail.test(quotaM[1])) && !(appendM && quotaFieldTail.test(appendM[1])) && !(clearM && quotaFieldTail.test(clearM[1]))) {
+      const mm = (quotaM ?? appendM ?? clearM)!;
+      const scope = mm[1].replace(/^(把|将|对|请|所有|全部|整个|清单项?|各项|项目)+/, "").trim();
+      const code = mm[2];
+      const mode = appendM ? "append" : "replace";
+      const clear = !!clearM;
+      const compute = async (): Promise<PlanStep | null> => {
+        const { listBoq } = await import("@boq/service");
+        const items = (await listBoq(ctx.projectId)).filter((i) => !i.isHeader && i.name.trim());
+        const pool = scopeFilter(items, scope);
+        if (!pool.length) return null;
+        return {
+          tool: "quota.setItemQuota",
+          args: clear ? { itemIds: pool.map((i) => i.id), clear: true } : { itemIds: pool.map((i) => i.id), quotaCode: code, mode },
+          activity: clear ? `正在清除组价方案` : `正在${mode === "append" ? "增列" : "套用"}定额 ${code}`,
+        };
+      };
+      return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的清单项` : "没有可组价的清单项" };
+    }
+
     // 定额测算: "按四川2020定额测算" / "定额组价" / "测算一下"
     if (/定额|组价|测算/.test(m)) {
       return {

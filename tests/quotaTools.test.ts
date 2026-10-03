@@ -79,16 +79,18 @@ describe("quota.setItemQuota", () => {
     await expect(call({ itemId: "i1", quotaCode: "5H0332" })).rejects.toThrow("尚未确认");
     expect(db.updates.length).toBe(0);
   });
-  it("定额有主材但清单项缺暂估价 → 报错", async () => {
+  it("定额有主材但清单项缺暂估价 → 不写入并报缺价", async () => {
     db.items = [item({ mainMaterialPrice: "0" })];
-    await expect(call({ itemId: "i1", quotaCode: "5H0332" })).rejects.toThrow("缺价");
+    const r = await call({ itemId: "i1", quotaCode: "5H0332" });
+    expect(r.observation.error).toContain("缺价");
+    expect(db.updates.length).toBe(0);
   });
   it("定额无声明主材（detail.mainMaterial 空）→ 不加主材价，防重复计", async () => {
     const r = await call({ itemId: "i1", quotaCode: "5H0999" });
     const plan = db.updates[0].patch.pricingPlan as PricingPlanLine[];
     expect(plan.length).toBe(1);
     expect(plan[0].mainPrice).toBeNull();
-    expect(r.observation.unitPrice).toBeTruthy();
+    expect(r.observation.items[0].unitPrice).toBeTruthy();
   });
   it("replace 替换主项 / append 增列", async () => {
     await call({ itemId: "i1", quotaCode: "5H0332", mode: "replace" });
