@@ -253,6 +253,23 @@ registerTool({
     });
     sBoq.columns = [{ width: 6 }, { width: 16 }, { width: 30 }, { width: 40 }, { width: 8 }, { width: 12 }, { width: 12 }, { width: 14 }];
 
+    // 总价措施/其他项目明细（表-11/表-12 口径）：总额计价行单列成表，金额是真钱不能只在汇总里出现
+    const lumpRows = items.filter((it) => !it.isHeader && (it.feeType === "总价措施" || it.feeType === "其他项目"));
+    if (lumpRows.length) {
+      const sL = wb.addWorksheet("措施与其他项目");
+      sL.addRow(["序号", "项目编码", "项目名称", "费用类别", "金额"]).font = bold.font;
+      let lumpSeq = 0;
+      for (const it of lumpRows) {
+        const r = sL.addRow([++lumpSeq, it.code, it.name, it.feeType, Number(it.totalPrice)]);
+        r.getCell(5).numFmt = moneyFmt;
+      }
+      const lumpTotal = lumpRows.reduce((n, it) => n.plus(D(it.totalPrice || "0")), D(0));
+      const tr = sL.addRow(["", "", "合计", "", Number(lumpTotal.toFixed(2))]);
+      tr.font = bold.font;
+      tr.getCell(5).numFmt = moneyFmt;
+      sL.columns = [{ width: 6 }, { width: 16 }, { width: 44 }, { width: 12 }, { width: 14 }];
+    }
+
     // 占比
     const s2 = wb.addWorksheet("专业占比");
     s2.addRow(["专业", "金额", "占比", "项数"]).font = bold.font;
@@ -447,7 +464,7 @@ registerTool({
         title: "分析报告",
         artifactId: artifact.id,
         filename: artifact.label,
-        summary: `汇总/取费/清单/专业/材料/成本构成${planned.length ? "/综合单价分析" : ""}${matRows.length ? "/主要材料表" : ""}${suppliedRows.length ? "/甲供材表" : ""}/台账/异常 ${wb.worksheets.length} 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
+        summary: `汇总/取费/清单${lumpRows.length ? "/措施与其他项目" : ""}/专业/材料/成本构成${planned.length ? "/综合单价分析" : ""}${matRows.length ? "/主要材料表" : ""}${suppliedRows.length ? "/甲供材表" : ""}/台账/异常 ${wb.worksheets.length} 个 sheet，含税造价 ${fmtMoney(fee.grandTotal)} 元`,
       }],
       receipts: [{
         actionType: "EXPORT",

@@ -209,3 +209,33 @@ describe("report.generate 甲供材表", () => {
     expect(wb.getWorksheet("甲供材表")).toBeUndefined();
   });
 });
+
+describe("report.generate 措施与其他项目表", () => {
+  it("总价措施/其他项目行单列成表并带合计", async () => {
+    mocks.items.mockResolvedValue([
+      item({ name: "镀锌钢管" }),
+      item({ id: "i9", name: "安全文明施工费", feeType: "总价措施", quantity: "1", unitPrice: "0", totalPrice: "5000" }),
+      item({ id: "i10", name: "暂列金额", feeType: "其他项目", quantity: "1", unitPrice: "0", totalPrice: "30000" }),
+    ]);
+    await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    const sL = wb.getWorksheet("措施与其他项目");
+    expect(sL).toBeTruthy();
+    const cells: string[] = [];
+    sL!.eachRow((row) => cells.push(String((row.values as unknown[]).slice(1).join("|"))));
+    expect(cells.some((c) => c.includes("安全文明施工费") && c.includes("总价措施"))).toBe(true);
+    expect(cells.some((c) => c.includes("暂列金额") && c.includes("其他项目"))).toBe(true);
+    expect(cells.some((c) => c.includes("合计") && c.includes("35000"))).toBe(true);
+    // 不进分部分项表
+    const sB = wb.getWorksheet("分部分项清单")!;
+    const bCells: string[] = [];
+    sB.eachRow((row) => bCells.push(String((row.values as unknown[]).slice(1).join("|"))));
+    expect(bCells.some((c) => c.includes("安全文明施工费"))).toBe(false);
+  });
+  it("无总额计价行 → 不出该 sheet", async () => {
+    mocks.items.mockResolvedValue([item({})]);
+    await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    expect(wb.getWorksheet("措施与其他项目")).toBeUndefined();
+  });
+});
