@@ -239,3 +239,40 @@ describe("pickBestPriceRow", () => {
     expect(pick!.row.price).toBe(85);
   });
 });
+
+describe("pickBestPriceRow 稳定性修正", () => {
+  const row2 = (over: Partial<PriceCandidate>): PriceCandidate => ({
+    name: "镀锌钢管", spec: "DN100", unit: "m", brand: "", price: 80,
+    priceType: "MARKET", region: "", period: "", ...over,
+  });
+
+  it("同分时取期次较新者，不依赖候选顺序", () => {
+    // 两候选期次都晚于指定期 → 期次分同为 0，总分相等。
+    // 旧逻辑按迭代序取先入队的旧期次行；修后同分裁决取期次较新者。
+    const pick = pickBestPriceRow(
+      [
+        row2({ price: 80, period: "2024-06" }),
+        row2({ price: 81, period: "2025-06" }),
+      ],
+      { name: "镀锌钢管", spec: "DN100" },
+      { period: "2024-01" } // 两候选都晚于该期 → 期次维度零分，打平
+    );
+    expect(pick!.row.period).toBe("2025-06");
+  });
+
+  it("单位别名归一：价格行「米」对清单「m」也得单位分", () => {
+    const pick = pickBestPriceRow(
+      [row2({ unit: "米" }), row2({ unit: "吨" })],
+      { name: "镀锌钢管", spec: "DN100", unit: "m" }
+    );
+    expect(pick!.row.unit).toBe("米");
+  });
+
+  it("材料词命中名称时做归一化比较（大小写/空白不丢配）", () => {
+    const pick = pickBestPriceRow(
+      [row2({ name: "热镀锌钢管" }), row2({ name: "PPR管" })],
+      { name: "管材", material: "镀锌" }
+    );
+    expect(pick!.row.name).toBe("热镀锌钢管");
+  });
+});

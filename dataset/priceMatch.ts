@@ -1,4 +1,5 @@
 import { periodKey } from "./priceParse";
+import { normUnit } from "@cost-engine/semantic";
 
 // 价格库候选行打分：名称/规格是基础分（沿用既有阈值 60/80），
 // 品牌偏好 / 地区 / 期次新旧 / 价格类型 在候选间做加减分裁决。
@@ -119,7 +120,7 @@ export function pickBestPriceRow(
       : { any: 0, strong: 0 };
     const nameOk =
       nameHit(r.name, item.name) ||
-      !!(item.material && r.name.includes(item.material));
+      !!(item.material && norm(r.name).includes(norm(item.material)));
     // 型号式价格行（名称为型号）无名称命中——规格词根重合度够也保留参选
     if (!nameOk && !specExact && !specContain && !shared.strong && shared.any < 2)
       continue;
@@ -142,7 +143,7 @@ export function pickBestPriceRow(
       }
     }
     if (!nameOk) notes.push("名称未直接命中（按型号规格匹配）");
-    if (r.unit && item.unit && r.unit === item.unit) s += 10;
+    if (r.unit && item.unit && normUnit(r.unit) === normUnit(item.unit)) s += 10;
 
     // 品牌：指定品牌命中 > 无品牌候选 > 异品牌候选（异品牌仍可兜底但要留痕）
     if (brands.length) {
@@ -178,7 +179,11 @@ export function pickBestPriceRow(
     // 价格类型偏好
     if (prefs?.priceType && r.priceType === prefs.priceType) s += 10;
 
-    if (!best || s > best.score) best = { row: r, score: s, notes };
+    // 同分裁决取期次较新者（再退入库时间）——不能让结果依赖候选集迭代顺序
+    if (!best || s > best.score || (s === best.score &&
+      (pk > periodKey(best.row.period) ||
+        (pk === periodKey(best.row.period) && (Date.parse(r.createdAt ?? "") || 0) > (Date.parse(best.row.createdAt ?? "") || 0)))))
+      best = { row: r, score: s, notes };
   }
   return best;
 }
