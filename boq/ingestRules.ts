@@ -16,8 +16,9 @@ export const sectionFeeType = (s: string): SheetFeeType | null =>
  *  表-08 标题虽写「和单价措施」，很多导出把措施行放表尾、序号重启、无分隔行——按编码段识别。 */
 export const MEASURE_CODE_RE = /^(0117|0212|0313|0411|0511|0611)/;
 
-/** 序号重启 + 措施名的兜底信号（措施行缺编码或非 GB 段时） */
-export const MEASURE_NAME_RE = /排水|降水|脚手架|围堰|便道|便桥|大型机械|进出场|碰通|垂直运输|超高施工|洞内施工/;
+/** 序号重启 + 措施名的兜底信号（措施行缺编码或非 GB 段时）。
+ *  不写裸「排水」——排水管/排水立管是分部分项实体，措施行只会写「施工排水/降排水」。 */
+export const MEASURE_NAME_RE = /施工排水|基坑排水|降排水|降水|脚手架|围堰|便道|便桥|大型机械|进出场|碰通|垂直运输|超高施工|洞内施工/;
 
 export interface RowDecision {
   feeType: SheetFeeType;
