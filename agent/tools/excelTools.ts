@@ -191,7 +191,7 @@ registerTool({
     const leaf = items.filter((i) => !i.isHeader);
     if (!leaf.length) return { observation: { error: "清单为空，无法生成报告" } };
 
-    const { projectTotals, aggregateByDiscipline, aggregateByCategory } = await import("@cost-engine/aggregate");
+    const { projectTotals, aggregateByDiscipline, aggregateByCategory, aggregateByUnitProject } = await import("@cost-engine/aggregate");
     const {
       findSameItemDifferentPrice, findPriceAnomalies, findArithmeticMismatches,
       findFeatureMismatch, findDuplicateItems, findUnitInconsistencies, findCodeNameMismatch, findInvalidCodes, findMissingCodes,
@@ -282,6 +282,22 @@ registerTool({
     s3.addRow(["材料类别", "金额", "占比", "项数"]).font = bold.font;
     for (const c of aggregateByCategory(items).slices)
       s3.addRow([c.label, Number(c.amount), `${(c.share * 100).toFixed(1)}%`, c.count]);
+
+    // 单位工程汇总（表-04 口径）：多个单位工程才单列
+    const byUnit = aggregateByUnitProject(items);
+    const hasUnit = byUnit.slices.length > 1 || (byUnit.slices.length === 1 && byUnit.slices[0].key !== "未注明单位工程");
+    if (hasUnit) {
+      const sU = wb.addWorksheet("单位工程汇总");
+      sU.addRow(["序号", "单位工程", "金额", "占比", "项数"]).font = bold.font;
+      byUnit.slices.forEach((s, i) => {
+        const r = sU.addRow([i + 1, s.label, Number(s.amount), `${(s.share * 100).toFixed(1)}%`, s.count]);
+        r.getCell(3).numFmt = moneyFmt;
+      });
+      const tr = sU.addRow(["", "合计", Number(byUnit.total.toFixed(2)), "100.0%", byUnit.slices.reduce((n, s) => n + s.count, 0)]);
+      tr.font = bold.font;
+      tr.getCell(3).numFmt = moneyFmt;
+      sU.columns = [{ width: 6 }, { width: 36 }, { width: 16 }, { width: 10 }, { width: 8 }];
+    }
 
     // 人材机成本构成（分量来源：定额组价方案 > 源表分解列 > 主材暂估价）
     const comp = analyzeCostComposition(items);

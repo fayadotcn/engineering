@@ -239,3 +239,26 @@ describe("report.generate 措施与其他项目表", () => {
     expect(wb.getWorksheet("措施与其他项目")).toBeUndefined();
   });
 });
+
+describe("report.generate 单位工程汇总", () => {
+  it("多个单位工程 → 出汇总 sheet 带合计", async () => {
+    mocks.items.mockResolvedValue([
+      item({ id: "i1", unitProject: "1#楼", totalPrice: "1000" }),
+      item({ id: "i2", unitProject: "2#楼", totalPrice: "2000" }),
+    ]);
+    await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    const sU = wb.getWorksheet("单位工程汇总");
+    expect(sU).toBeTruthy();
+    const cells: string[] = [];
+    sU!.eachRow((row) => cells.push(String((row.values as unknown[]).slice(1).join("|"))));
+    expect(cells.some((c) => c.includes("1#楼") && c.includes("1000"))).toBe(true);
+    expect(cells.some((c) => c.includes("合计") && c.includes("3000"))).toBe(true);
+  });
+  it("单一未注明单位工程 → 不出该 sheet", async () => {
+    mocks.items.mockResolvedValue([item({})]);
+    await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    expect(wb.getWorksheet("单位工程汇总")).toBeUndefined();
+  });
+});

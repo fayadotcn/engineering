@@ -8,8 +8,8 @@ import type { Discipline } from "@shared/types";
 
 const money = (value: string) => Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 /** 大额用「万」说话：941.9 万元 比 9,418,648.28 元 一眼可读；小金额保留到分。 */
-const wan = (value: string) => { const n = Number(value); return n >= 10000 ? `${(n / 10000).toLocaleString("zh-CN", { maximumFractionDigits: n >= 1000000 ? 0 : 1 })} 万元` : `${money(value)} 元`; };
-const wanNum = (value: string) => { const n = Number(value); return n >= 10000 ? `${(n / 10000).toLocaleString("zh-CN", { maximumFractionDigits: n >= 1000000 ? 0 : 1 })}万` : money(value); };
+const wan = (value: string) => { const n = Number(value); return n >= 1e8 ? `${(n / 1e8).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} 亿元` : n >= 10000 ? `${(n / 10000).toLocaleString("zh-CN", { maximumFractionDigits: n >= 1000000 ? 0 : 1 })} 万元` : `${money(value)} 元`; };
+const wanNum = (value: string) => { const n = Number(value); return n >= 1e8 ? `${(n / 1e8).toLocaleString("zh-CN", { maximumFractionDigits: 2 })}亿` : n >= 10000 ? `${(n / 10000).toLocaleString("zh-CN", { maximumFractionDigits: n >= 1000000 ? 0 : 1 })}万` : money(value); };
 
 export function CostOverview({ onUpload }: { onUpload?: () => void }) {
   const s = useStore();
