@@ -275,11 +275,13 @@ registerTool({
     const f = findCodeNameMismatch(items);
     const g = findInvalidCodes(items);
     const h = findMissingCodes(items);
+    const dp = findDuplicateItems(items);
     const arith = d[0]?.items.length ?? 0;
     const invalid = g[0]?.items.length ?? 0;
     const missing = h[0]?.items.length ?? 0;
+    const dup = dp.reduce((n, r) => n + r.items.length, 0);
     return {
-      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith, unitInconsistent: e.length, codeMismatch: f.length, invalidCode: invalid, missingCode: missing },
+      observation: { sameItemDiffPrice: a.length, priceAnomalies: b.length, featureMismatch: c.length, arithmeticMismatch: arith, unitInconsistent: e.length, codeMismatch: f.length, invalidCode: invalid, missingCode: missing, duplicate: dp.length },
       views: [
         anomalyView("SAME_ITEM_DIFF_PRICE", a),
         anomalyView("PRICE_ANOMALY", b),
@@ -289,8 +291,9 @@ registerTool({
         anomalyView("CODE_MISMATCH", f),
         anomalyView("INVALID_CODE", g),
         anomalyView("MISSING_CODE", h),
+        anomalyView("DUPLICATE", dp),
       ],
-      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项，单位不一致 ${e.length} 组，一码多名 ${f.length} 组，非标编码 ${invalid} 项，缺编码 ${missing} 项`,
+      message: `全面检查完成：相同项不同价 ${a.length} 组，单价异常 ${b.length} 组，特征不一致 ${c.length} 组，合价算术不符 ${arith} 项，单位不一致 ${e.length} 组，一码多名 ${f.length} 组，非标编码 ${invalid} 项，缺编码 ${missing} 项，重复项 ${dup} 项`,
     };
   },
 });
