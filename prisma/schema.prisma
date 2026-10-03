@@ -96,6 +96,7 @@ model BoqItem {
   @@index([projectId])
   @@index([projectId, code])
   @@index([projectId, discipline])
+  @@index([fileId])
 }
 
 // 已确认的列映射模板：表头指纹 → 列角色/表类型，再次遇到同构表格直接套用
@@ -128,6 +129,7 @@ model QuotationItem {
   createdAt    DateTime @default(now())
 
   @@index([projectId])
+  @@index([fileId])
 }
 
 model CostFact {
