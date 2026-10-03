@@ -25,6 +25,10 @@ export async function POST(
   // multipart filename can arrive mojibake from non-UTF8 clients; an explicit
   // `filename` field wins when provided
   const filename = (form.get("filename") as string | null)?.trim() || file.name;
+  // 与上传控件 accept 口径一致——不支持的类型不必建档起 run 再失败
+  const ext = path.extname(filename).toLowerCase();
+  if (![".xls", ".xlsx", ".csv", ".pdf"].includes(ext))
+    return NextResponse.json({ error: `不支持的文件类型「${ext || "无扩展名"}」——支持 .xls/.xlsx/.csv/.pdf` }, { status: 400 });
   const contentHash = createHash("sha1").update(buffer).digest("hex");
 
   // 同项目同内容去重：已解析过的文件不再建记录、不起 run；
@@ -54,7 +58,6 @@ export async function POST(
     return NextResponse.json({ file: dup, runId, duplicate: true });
   }
 
-  const ext = path.extname(filename) || ".bin";
   const storageKey = await storage.put(buffer, ext);
 
   const { stage, period } = inferFileStage(filename);
