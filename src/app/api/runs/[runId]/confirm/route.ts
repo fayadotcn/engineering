@@ -14,7 +14,13 @@ export async function POST(
   const { approve } = input.data;
   const run = await prisma.agentRun.findUnique({ where: { id } });
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (run.status !== "AWAITING_CONFIRM")
+  // 原子抢占待确认状态——双击/并发提交只有一个请求能走到 resolver，
+  // 另一个拿 409，不会把正在执行的 run 误标 FAILED
+  const claimed = await prisma.agentRun.updateMany({
+    where: { id, status: "AWAITING_CONFIRM" },
+    data: { status: "RUNNING", pendingAction: "{}" },
+  });
+  if (!claimed.count)
     return NextResponse.json(
       { error: `run 不在待确认状态（${run.status}）` },
       { status: 409 }
