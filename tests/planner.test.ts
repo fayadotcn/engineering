@@ -343,3 +343,24 @@ describe("主材暂估价设值路由", () => {
     expect((s?.args.patches as { unitPrice?: string }[] | undefined)?.[0]?.unitPrice).toBe("5.00");
   });
 });
+
+describe("名称/项目特征修正路由", () => {
+  it("「把镀锌钢管的项目特征改为DN100 沟槽连接」→ boq.update 写 rawFeature", async () => {
+    const p = await plan("把镀锌钢管的项目特征改为DN100 沟槽连接");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.update");
+    expect(s?.args.patches).toEqual([{ id: "i2", rawFeature: "DN100 沟槽连接" }]);
+  });
+
+  it("「电力电缆名称改为电力电缆敷设 YJV」→ 写 name", async () => {
+    const p = await plan("电力电缆名称改为电力电缆敷设YJV");
+    const s = await resolve(p.steps[0]);
+    expect(s?.args.patches).toEqual([{ id: "i1", name: "电力电缆敷设YJV" }]);
+  });
+
+  it("「检查项目特征不一致」不被截胡（无改为+值）", async () => {
+    const p = await plan("检查项目特征不一致");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("boq.findFeatureMismatch");
+  });
+});

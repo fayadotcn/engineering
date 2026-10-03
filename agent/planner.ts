@@ -513,6 +513,29 @@ export class RulePlanner implements Planner {
       return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的可计价清单项` : "没有可写主材价的清单项" };
     }
 
+    // 名称/项目特征修正：「把X的名称改为Y」「给X的特征补上沟槽连接」——特征不符检查的处置通道。
+    // 须在改价路由之前：特征文本可能含「单价/价格」字样，先到先判
+    const nameFeatM = m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(项目特征|特征|名称)(?:改|设|补|填写)(?:为|成|上|到|充)\s*[：:=""]?(.+?)\s*[""」』]?$/);
+    if (nameFeatM) {
+      const scope = nameFeatM[1].replace(/^(把|将|对|请|所有|全部|整个|清单项?|各项|项目)+/, "");
+      const field = nameFeatM[2] === "名称" ? "name" : "rawFeature";
+      const val = nameFeatM[3].replace(/[""'"'「『」』]+/g, "").trim();
+      if (val) {
+        const compute = async (): Promise<PlanStep | null> => {
+          const { listBoq } = await import("@boq/service");
+          const items = (await listBoq(ctx.projectId)).filter((i) => !i.isHeader && i.name.trim());
+          const pool = scopeFilter(items, scope);
+          if (!pool.length) return null;
+          return {
+            tool: "boq.update",
+            args: { patches: pool.map((i) => ({ id: i.id, [field]: val })), reason: `${nameFeatM[2]}设为「${val}」${scope ? `（范围：${scope}）` : ""}` },
+            activity: `正在更新${nameFeatM[2]}`,
+          };
+        };
+        return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的清单项` : "没有可修改的清单项" };
+      }
+    }
+
     // 改价/统一单价: 「电缆单价改为5元」（范围+指定值）、「相同项统一为最低价/均价」
     if (/统一|改为|调成|调整为|调到|调为|设为/.test(m) && /单价|价格|综合单价/.test(m)) {
       const setM = m.match(/(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)/);
