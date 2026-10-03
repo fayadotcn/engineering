@@ -129,4 +129,43 @@ describe("单方造价指标路由", () => {
     expect(s?.tool).toBe("project.setFact");
     expect(s?.args).toMatchObject({ key: "建筑面积" });
   });
+
+  it("「单方造价控制到500元/㎡」→ 按面积换算目标总价反算", async () => {
+    const p = await plan("单方造价控制到500元/㎡", [{ key: "建筑面积", value: "12000" }]);
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("quantity.adjust");
+    expect(s?.args.targetTotal).toBe(6000000);
+    expect(s?.args.apply).toBe(true);
+  });
+
+  it("单方造价反算但无建筑面积事实 → 不出步骤，提示先填面积", async () => {
+    const p = await plan("单方造价控制到500元/㎡");
+    expect(p.steps).toHaveLength(0);
+    expect(p.fallbackMessage).toContain("建筑面积");
+  });
+
+  it("「单方造价500元/㎡合理吗」→ 询问不是调价，走 feeSummary", async () => {
+    const p = await plan("单方造价500元/㎡合理吗");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("cost.feeSummary");
+  });
+});
+
+describe("类别词修饰造价/费用的范围化比例调整", () => {
+  it("「电缆造价下浮5%」→ 只调电缆项（allowedItemIds），不是整体总价", async () => {
+    const p = await plan("电缆造价下浮5%");
+    const s = await resolve(p.steps[0]);
+    expect(s?.tool).toBe("quantity.adjust");
+    expect(s?.args.allowedItemIds).toEqual(["i1"]);
+    // allTotal 3000 − 电缆小计 1000×5% = 2950
+    expect(s?.args.targetTotal).toBe(2950);
+  });
+
+  it("「含税总价下浮5%」剥前缀后无类别词 → 仍走整体反算", async () => {
+    const p = await plan("含税总价下浮5%");
+    const s0 = await resolve(p.steps[0]);
+    expect(s0?.tool).toBe("cost.calculate");
+    const s1 = await resolve(p.steps[1], [{ observation: { exclTax: "1000.00", inclTax: null } }]);
+    expect(s1?.args.allowedItemIds).toBeUndefined();
+  });
 });

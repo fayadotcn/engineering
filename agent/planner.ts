@@ -1,7 +1,7 @@
 import type { RunContext } from "./context";
 import type { ToolResult } from "./tools/registry";
 import { REGION_RE } from "@dataset/priceParse";
-import { parseRateValue } from "@project/facts";
+import { parseRateValue, parseAreaValue } from "@project/facts";
 import { autopilotPlan } from "./autopilot";
 
 // Planner produces steps. A step is either a static {tool,args} or a
@@ -65,7 +65,7 @@ const CAPABILITIES = `我可以直接执行这些造价任务：
 • 询价处理：把询价文件价格匹配并写回清单，未询到的自动标记
 • 金额分析：各专业占比、电缆/桥架/管道/阀门等材料类别占比
 • 成本构成：人材机费用占比、毛利与成本倒挂项（报价低于成本）
-• 工程量反算：总价控制到目标值（含税可指定税率），只调工程量
+• 总价反算：总价控制到目标值（含税可指定税率），默认按比例调综合单价
 • 定额测算：匹配定额子目并组价，与清单价对比偏差
 • 两版清单对审：招标/中标/结算的价差、量差、独有项与总额差
 • 工程量计算：「算一下 3层×12个+15」直接求值，可写回清单项
@@ -157,7 +157,24 @@ export class RulePlanner implements Planner {
     // 必须在「费用汇总」之前——「含税总价控制到500万」含「含税总价」字样，
     // 但动词+金额决定了它是反算不是汇总。
     const target = m.match(/(?:控制|调|调整|降|到|为)\D{0,6}([\d,]+(?:\.\d+)?)\s*(亿|万|千)?/);
-    if (/总价|含税|总额|造价/.test(m) && target) {
+    const perArea = /单方|每平(?:米|方)|元\s*[/／]\s*(?:㎡|平)/.test(m);
+    if (perArea && target) {
+      if (/合理|合适|怎么样|如何|高吗|贵吗|便宜/.test(m))
+        return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用与单方造价" }] };
+      // 「单方造价控制到500元/㎡」→ 目标总价 = 单方价 × 建筑面积；无面积事实无法换算
+      const area = parseAreaValue(ctx.facts.find((f) => /面积/.test(f.key))?.value);
+      if (!area || area <= 0)
+        return { steps: [], fallbackMessage: "按单方造价反算需要建筑面积——请在计价设置填写「建筑面积（㎡）」，或回复「建筑面积设为12000」" };
+      const unit = Number(target[1].replace(/,/g, ""));
+      return {
+        steps: [{
+          tool: "quantity.adjust",
+          args: { targetTotal: Number((unit * area).toFixed(2)), apply: true },
+          activity: `正在按单方造价 ${unit} 元/㎡ × ${area}㎡ 反算综合单价`,
+        }],
+      };
+    }
+    if (/总价|含税|总额|造价/.test(m) && target && !perArea) {
       const mult = target[2] === "亿" ? 1e8 : target[2] === "万" ? 1e4 : target[2] === "千" ? 1e3 : 1;
       const targetTotal = Number(target[1].replace(/,/g, "")) * mult;
       const inclTax = /含税/.test(m);
@@ -188,6 +205,36 @@ export class RulePlanner implements Planner {
       const inclTax = /含税/.test(m);
       const taxFact = ctx.facts.find((f) => f.key === "税率")?.value;
       const taxRate = inclTax ? (parseRateValue(taxFact) ?? 0.09) : 0;
+      // 「电缆造价下浮5%」：材料类别词直接修饰 造价/费用/报价 → 只调该类别项单价，
+      // 而非整体总价（「含税报价/总造价」剥前缀后不在类别词表，仍走整体路径）。
+      const feeW = m.match(/([一-龥A-Za-z]{2,8}?)(?:的)?(?:造价|费用|报价)/)?.[1]
+        ?.replace(/^(把|将|对|请|所有|全部|整个|统一|综合|清单项?|各项|项目|该|本|总|含税)+/, "") ?? "";
+      if (feeW && MATERIAL_CATEGORIES.some((c) => feeW.includes(c.replace(/柜|设备/, "")))) {
+        return {
+          steps: [
+            async (): Promise<PlanStep | null> => {
+              const { listBoq } = await import("@boq/service");
+              const { isPricableItem } = await import("@shared/types");
+              const items = await listBoq(ctx.projectId);
+              const leaf = items.filter((i) => !i.isHeader && i.name.trim());
+              const pool = scopeFilter(
+                leaf.filter((i) => isPricableItem(i) && !Number.isNaN(Number(i.totalPrice))),
+                feeW
+              );
+              if (!pool.length) return null;
+              const subtotal = pool.reduce((a, i) => a + Number(i.totalPrice), 0);
+              const allTotal = leaf.reduce((a, i) => a + Number(i.totalPrice), 0);
+              const targetTotal = Number((allTotal + (subtotal * dir * pct) / 100).toFixed(2));
+              return {
+                tool: "quantity.adjust",
+                args: { targetTotal, taxRate, allowedItemIds: pool.map((i) => i.id), apply: true },
+                activity: `正在将「${feeW}」项综合单价${pctM[1]} ${pct}%`,
+              };
+            },
+          ],
+          fallbackMessage: `没有找到「${feeW}」的可计价清单项`,
+        };
+      }
       return {
         steps: [
           { tool: "cost.calculate", args: {}, activity: "正在取当前总价" },
