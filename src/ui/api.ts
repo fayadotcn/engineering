@@ -79,6 +79,10 @@ export const api = {
   boq: (id: string, signal?: AbortSignal) => request<BoqItemDTO[]>(`/api/projects/${id}/boq`, { signal }, "清单读取失败"),
   summary: (id: string, signal?: AbortSignal) => request<ProjectSummary>(`/api/projects/${id}/summary`, { signal }, "汇总读取失败"),
   runs: (id: string, signal?: AbortSignal) => request<RunRecord[]>(`/api/projects/${id}/runs`, { signal }, "任务记录读取失败"),
+  /** 空闲同步探针：指纹 = 最新回执/run/行数/台账，变才触发全量刷新 */
+  digest: (id: string, signal?: AbortSignal) =>
+    request<{ receiptId: string | null; runId: string | null; runStatus: string | null; boqCount: number; fileCount: number; factId: string | null }>(
+      `/api/projects/${id}/digest`, { signal }, "同步失败"),
   saveSettings: (id: string, values: Record<string, string>) => request<unknown>(`/api/projects/${id}/settings`, json("PUT", values), "保存失败"),
 
   startRun: (projectId: string, message: string, extra?: Record<string, unknown>) => request<{ runId: string }>(`/api/projects/${projectId}/agent/runs`, json("POST", { message, extra }), "任务启动失败"),

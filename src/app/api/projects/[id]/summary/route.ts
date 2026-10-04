@@ -12,7 +12,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const { id } = await params;
   if (!await prisma.project.findUnique({ where: { id } })) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
   const [items, facts, fees, files] = await Promise.all([
-    listBoq(id), getFacts(id), loadFeeParams(id),
+    // 汇总只要数值字段——rawCells 整行原文（每行 KB 级）不取，响应时间直接腰斩
+    listBoq(id, { rawCells: false }), getFacts(id), loadFeeParams(id),
     prisma.projectFile.findMany({ where: { projectId: id }, select: { id: true, filename: true } }),
   ]);
   const totals = projectTotals(items);

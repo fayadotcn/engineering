@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ClipboardList, Loader2, Upload } from "lucide-react";
 import { useStore, OPEN_CONV_EVENT } from "./store";
+import { api } from "./api";
 import { isBusy, isDirty } from "./busy";
 import { Conversation, FOCUS_COMPOSER } from "./Conversation";
 import { ConfirmDialog, Modal, toast } from "./primitives";
@@ -122,10 +123,17 @@ export function Workbench({ projectId }: { projectId: string }) {
   useEffect(() => {
     void s.init(projectId);
     remembered.current = {};
-    // 空闲时轮询，同步其他窗口或后台任务带来的变化
+    // 空闲轮询只打轻量 digest 探针（KB 级），指纹变化才全量刷新——
+    // 之前每 10s 直接 init 会拉 boq+runs+summary ~2MB，页面常驻抖动。
+    let lastDigest = "";
     const timer = setInterval(() => {
       const st = useStore.getState();
-      if (document.visibilityState === "visible" && !isBusy(st) && !isDirty(st)) void st.init(projectId, true);
+      if (document.visibilityState !== "visible" || isBusy(st) || isDirty(st)) return;
+      void api.digest(projectId).then((d) => {
+        const sig = JSON.stringify(d);
+        if (lastDigest && sig !== lastDigest) void st.init(projectId, true);
+        lastDigest = sig;
+      }).catch(() => {});
     }, 10000);
     return () => clearInterval(timer);
   }, [projectId]);
