@@ -64,6 +64,8 @@ async function main() {
     let run;
     for (let i = 0; i < 100; i++) { run = await prisma.agentRun.findUniqueOrThrow({ where: { id: uploaded.runId } }); if (run.status !== "RUNNING") break; await sleep(100); }
     assert.equal(run?.status, "AWAITING_CONFIRM");
+    // 待确认期间再起任务 → 409（单项目单活 run 守卫）
+    await request(`/api/projects/${id}/agent/runs`, "POST", { message: "再跑一条" }, 409);
     const abort = new AbortController();
     const stream = await fetch(`${base}/api/runs/${uploaded.runId}/stream`, { signal: abort.signal });
     assert.equal(stream.status, 200); const reader = stream.body!.getReader();
@@ -78,6 +80,11 @@ async function main() {
     finally { clearTimeout(timer); }
     assert(finished, "SSE should remain connected through approval and completion");
     const items = await request(`/api/projects/${id}/boq`); assert.equal(items.filter((i: { isHeader: boolean }) => !i.isHeader).length, 2);
+    // 同内容文件再传一次 → contentHash 去重，不起新 run
+    const formDup = new FormData();
+    formDup.append("file", new Blob([new Uint8Array(await book.xlsx.writeBuffer())]), "用途待确认-副本.xlsx");
+    const dup = await fetch(`${base}/api/projects/${id}/files`, { method: "POST", body: formDup }).then(r => r.json());
+    assert.equal(dup.duplicate, true); assert.equal(dup.runId, null);
     const item = items.find((i: { isHeader: boolean }) => !i.isHeader);
     const edited = await request(`/api/boq-items/${item.id}`, "PATCH", { mainMaterialPrice: "12.50" });
     assert.equal(edited.item.unitPrice, item.unitPrice); assert.equal(edited.item.totalPrice, item.totalPrice); assert(edited.receiptId);
@@ -117,6 +124,12 @@ async function main() {
     await request(`/api/boq-items/${feeItem.id}`, "PATCH", { quantity: "1" }, 400);
     await request(`/api/boq-items/${feeItem.id}`, "PATCH", { totalPrice: "NaN" }, 400);
     await request(`/api/boq-items/${item.id}`, "PATCH", { totalPrice: "999" }, 400);
+    // 负值全线拦截：量/价/材暂估/人材机都不允许负数
+    await request(`/api/boq-items/${item.id}`, "PATCH", { unitPrice: "-5" }, 400);
+    await request(`/api/boq-items/${item.id}`, "PATCH", { quantity: "-1" }, 400);
+    await request(`/api/boq-items/${item.id}`, "PATCH", { mainMaterialPrice: "-0.5" }, 400);
+    await request(`/api/boq-items/${item.id}`, "PATCH", { laborUnitPrice: "-2" }, 400);
+    await request(`/api/boq-items/${item.id}`, "PATCH", { quantityExpr: "3+*2" }, 400);
     const withFee = await request(`/api/projects/${id}/summary`);
     assert.equal(withFee.fees.preTax, "2364.86"); assert.equal(withFee.fees.grandTotal, "2577.70");
     await request(`/api/receipts/${feeReceipt.id}/revert`, "POST");
