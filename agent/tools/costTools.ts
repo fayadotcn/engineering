@@ -398,8 +398,9 @@ registerTool({
       : null,
   handler: async (ctx, args) => {
     const items = await listBoq(ctx.projectId);
-    const taxFact = (await getFact(ctx.projectId, "税率"))?.value;
-    const tax = args.taxRate ?? parseRateValue(taxFact) ?? 0;
+    // 目标价默认税前口径；仅调用方显式声明含税（taxRate>0）才做价税分离——
+    // 若兜底台账税率，税前意图会被静默当含税反算，结果少 ~9%
+    const tax = args.taxRate ?? 0;
     const field = args.mode === "quantity" ? "quantity" : "price";
     const fieldLabel = field === "quantity" ? "工程量" : "综合单价";
     const r = adjustToTarget(items, {
