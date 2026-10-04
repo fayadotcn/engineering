@@ -106,19 +106,26 @@ registerTool({
     }
     for (const [name, s] of Object.entries(meta.mapping ?? {}))
       if (s.columns && Object.keys(s.columns).length) colMaps[name] = { ...s.columns };
-    const patches: CellPatch[] = mine.map((i) => ({
-      sheetName: i.sheetName,
-      rowIndex: i.rowIndex,
-      unitPrice: i.unitPrice,
-      quantity: i.quantity,
-      quantityExpr: i.quantityExpr || undefined,
-      totalPrice: i.totalPrice,
-    }));
+    // 未定价行不写价字段——把 0 写进源表空价单元格 = 把「未报价」落成「报价 0」，
+    // 与导出留白同口径；工程量/计算式照常写回
+    let skippedUnpriced = 0;
+    const patches: CellPatch[] = mine.map((i) => {
+      const unpriced = isPricableItem(i) && D(i.unitPrice).isZero();
+      if (unpriced) skippedUnpriced++;
+      return {
+        sheetName: i.sheetName,
+        rowIndex: i.rowIndex,
+        unitPrice: unpriced ? undefined : i.unitPrice,
+        quantity: i.quantity,
+        quantityExpr: i.quantityExpr || undefined,
+        totalPrice: unpriced ? undefined : i.totalPrice,
+      };
+    });
     const original = await storage.get(file.storageKey);
     const out = await writeBackPrices(original, patches, colMaps);
     const artifact = await saveArtifact(ctx, out, `${file.filename.replace(/\.xlsx?$/i, "")}_已更新.xlsx`);
     return {
-      observation: { artifactId: artifact.id, writtenRows: patches.length },
+      observation: { artifactId: artifact.id, writtenRows: patches.length, skippedUnpriced },
       views: [
         {
           kind: "exportResult",
@@ -126,7 +133,7 @@ registerTool({
           title: "已写回源文件",
           artifactId: artifact.id,
           filename: artifact.label,
-          summary: `已将 ${patches.length} 行单价/工程量/合价写回「${file.filename}」${outside ? `；另有 ${outside} 行来自其他文件或手工补录，不在该源文件内` : ""}`,
+          summary: `已将 ${patches.length} 行单价/工程量/合价写回「${file.filename}」${outside ? `；另有 ${outside} 行来自其他文件或手工补录，不在该源文件内` : ""}${skippedUnpriced ? `；${skippedUnpriced} 行未定价，价字段留白` : ""}`,
         },
       ],
       receipts: [
@@ -139,7 +146,8 @@ registerTool({
         },
       ],
       message: `已把最新价格写回源文件，生成「${artifact.label}」` +
-        (outside ? `；另有 ${outside} 行（手工补录/其他源文件）不在该文件内，请用「导出清单」取全量` : ""),
+        (outside ? `；另有 ${outside} 行（手工补录/其他源文件）不在该文件内，请用「导出清单」取全量` : "") +
+        (skippedUnpriced ? `；${skippedUnpriced} 行未定价，价单元格留白未动` : ""),
     };
   },
 });
