@@ -19,6 +19,7 @@ vi.mock("@database/client", () => {
       return row;
     }),
     update: vi.fn(async () => ({})),
+    updateMany: vi.fn(async () => ({ count: 0 })),
   };
   const tx = {
     agentRun,
@@ -60,5 +61,18 @@ describe("startRun 单项目单任务串行", () => {
     db.created = [];
     await startRun({ projectId: "p", message: "导入文件「a.xlsx」", extra: { ingestFileId: "f1" } });
     expect(db.created[0]).toMatchObject({ planner: "import" });
+  });
+});
+
+describe("markZombieRunsFailed 启动清尾", () => {
+  it("RUNNING/AWAITING_CONFIRM 全部判 FAILED（重启后这些 run 不可能再结束）", async () => {
+    const { markZombieRunsFailed } = await import("../agent/runtime");
+    const mod = await import("@database/client");
+    const spy = vi.spyOn(mod.prisma.agentRun, "updateMany");
+    await markZombieRunsFailed();
+    expect(spy).toHaveBeenCalledWith({
+      where: { status: { in: ["RUNNING", "AWAITING_CONFIRM"] } },
+      data: expect.objectContaining({ status: "FAILED" }),
+    });
   });
 });

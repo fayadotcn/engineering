@@ -30,6 +30,22 @@ export class ActiveRunError extends Error {
 // 活 run 判定窗口与文件删除/reingest 守卫同口径：超窗视为僵尸 run 不再拦截
 export const LIVE_WINDOW_MS = 15 * 60 * 1000;
 
+/**
+ * 进程启动时清尾：RUNNING/AWAITING_CONFIRM 的执行器与确认门 resolver 只活在
+ * 旧进程内存里，重启后这些 run 永远不可能结束——立即判 FAILED，释放
+ * 「单项目单活 run」守卫，用户不必等 15 分钟懒清理窗口。
+ */
+export function markZombieRunsFailed() {
+  return prisma.agentRun.updateMany({
+    where: { status: { in: ["RUNNING", "AWAITING_CONFIRM"] } },
+    data: {
+      status: "FAILED",
+      summary: "服务重启，任务中断，请重新发送",
+      finishedAt: new Date(),
+    },
+  });
+}
+
 export function findLiveRun(projectId: string) {
   return prisma.agentRun.findFirst({
     where: {
