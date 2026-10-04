@@ -49,7 +49,12 @@ export function markZombieRunsFailed() {
 // 本进程是否已做过启动清尾：每个进程首个 startRun 前清一次僵尸。
 // 不用 instrumentation.register()——它会连工具/存储图一起打进不允许
 // Node 内置模块的 bundle；进程内首调清尾等效且零打包面。
-let zombiesSwept = false;
+// flag 必须存 globalThis：dev 热重载会重建 module graph，普通模块变量会让
+// 新图把本进程仍存活的 AWAITING_CONFIRM run（resolver 在 globalThis 上活着）
+// 误杀成 FAILED。
+const sweepState = (globalThis as typeof globalThis & { __zombiesSwept?: boolean });
+const zombiesSwept = () => sweepState.__zombiesSwept === true;
+const markSwept = () => { sweepState.__zombiesSwept = true; };
 
 export function findLiveRun(projectId: string) {
   return prisma.agentRun.findFirst({
@@ -65,8 +70,8 @@ export function findLiveRun(projectId: string) {
 export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
   // 本进程第一次起任务前清尾：数据库里遗留的 RUNNING/AWAITING_CONFIRM 都属
   // 于已死进程（本进程的 resolver/执行器不可能属于重启前的 run），立即判 FAILED。
-  if (!zombiesSwept) {
-    zombiesSwept = true;
+  if (!zombiesSwept()) {
+    markSwept();
     await markZombieRunsFailed().catch(() => { /* 清尾失败由懒清理兜底，不阻塞启动 */ });
   }
   const isImport = typeof input.extra?.ingestFileId === "string";

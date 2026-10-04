@@ -78,6 +78,8 @@ describe("markZombieRunsFailed 启动清尾", () => {
 
   it("进程内首个 startRun 自动清尾一次，后续不再重复扫", async () => {
     vi.resetModules();
+    // 清尾 flag 在 globalThis（防 dev 热重载误杀活 run）——测试需显式复位
+    delete (globalThis as { __zombiesSwept?: boolean }).__zombiesSwept;
     const mod = await import("@database/client");
     const spy = vi.spyOn(mod.prisma.agentRun, "updateMany");
     const { startRun: freshStart } = await import("../agent/runtime");
