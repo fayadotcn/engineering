@@ -1,4 +1,5 @@
 import type { ParsedSheet } from "./excel";
+import { D } from "@cost-engine/money";
 
 /**
  * FACTS 表取数（表-03/04/13/扉页 → 台账事实，设计 docs/restructure-design.md §3.4）。
@@ -150,7 +151,7 @@ function ratesFromTable13(sheet: ParsedSheet): FeeTaxSheet {
   const addon = rows.find((r) => r.kind === "附加税");
   const sumOr = (nums: (number | null)[]) => {
     const vals = nums.filter((n): n is number => n !== null);
-    return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    return vals.length ? vals.reduce((a, b) => a.add(b), D(0)).toNumber() : null;
   };
   return {
     sheet: sheet.sheetName,
@@ -272,7 +273,7 @@ export function extractFileFacts(sheets: ParsedSheet[], filename: string): Extra
   const laborBase = median(
     t13
       .filter((t) => t.regAmount !== null && t.regRate !== null && t.regRate > 0)
-      .map((t) => t.regAmount! / (t.regRate! / 100))
+      .map((t) => D(t.regAmount!).div(D(t.regRate!).div(100)).toNumber())
   );
   if (laborBase !== null)
     facts.push({
