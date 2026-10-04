@@ -204,3 +204,23 @@ describe("五统一符合性标记", () => {
     expect(rows[0].featureConflict?.length).toBeGreaterThan(0);
   });
 });
+
+describe("pickComparePair 缺省对审对", () => {
+  it("「中标」阶段排在投标与清标之间——不冒充招标当最前配对", async () => {
+    const { pickComparePair } = await import("@cost-engine/fileCompare");
+    const f = (stage: string, period = "", t = 0) => ({ stage, period, createdAt: new Date(2024, 0, 1 + t) });
+    // inferFileStage 会产出「中标」，此前不在 COMPARE_STAGE_ORDER 里 → indexOf -1
+    // 被 Math.max 抬成 0 与「招标」同级，三文件时对审方向错乱
+    const [a, b] = pickComparePair([f("结算"), f("中标"), f("招标")]);
+    expect(a.stage).toBe("招标");
+    expect(b.stage).toBe("结算");
+  });
+
+  it("空 stage 视为最靠前（原始清单版）", async () => {
+    const { pickComparePair } = await import("@cost-engine/fileCompare");
+    const f = (stage: string, t = 0) => ({ stage, period: "", createdAt: new Date(2024, 0, 1 + t) });
+    const [a, b] = pickComparePair([f("结算"), f("", 1), f("投标")]);
+    expect(a.stage).toBe("");
+    expect(b.stage).toBe("结算");
+  });
+});

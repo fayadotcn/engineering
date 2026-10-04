@@ -58,9 +58,9 @@ export function top2Quota(item: BoqItemDTO, lib: QuotaEntry[]) {
     if (s > best.s) { alt = best; best = { q, s }; }
     else if (s > alt.s) alt = { q, s };
   }
-  const price = (q: QuotaEntry) => q.labor + q.material + q.machine;
+  const price = (q: QuotaEntry) => D(q.labor).add(q.material).add(q.machine);
   const ambiguous = !!(best.q && alt.q && best.s - alt.s <= 10 &&
-    Math.abs(price(best.q) - price(alt.q)) / Math.max(1, price(best.q)) > 0.05);
+    price(best.q).minus(price(alt.q)).abs().div(Decimal.max(1, price(best.q))).gt(0.05));
   return { best, alt, ambiguous };
 }
 

@@ -130,10 +130,11 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
   return rows.sort((x, y) => order[x.status] - order[y.status]);
 }
 
-/** 造价流转顺序：招标→投标→清标→进度→变更→报审→结算→财评；对审默认「最早阶段 ↔ 最晚阶段」。
+/** 造价流转顺序：招标→投标→中标→清标→进度→变更→报审→结算→财评；对审默认「最早阶段 ↔ 最晚阶段」。
  *  stage 为空视为最靠前——文件名不带阶段词的通常就是原始清单/招标版（如「X工程清单.xls」）。 */
-export const COMPARE_STAGE_ORDER = ["招标", "投标", "清标", "进度", "变更", "报审", "结算", "财评"];
-const stageRank = (s: string) => (!s ? -1 : Math.max(0, COMPARE_STAGE_ORDER.indexOf(s)));
+export const COMPARE_STAGE_ORDER = ["招标", "投标", "中标", "清标", "进度", "变更", "报审", "结算", "财评"];
+// 未列名的阶段词 indexOf=-1，自然沉到最前（与空 stage 同语义：按原始版对待）
+const stageRank = (s: string) => (!s ? -1 : COMPARE_STAGE_ORDER.indexOf(s));
 
 /** 缺省对审对：按（阶段序 → 期次 → 上传时间）排序取首末——招标vs结算、上期vs本期都能落到正确方向 */
 export function pickComparePair<T extends { stage: string; period: string; createdAt: Date }>(files: T[]): [T, T] {
