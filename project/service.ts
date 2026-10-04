@@ -3,7 +3,13 @@ import { prisma } from "@database/client";
 export async function ensureDefaultWorkspace() {
   const ws = await prisma.workspace.findFirst();
   if (ws) return ws;
-  return prisma.workspace.create({ data: { name: "默认工作区" } });
+  // 固定 id upsert：两个并发首建请求都过了 findFirst 时，
+  // upsert 保证只落一行（后到的走 update 分支返回同一工作区）
+  return prisma.workspace.upsert({
+    where: { id: "default" },
+    update: {},
+    create: { id: "default", name: "默认工作区" },
+  });
 }
 
 export async function createProject(name: string) {
