@@ -297,46 +297,47 @@ export function compareDeclared(
   rows: FeeRow[],
   units: Record<string, unknown>[]
 ): DeclaredCheck[] {
-  const sum = (k: string) =>
-    units.reduce((a, u) => a + (typeof u[k] === "number" ? (u[k] as number) : 0), 0);
-  const bySeq = new Map(rows.map((x) => [x.seq, Number(x.amount)]));
+  // 金额对账必须走 Decimal——裸 float 累加/求差会产出 0.0000001 级噪声差异
+  const sumKey = (k: string) =>
+    units.reduce((a, u) => a.plus(typeof u[k] === "number" ? (u[k] as number) : 0), D(0));
+  const bySeq = new Map(rows.map((x) => [x.seq, D(x.amount)]));
   const rowBySeq = new Map(rows.map((x) => [x.seq, x]));
   // 费率未设置的行无法重算——申报 vs 0 不是口径差异，是配置缺口；跳过该行
   // 并在税金/合计上注明差异含未计取分量
   const uncomputable = (seqs: string[]) =>
     seqs.some((s) => /未设置|未确认/.test(rowBySeq.get(s)?.note ?? ""));
   const hasAddonRow = rowBySeq.has("六·附");
-  const pairs: { label: string; declared: number; computed: number; skip?: boolean; note?: string }[] = [
+  const pairs: { label: string; declared: Decimal; computed: Decimal; skip?: boolean; note?: string }[] = [
     {
       label: "分部分项+措施项目费",
-      declared: sum("分部分项工程费") + sum("措施项目费"),
-      computed: (bySeq.get("一") ?? 0) + (bySeq.get("二") ?? 0),
+      declared: sumKey("分部分项工程费").plus(sumKey("措施项目费")),
+      computed: (bySeq.get("一") ?? D(0)).plus(bySeq.get("二") ?? D(0)),
     },
     {
-      label: "规费", declared: sum("规费"), computed: bySeq.get("四") ?? 0,
+      label: "规费", declared: sumKey("规费"), computed: bySeq.get("四") ?? D(0),
       skip: uncomputable(["四"]),
     },
     // 表-04 的「税金」口径含附加税（部分文件另列附加税行）；计算侧 六=增值税、六·附=附加税。
     // 附加税率未设置时不产出六·附行——该分量无法计算，从申报侧剔除同口径比较
     {
       label: "税金",
-      declared: sum("税金") + (hasAddonRow ? sum("附加税") : 0),
-      computed: (bySeq.get("六") ?? 0) + (bySeq.get("六·附") ?? 0),
+      declared: sumKey("税金").plus(hasAddonRow ? sumKey("附加税") : 0),
+      computed: (bySeq.get("六") ?? D(0)).plus(bySeq.get("六·附") ?? D(0)),
       skip: uncomputable(["六"]),
       note: uncomputable(["四"]) ? "基数不含规费（规费费率未设置），差异含该部分" : undefined,
     },
     {
-      label: "合计", declared: sum("合计"), computed: bySeq.get("七") ?? 0,
+      label: "合计", declared: sumKey("合计"), computed: bySeq.get("七") ?? D(0),
       note: uncomputable(["四", "六"]) ? "差异含未计取的规费/税金（费率未设置）" : undefined,
     },
   ];
   return pairs
-    .filter((p) => p.declared > 0 && !p.skip)
+    .filter((p) => p.declared.gt(0) && !p.skip)
     .map((p) => {
-      const diff = p.computed - p.declared;
+      const diff = p.computed.minus(p.declared);
       return {
-        label: p.label, declared: p.declared, computed: p.computed,
-        diff, pct: diff / p.declared,
+        label: p.label, declared: p.declared.toNumber(), computed: p.computed.toNumber(),
+        diff: diff.toNumber(), pct: diff.div(p.declared).toNumber(),
         ...(p.note ? { note: p.note } : {}),
       };
     });

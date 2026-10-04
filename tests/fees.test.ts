@@ -272,3 +272,21 @@ describe("人工费调整（定额人工费×调差系数）", () => {
     expect(issues.map((x) => x.label)).toContain("人工费调整未计取");
   });
 });
+
+describe("compareDeclared 申报核对", () => {
+  it("金额对账走 Decimal——两个 5000000.07 相加与计算侧相等时 diff 恰为 0（float 必有噪声）", async () => {
+    const { compareDeclared } = await import("../cost-engine/fees");
+    const units = [
+      { 分部分项工程费: 5000000.07 },
+      { 分部分项工程费: 5000000.07 },
+    ];
+    const rows = [
+      { seq: "一", name: "分部分项工程费", basis: "", rate: null, amount: "10000000.14", level: "leaf" as const },
+      { seq: "二", name: "措施项目费", basis: "", rate: null, amount: "0.00", level: "leaf" as const },
+    ];
+    const checks = compareDeclared(rows, units);
+    expect(checks.length).toBe(1);
+    expect(checks[0].diff).toBe(0); // float: 10000000.14 - 10000000.139999998 ≈ 1.9e-9
+    expect(checks[0].pct).toBe(0);
+  });
+});
