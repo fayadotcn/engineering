@@ -61,7 +61,10 @@ async function callOpenAI(
   });
   if (!res.ok) throw new Error(`模型请求失败 ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
-  return data.choices[0].message as LLMMsg;
+  // 网关/代理可能以 200 返回错误体或空 choices——裸下标会把这变成难懂的 TypeError
+  const msg = data?.choices?.[0]?.message as LLMMsg | undefined;
+  if (!msg) throw new Error(`模型响应结构异常：${JSON.stringify(data).slice(0, 200)}`);
+  return msg;
 }
 
 /** 流式调用（DeepSeek/OpenAI 兼容 SSE）：内容增量经 onText 实时回吐，
