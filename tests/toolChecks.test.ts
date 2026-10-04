@@ -8,10 +8,32 @@ const db = vi.hoisted(() => ({ items: [] as BoqItemDTO[] }));
 
 vi.mock("@boq/service", () => ({
   listBoq: vi.fn(async () => db.items),
-  updateBoqItems: vi.fn(),
+  updateBoqItems: vi.fn(async (_p: string, patches: { id: string; patch: Record<string, unknown> }[]) => {
+    const before = db.items.filter((i) => patches.some((p) => p.id === i.id));
+    const after = before.map((b) => ({ ...b, ...patches.find((p) => p.id === b.id)!.patch }));
+    return { before, after };
+  }),
 }));
+vi.mock("@project/facts", () => ({
+  getFacts: vi.fn(async () => []),
+  getFact: vi.fn(async () => null),
+  setFact: vi.fn(),
+  loadFeeParams: vi.fn(async () => ({
+    set: {}, coeffMeasureFee: { isZero: () => true, gt: () => false },
+    regLaborBase: null,
+  })),
+  parseRateValue: (v: string) => { const m = String(v).match(/[\d.]+/); return m ? Number(m[0]) / (String(v).includes("%") ? 100 : 1) : null; },
+  parseAmountValue: () => null,
+  parseAreaValue: () => null,
+}));
+vi.mock("@project/service", () => ({
+  createProject: vi.fn(async (name: string) => ({ id: "newp", name })),
+}));
+vi.mock("@database/client", () => ({ prisma: {} }));
 
 import "../agent/tools/boqTools";
+import "../agent/tools/costTools";
+import "../agent/tools/projectTools";
 import { getTool } from "../agent/tools/registry";
 
 const ctx = { projectId: "p", runId: "r1", userId: "u", emit: vi.fn() };
@@ -145,5 +167,68 @@ describe("检查类工具接线（boq.find*）", () => {
       const r = await run(t);
       expect(r.observation.count, t).toBe(0);
     }
+  });
+});
+
+describe("cost.* 聚合工具接线", () => {
+  it("cost.aggregate 返回分部分项合计", async () => {
+    db.items = FIXTURE;
+    const r = await run("cost.aggregate");
+    expect(Number(r.observation.total)).toBeGreaterThan(0);
+  });
+
+  it("cost.professionalBreakdown 出 breakdown 视图", async () => {
+    db.items = FIXTURE;
+    const r = await run("cost.professionalBreakdown") as ToolResult & { views: { kind: string }[] };
+    expect(r.views[0].kind).toBe("breakdown");
+  });
+
+  it("cost.unitSummary 按单位工程分块", async () => {
+    db.items = [
+      item({ id: "u1", unitProject: "A栋", totalPrice: "100.00" }),
+      item({ id: "u2", unitProject: "B栋", totalPrice: "200.00" }),
+    ];
+    const r = await run("cost.unitSummary") as ToolResult & { observation: { slices: { key: string }[] } };
+    expect(r.observation.slices.map((s) => s.key).sort()).toEqual(["A栋", "B栋"]);
+  });
+
+  it("cost.materialBreakdown categories 过滤生效", async () => {
+    db.items = FIXTURE;
+    const r = await run("cost.materialBreakdown", { categories: ["配电箱"] }) as ToolResult & { observation: { slices: { label: string }[] } };
+    expect(r.observation.slices.every((s) => s.label === "配电箱")).toBe(true);
+  });
+});
+
+describe("quantity.calculate / quantity.adjust 守卫", () => {
+  it("quantity.calculate 求值并支持 x 乘号记号", async () => {
+    const r = await run("quantity.calculate", { expression: "3x12+5" });
+    expect(r.observation.result ?? (r.observation as Record<string, unknown>).result).toBeTruthy();
+    expect(r.message).toContain("41");
+  });
+
+  it("quantity.calculate 无效式返回错误观测而不是抛", async () => {
+    const r = await run("quantity.calculate", { expression: "3米2米" });
+    expect(String(r.observation.error)).toContain("计算式无效");
+  });
+
+  it("quantity.adjust 负目标总价被工具层拦截", async () => {
+    db.items = FIXTURE;
+    const r = await run("quantity.adjust", { targetTotal: -100, apply: true });
+    expect(String((r.observation as { reason?: string }).reason)).toContain("非负");
+  });
+});
+
+describe("project.* 工具接线", () => {
+  it("project.summary 汇总行数与合价", async () => {
+    db.items = FIXTURE;
+    const r = await run("project.summary");
+    expect(String(r.message)).toContain("清单");
+  });
+
+  it("project.create 走领域服务（名称校验+回执在 createProject 内）", async () => {
+    const { createProject } = await import("@project/service");
+    const r = await run("project.create", { name: "新工程" });
+    expect(createProject).toHaveBeenCalledWith("新工程");
+    expect((r.observation as { projectId: string }).projectId).toBe("newp");
   });
 });

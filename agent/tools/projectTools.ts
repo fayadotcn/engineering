@@ -78,10 +78,10 @@ registerTool({
   implemented: true,
   schema: z.object({ name: z.string().describe("项目名称") }),
   handler: async (ctx, args: { name: string }) => {
-    const ws = await prisma.workspace.findFirst();
-    const p = await prisma.project.create({
-      data: { name: args.name, workspaceId: ws!.id },
-    });
+    // 走领域服务：名称校验 + ensureDefaultWorkspace（无工作区不再裸 .id 崩）
+    // + 事务内创建+回执——「每个写动作产生 ActionReceipt」红线不绕过
+    const { createProject } = await import("@project/service");
+    const p = await createProject(args.name);
     return { observation: { projectId: p.id, name: p.name } };
   },
 });

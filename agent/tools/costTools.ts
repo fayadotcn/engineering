@@ -404,6 +404,8 @@ registerTool({
     const tax = args.taxRate ?? 0;
     const field = args.mode === "quantity" ? "quantity" : "price";
     const fieldLabel = field === "quantity" ? "工程量" : "综合单价";
+    if (!D(args.targetTotal).isFinite() || D(args.targetTotal).lt(0))
+      return { observation: { ok: false, reason: "目标总价必须为非负有效数字" } };
     const r = adjustToTarget(items, {
       targetTotal: args.targetTotal,
       taxRate: tax,
