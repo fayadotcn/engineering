@@ -16,7 +16,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       ? "application/pdf"
       : ext === "xls"
         ? "application/vnd.ms-excel"
-        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        : ext === "csv"
+          ? "text/csv; charset=utf-8"
+          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   return new Response(new Uint8Array(buf), {
     headers: {
       "content-type": ct,
