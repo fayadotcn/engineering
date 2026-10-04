@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
-import { startRun } from "@agent/runtime";
+import { ActiveRunError, startRun } from "@agent/runtime";
 
 // 按当前（可能已被用户修正的）列映射重新导入：走 agent run，全程留痕。
 export async function POST(
@@ -23,10 +23,16 @@ export async function POST(
   });
   if (live)
     return NextResponse.json({ error: "该文件正在导入/待核对，完成后再重导", runId: live.id }, { status: 409 });
-  const { runId } = await startRun({
-    projectId: file.projectId,
-    message: `重新导入文件「${file.filename}」`,
-    extra: { ingestFileId: file.id },
-  });
-  return NextResponse.json({ runId });
+  try {
+    const { runId } = await startRun({
+      projectId: file.projectId,
+      message: `重新导入文件「${file.filename}」`,
+      extra: { ingestFileId: file.id },
+    });
+    return NextResponse.json({ runId });
+  } catch (e) {
+    if (e instanceof ActiveRunError)
+      return NextResponse.json({ error: "已有任务在执行或等待确认，完成后再重导", runId: e.runId }, { status: 409 });
+    throw e;
+  }
 }

@@ -21,15 +21,48 @@ export interface StartRunInput {
   extra?: Record<string, unknown>; // e.g. { ingestFileId }
 }
 
+export class ActiveRunError extends Error {
+  constructor(public runId: string) {
+    super("已有任务在执行或等待确认");
+  }
+}
+
+// 活 run 判定窗口与文件删除/reingest 守卫同口径：超窗视为僵尸 run 不再拦截
+export const LIVE_WINDOW_MS = 15 * 60 * 1000;
+
+export function findLiveRun(projectId: string) {
+  return prisma.agentRun.findFirst({
+    where: {
+      projectId,
+      status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+      createdAt: { gt: new Date(Date.now() - LIVE_WINDOW_MS) },
+    },
+    select: { id: true },
+  });
+}
+
 export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
   const isImport = typeof input.extra?.ingestFileId === "string";
   const isAutopilot = input.extra?.autopilot === true;
-  const run = await prisma.agentRun.create({
-    data: {
-      projectId: input.projectId,
-      userMessage: input.message,
-      planner: isImport ? "import" : isAutopilot ? "autopilot" : modelConfig() ? "llm" : "rule",
-    },
+  // 单项目单任务串行：检查+建单同事务，双窗口/直连 API 也不会起并发 run
+  // （两个 run 交错 deleteByFile/createMany 或并发写清单是真实风险）
+  const run = await prisma.$transaction(async (tx) => {
+    const live = await tx.agentRun.findFirst({
+      where: {
+        projectId: input.projectId,
+        status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+        createdAt: { gt: new Date(Date.now() - LIVE_WINDOW_MS) },
+      },
+      select: { id: true },
+    });
+    if (live) throw new ActiveRunError(live.id);
+    return tx.agentRun.create({
+      data: {
+        projectId: input.projectId,
+        userMessage: input.message,
+        planner: isImport ? "import" : isAutopilot ? "autopilot" : modelConfig() ? "llm" : "rule",
+      },
+    });
   });
   // fire-and-forget: events stream via subscribeRun
   void executeRun(run.id, input).catch(async (e) => {

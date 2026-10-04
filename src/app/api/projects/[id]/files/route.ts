@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { storage } from "@file/storage";
 import { inferFileStage } from "@file/classify";
-import { startRun } from "@agent/runtime";
+import { ActiveRunError, findLiveRun, startRun } from "@agent/runtime";
 import { createHash } from "crypto";
 import path from "path";
 
@@ -50,13 +50,24 @@ export async function POST(
       },
     });
     if (live) return NextResponse.json({ file: dup, runId: live.id, duplicate: true });
-    const { runId } = await startRun({
-      projectId,
-      message: `重新导入文件「${dup.filename}」`,
-      extra: { ingestFileId: dup.id },
-    });
-    return NextResponse.json({ file: dup, runId, duplicate: true });
+    try {
+      const { runId } = await startRun({
+        projectId,
+        message: `重新导入文件「${dup.filename}」`,
+        extra: { ingestFileId: dup.id },
+      });
+      return NextResponse.json({ file: dup, runId, duplicate: true });
+    } catch (e) {
+      if (e instanceof ActiveRunError)
+        return NextResponse.json({ file: dup, error: "已有任务在执行或等待确认，完成后再导入", runId: e.runId }, { status: 409 });
+      throw e;
+    }
   }
+
+  // 别的任务在跑就先拒——文件建档后 startRun 被拦会留下永不导入的孤儿记录
+  const busy = await findLiveRun(projectId);
+  if (busy)
+    return NextResponse.json({ error: "已有任务在执行或等待确认，完成后再上传", runId: busy.id }, { status: 409 });
 
   const storageKey = await storage.put(buffer, ext);
 
@@ -75,11 +86,17 @@ export async function POST(
   });
 
   // ingest goes through the agent runtime so it's fully traced
-  const { runId } = await startRun({
-    projectId,
-    message: `分析并导入文件「${filename}」`,
-    extra: { ingestFileId: record.id },
-  });
-
-  return NextResponse.json({ file: record, runId });
+  try {
+    const { runId } = await startRun({
+      projectId,
+      message: `分析并导入文件「${filename}」`,
+      extra: { ingestFileId: record.id },
+    });
+    return NextResponse.json({ file: record, runId });
+  } catch (e) {
+    // 检查到建库之间抢到活 run 的窄窗：记录已建，标出文件让前端能补触发
+    if (e instanceof ActiveRunError)
+      return NextResponse.json({ file: record, error: "已有任务在执行或等待确认，完成后在文件列表重导", runId: e.runId }, { status: 409 });
+    throw e;
+  }
 }

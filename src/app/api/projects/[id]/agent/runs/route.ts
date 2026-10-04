@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
-import { startRun } from "@agent/runtime";
+import { ActiveRunError, startRun } from "@agent/runtime";
 
 export async function POST(
   req: Request,
@@ -17,6 +17,9 @@ export async function POST(
     const { runId } = await startRun({ projectId, message, extra: body?.extra });
     return NextResponse.json({ runId });
   } catch (e) {
+    // 已有存活任务：拒绝并发而不是让两个 run 交错写清单/导入
+    if (e instanceof ActiveRunError)
+      return NextResponse.json({ error: "已有任务在执行或等待确认，请先完成或取消", runId: e.runId }, { status: 409 });
     return NextResponse.json({ error: e instanceof Error ? e.message : "启动任务失败" }, { status: 500 });
   }
 }
