@@ -19,7 +19,13 @@ export async function PATCH(
     return NextResponse.json({ error: "sheetName required" }, { status: 400 });
   const sheetName = body.sheetName;
 
-  const { file, mapping, isPdf } = await ensureInspection(id);
+  let inspected: Awaited<ReturnType<typeof ensureInspection>>;
+  try {
+    inspected = await ensureInspection(id);
+  } catch {
+    return NextResponse.json({ error: "文件不存在" }, { status: 404 });
+  }
+  const { file, mapping, isPdf } = inspected;
   if (isPdf || !mapping)
     return NextResponse.json({ error: "PDF 文件没有列映射" }, { status: 400 });
   const sheet = mapping[sheetName];

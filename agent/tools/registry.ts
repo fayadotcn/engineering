@@ -78,6 +78,9 @@ function unwrap(s: z.ZodType<unknown>): z.ZodType<unknown> {
       s = (s as z.ZodOptional<z.ZodType<unknown>>).unwrap();
     } else if (s instanceof z.ZodDefault) {
       s = (s as z.ZodDefault<z.ZodType<unknown>>).removeDefault();
+    } else if (s instanceof z.ZodEffects) {
+      // .refine()/.transform() 挂在顶层会让整个工具 schema 退化成 {type:"string"}——剥掉看真身
+      s = s.innerType();
     } else {
       return s;
     }
