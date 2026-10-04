@@ -56,8 +56,9 @@ export async function assembleExportSheets(projectId: string) {
                     计量单位: r.unit,
                     工程量: r.quantity,
                     工程量计算式: r.quantityExpr ?? "",
-                    综合单价: r.unitPrice,
-                    合价: r.totalPrice,
+                    // 未定价行单价/合价留白——0.00 会被误读成「定价为 0」，与 report.generate 同口径
+                    综合单价: unpriced ? "" : r.unitPrice,
+                    合价: unpriced ? "" : r.totalPrice,
                     // 表-08 金额栏「其中暂估价」口径：主材暂估价单列便于审价
                     主材暂估价: r.mainMaterialPrice,
                     // 复核口径：可计价行单价为 0 必须显式标出，不能和已定价行一样留白
