@@ -350,7 +350,11 @@ registerTool({
       return { observation: { error: "需要两份清单文件才能对审，请再上传一版（如中标/结算/进度申报清单）" } };
     const [autoA, autoB] = files.length >= 2 ? pickComparePair(files) : [files[0], files[0]];
     const fileA = args.fileAId ? files.find((f) => f.id === args.fileAId) : autoA;
-    const fileB = args.fileBId ? files.find((f) => f.id === args.fileBId) : autoB;
+    let fileB = args.fileBId ? files.find((f) => f.id === args.fileBId) : autoB;
+    // 与 buildCompareReport 同口径：只指定一侧时另一侧撞上自动换一份，
+    // 用户给了方向就不该报「选择无效」
+    if (fileA && fileB && fileA.id === fileB.id && (!args.fileAId || !args.fileBId))
+      fileB = files.find((f) => f.id !== fileA.id) ?? fileB;
     if (!fileA || !fileB || fileA.id === fileB.id)
       return { observation: { error: "文件选择无效" } };
 

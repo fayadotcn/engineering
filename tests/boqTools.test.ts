@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
   rows: [] as { id: string; projectId: string; name: string }[],
-  boqRows: [] as { id: string; feeType: string; name: string; code: string }[],
+  boqRows: [] as Record<string, unknown>[],
+  files: [] as { id: string; filename: string; kind: string; status: string; stage: string; period: string; createdAt: Date }[],
   deleted: [] as string[],
   receipts: [] as { id: string; projectId: string; summary: string; reversible: boolean }[],
   revertedIds: [] as string[],
@@ -44,6 +45,10 @@ vi.mock("@database/client", () => ({
         return { count: w.where.id.in.length };
       }),
     },
+    projectFile: {
+      findMany: vi.fn(async () => db.files),
+    },
+    costFact: { findFirst: vi.fn(async () => null) },
   },
 }));
 
@@ -108,6 +113,39 @@ describe("boq.update", () => {
   it("未改分层的分部分项行直改合价 → 拒绝", async () => {
     db.boqRows = [{ id: "i1", feeType: "分部分项", name: "行", code: "" }];
     await expect(callTool("boq.update", { patches: [{ id: "i1", totalPrice: "500" }] })).rejects.toThrow("合价由工程量");
+  });
+});
+
+describe("boq.compareFiles", () => {
+  const file = (id: string, filename: string, stage: string) => ({
+    id, filename, kind: "BOQ_TENDER", status: "PARSED", stage, period: "", createdAt: new Date(),
+  });
+  const boqItem = (id: string, fileId: string) => ({
+    id, projectId: "p1", fileId, sheetName: "s", rowIndex: 1,
+    code: "030001001001", name: "镀锌钢管", rawFeature: "DN100", unit: "m", quantity: "10",
+    unitPrice: "100", mainMaterialPrice: "0", laborUnitPrice: "0", machineUnitPrice: "0",
+    pricingPlan: [], feeType: "分部分项", totalPrice: "1000", sectionPath: "",
+    isHeader: false, sortOrder: 0, discipline: "OTHER", features: {},
+  });
+
+  it("只指定 A 且 A 恰为自动配对的 B → 另一侧自动换一份（与导出对审同口径）", async () => {
+    db.files = [file("f1", "招标清单.xlsx", "招标"), file("f2", "结算清单.xlsx", "结算")];
+    db.boqRows = [boqItem("i1", "f1"), boqItem("i2", "f2")];
+    const r = (await callTool("boq.compareFiles", { fileAId: "f2" })) as {
+      observation: { fileA?: string; fileB?: string; error?: string };
+    };
+    expect(r.observation.error).toBeUndefined();
+    expect(r.observation.fileA).toBe("结算清单.xlsx");
+    expect(r.observation.fileB).toBe("招标清单.xlsx");
+  });
+
+  it("双侧显式指定同一文件 → 报文件选择无效", async () => {
+    db.files = [file("f1", "招标清单.xlsx", "招标"), file("f2", "结算清单.xlsx", "结算")];
+    db.boqRows = [boqItem("i1", "f1")];
+    const r = (await callTool("boq.compareFiles", { fileAId: "f1", fileBId: "f1" })) as {
+      observation: { error?: string };
+    };
+    expect(r.observation.error).toContain("无效");
   });
 });
 
