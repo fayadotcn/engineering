@@ -323,7 +323,7 @@ export class RulePlanner implements Planner {
       return {
         steps: [{
           tool: "quantity.adjust",
-          args: { targetTotal: Number((unit * area).toFixed(2)), apply: true },
+          args: { targetTotal: D(unit).mul(area).toDecimalPlaces(2).toNumber(), apply: true },
           activity: `正在按单方造价 ${unit} 元/㎡ × ${area}㎡ 反算综合单价`,
         }],
       };
@@ -376,9 +376,9 @@ export class RulePlanner implements Planner {
                 feeW
               );
               if (!pool.length) return null;
-              const subtotal = pool.reduce((a, i) => a + Number(i.totalPrice), 0);
-              const allTotal = leaf.reduce((a, i) => a + Number(i.totalPrice), 0);
-              const targetTotal = Number((allTotal + (subtotal * dir * pct) / 100).toFixed(2));
+              const subtotal = pool.reduce((a, i) => a.add(i.totalPrice), D(0));
+              const allTotal = leaf.reduce((a, i) => a.add(i.totalPrice), D(0));
+              const targetTotal = allTotal.add(subtotal.mul(dir).mul(pct).div(100)).toDecimalPlaces(2).toNumber();
               return {
                 tool: "quantity.adjust",
                 args: { targetTotal, taxRate, allowedItemIds: pool.map((i) => i.id), apply: true },
@@ -394,10 +394,9 @@ export class RulePlanner implements Planner {
           { tool: "cost.calculate", args: {}, activity: "正在取当前总价" },
           async (results): Promise<PlanStep | null> => {
             const obs = results[0]?.observation as { exclTax?: string; inclTax?: string | null } | undefined;
-            const excl = Number(obs?.exclTax);
-            const base = inclTax ? (obs?.inclTax ? Number(obs.inclTax) : excl * (1 + taxRate)) : excl;
-            if (!Number.isFinite(base) || !(base > 0)) return null;
-            const targetTotal = Number((base * (1 + (dir * pct) / 100)).toFixed(2));
+            const base = inclTax && obs?.inclTax ? D(obs.inclTax) : D(obs?.exclTax).mul(inclTax ? D(1).add(taxRate) : 1);
+            if (!base.isFinite() || !base.gt(0)) return null;
+            const targetTotal = base.mul(D(1).add(D(dir).mul(pct).div(100))).toDecimalPlaces(2).toNumber();
             return {
               tool: "quantity.adjust",
               args: { targetTotal, taxRate, apply: true },
@@ -433,9 +432,9 @@ export class RulePlanner implements Planner {
               scope
             );
             if (!pool.length) return null;
-            const subtotal = pool.reduce((a, i) => a + Number(i.totalPrice), 0);
-            const allTotal = leaf.reduce((a, i) => a + Number(i.totalPrice), 0);
-            const targetTotal = Number((allTotal + (subtotal * dir * pct) / 100).toFixed(2));
+            const subtotal = pool.reduce((a, i) => a.add(i.totalPrice), D(0));
+            const allTotal = leaf.reduce((a, i) => a.add(i.totalPrice), D(0));
+            const targetTotal = allTotal.add(subtotal.mul(dir).mul(pct).div(100)).toDecimalPlaces(2).toNumber();
             const allowedItemIds = scope ? pool.map((i) => i.id) : undefined;
             return {
               tool: "quantity.adjust",
@@ -624,7 +623,8 @@ export class RulePlanner implements Planner {
 
     // 主材暂估价设值：「电缆主材暂估价设为45元」「桥架主材价统一为32」——写 mainMaterialPrice 不动综合单价
     const mainPriceM = m.match(/(?:暂估价|主材价)/) && m.match(/(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)/);
-    if (mainPriceM) {
+    if (mainPriceM || (/(?:暂估价|主材价)/.test(m) && /(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*-/.test(m))) {
+      if (!mainPriceM) return { steps: [], fallbackMessage: "主材暂估价必须是非负数值" };
       const scope = m.match(/([一-龥A-Za-z]{2,12}?)(?:的)?(?:暂估价|主材价)/)?.[1]
         ?.replace(/^(把|将|对|请|所有|全部|整个|统一|清单项?|各项|项目)+/, "") ?? "";
       const v = Number(mainPriceM[1].replace(/,/g, ""));
@@ -702,6 +702,10 @@ export class RulePlanner implements Planner {
     // 改价/统一单价: 「电缆单价改为5元」（范围+指定值）、「相同项统一为最低价/均价」
     if (/统一|改为|调成|调整为|调到|调为|设为/.test(m) && /单价|价格|综合单价/.test(m)) {
       const setM = m.match(/(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*([\d,]+(?:\.\d+)?)/);
+      // 显式拦负号：「改为-5」不被 setM 捕获，不拦会静默落到「统一最低价」分支
+      if (/(?:改为|调成|调整为|调到|调为|统一为|统一调成|统一改为|设为)\s*[¥￥]?\s*-/.test(m))
+        return { steps: [], fallbackMessage: "单价必须是非负数值" };
+      const setV = setM ? Number(setM[1].replace(/,/g, "")) : null;
       const mode = /最低|最小/.test(m) ? "min" : /平均|均值/.test(m) ? "mean" : "min";
       const scope = scopeWordOf(m);
       const computePatches = async (): Promise<PlanStep | null> => {
@@ -713,20 +717,20 @@ export class RulePlanner implements Planner {
         const pool = scopeFilter(items, scope);
         if (!pool.length) return null;
         const patches: { id: string; unitPrice: string }[] = [];
-        if (setM) {
+        if (setV !== null) {
           // 指定值口径：范围内所有可计价项直接设价（不要求先在差异组里）
-          const v = Number(setM[1].replace(/,/g, ""));
-          if (!Number.isFinite(v)) return null;
-          for (const it of pool) patches.push({ id: it.id, unitPrice: v.toFixed(2) });
+          for (const it of pool) patches.push({ id: it.id, unitPrice: (setV as number).toFixed(2) });
         } else {
           const { findSameItemDifferentPrice } = await import("@cost-engine/compare");
           const inPool = new Set(pool.map((i) => i.id));
           for (const r of findSameItemDifferentPrice(items)) {
             const targetItems = scope ? r.items.filter((i) => inPool.has(i.id)) : r.items;
             if (!targetItems.length) continue;
-            const prices = r.items.map((i) => Number(i.unitPrice));
+            // 均价必须走 Decimal：.005 边界的 float 均值会错分，且均价×N 与原价合计漂移
             const target =
-              mode === "min" ? Math.min(...prices) : prices.reduce((a, b) => a + b, 0) / prices.length;
+              mode === "min"
+                ? Math.min(...r.items.map((i) => Number(i.unitPrice)))
+                : r.items.reduce((a, i) => a.add(i.unitPrice), D(0)).div(r.items.length).toDecimalPlaces(2).toNumber();
             for (const it of targetItems) patches.push({ id: it.id, unitPrice: target.toFixed(2) });
           }
         }

@@ -583,6 +583,11 @@ describe("工程量修改路由", () => {
     expect(s?.tool).toBe("boq.update");
     expect((s?.args.patches as { unitPrice?: string }[])[0].unitPrice).toBe("5.00");
   });
+  it("「电缆单价改为-5」→ 无步骤，提示非负（不落服务端 400）", async () => {
+    const p = await plan("电力电缆单价改为-5元");
+    expect(p.steps).toEqual([]);
+    expect(p.fallbackMessage).toContain("非负");
+  });
 });
 
 describe("文件查询路由", () => {
