@@ -28,6 +28,7 @@ async function main() {
   const de = new DatabaseSync(DE_DB);
   const fyRows = de.prepare("SELECT fyid, fymc, jsgs FROM ps_fy").all() as unknown as PsFy[];
   const flRows = de.prepare("SELECT fyid, flmc, fl, rg, cl, jx FROM ps_fl").all() as unknown as PsFl[];
+  de.close();
 
   const tiersByFyid = new Map<number, PsFl[]>();
   for (const r of flRows) {

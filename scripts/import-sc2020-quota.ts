@@ -174,6 +174,8 @@ async function main() {
   const de = new DatabaseSync(DE_DB, { readOnly: true });
   const books = Object.entries(BOOKS).filter(([p]) => !only || only === "all" || p === only);
   for (const [p, label] of books) await importBook(zy, de, p, label);
+  zy.close();
+  de.close();
 }
 
 main().catch((e) => { console.error(e); process.exit(1); }).finally(() => prisma.$disconnect());
