@@ -3,7 +3,7 @@ import { prisma } from "@database/client";
 import { storage } from "@file/storage";
 import { inferFileStage } from "@file/classify";
 import { ActiveRunError, findLiveRun, startRun } from "@agent/runtime";
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import path from "path";
 
 // Upload -> store -> create ProjectFile -> agent ingest run (traced).

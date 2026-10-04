@@ -75,4 +75,19 @@ describe("markZombieRunsFailed 启动清尾", () => {
       data: expect.objectContaining({ status: "FAILED" }),
     });
   });
+
+  it("进程内首个 startRun 自动清尾一次，后续不再重复扫", async () => {
+    vi.resetModules();
+    const mod = await import("@database/client");
+    const spy = vi.spyOn(mod.prisma.agentRun, "updateMany");
+    const { startRun: freshStart } = await import("../agent/runtime");
+    db.runs = [];
+    db.created = [];
+    await freshStart({ projectId: "p", message: "x" });
+    expect(spy).toHaveBeenCalledTimes(1);
+    // 第二次会被刚建的活 run 拦下——拦截无所谓，关键是清尾没再跑
+    await freshStart({ projectId: "p", message: "y" }).catch(() => {});
+    expect(spy).toHaveBeenCalledTimes(1);
+    vi.resetModules();
+  });
 });

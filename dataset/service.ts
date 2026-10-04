@@ -5,7 +5,7 @@ import { parseQuotaWorkbook, type ParsedQuotaRow } from "./quotaParse";
 import { parseSemanticFeature } from "@cost-engine/semantic";
 import { fromJson, toJson } from "@shared/json";
 import { D } from "@cost-engine/money";
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import {
   applySheetPatch,
   inspectWithTemplates,

@@ -4,7 +4,7 @@ import { executeTool } from "./executor";
 import { getTool, type ToolContext, type ToolResult } from "./tools/registry";
 import { waitForConfirm } from "./pending";
 import { toJson } from "@shared/json";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import { resolveContext, type RunContext } from "./context";
 import { modelConfig, runLLMLoop } from "./llm";
 import { RulePlanner, type Plan, type PlanStep } from "./planner";
@@ -46,6 +46,11 @@ export function markZombieRunsFailed() {
   });
 }
 
+// 本进程是否已做过启动清尾：每个进程首个 startRun 前清一次僵尸。
+// 不用 instrumentation.register()——它会连工具/存储图一起打进不允许
+// Node 内置模块的 bundle；进程内首调清尾等效且零打包面。
+let zombiesSwept = false;
+
 export function findLiveRun(projectId: string) {
   return prisma.agentRun.findFirst({
     where: {
@@ -58,6 +63,12 @@ export function findLiveRun(projectId: string) {
 }
 
 export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
+  // 本进程第一次起任务前清尾：数据库里遗留的 RUNNING/AWAITING_CONFIRM 都属
+  // 于已死进程（本进程的 resolver/执行器不可能属于重启前的 run），立即判 FAILED。
+  if (!zombiesSwept) {
+    zombiesSwept = true;
+    await markZombieRunsFailed().catch(() => { /* 清尾失败由懒清理兜底，不阻塞启动 */ });
+  }
   const isImport = typeof input.extra?.ingestFileId === "string";
   const isAutopilot = input.extra?.autopilot === true;
   // 单项目单任务串行：检查+建单同事务，双窗口/直连 API 也不会起并发 run

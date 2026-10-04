@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import { D, lineTotal, round2 } from "@cost-engine/money";
 import { reconcilePriceRole } from "@shared/mapping";
 

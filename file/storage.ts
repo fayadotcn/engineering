@@ -1,6 +1,6 @@
 import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import path from "path";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 
 // StorageProvider interface — LocalStorage now, S3-compatible later.
 
