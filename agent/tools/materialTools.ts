@@ -4,7 +4,7 @@ import { listBoq, updateBoqItems } from "@boq/service";
 import { listQuotations } from "@material/service";
 import { searchMaterialPrices, matchLibraryForItem, getPricePrefs } from "@dataset/service";
 import { periodKey } from "@dataset/priceParse";
-import { matchQuotations } from "@cost-engine/match";
+import { matchQuotations, specNorm } from "@cost-engine/match";
 import { isPricableItem } from "@shared/types";
 import type { AnomalyRow, BoqItemDTO, DiffRow } from "@shared/types";
 
@@ -62,7 +62,8 @@ registerTool({
     const groups = new Map<string, { name: string; spec: string; points: { price: string; file: string; date: string }[] }>();
     for (const it of quotes) {
       if (q && !norm(it.materialName).includes(q)) continue;
-      const key = `${norm(it.materialName)}|${norm(it.spec)}`;
+      // 规格分组与询价匹配同口径（4×35 ≡ 4x35 ≡ DN 前缀忽略）——否则同材料拆成两条轨迹
+      const key = `${norm(it.materialName)}|${specNorm(it.spec)}`;
       const g = groups.get(key) ?? { name: it.materialName, spec: it.spec, points: [] };
       g.points.push({
         price: it.price.toString(),
@@ -77,7 +78,7 @@ registerTool({
       // 过滤词没命中任何材料名 —— 回退展示全部，避免误导为空
       filtered = new Map();
       for (const it of quotes) {
-        const key = `${norm(it.materialName)}|${norm(it.spec)}`;
+        const key = `${norm(it.materialName)}|${specNorm(it.spec)}`;
         const g = filtered.get(key) ?? { name: it.materialName, spec: it.spec, points: [] };
         g.points.push({
           price: it.price.toString(),
@@ -92,7 +93,7 @@ registerTool({
     const prefs = await getPricePrefs(ctx.projectId);
     const libRows = await searchMaterialPrices(args.materialName ?? "", 50, prefs);
     for (const r of libRows) {
-      const key = `${norm(r.name)}|${norm(r.spec)}`;
+      const key = `${norm(r.name)}|${specNorm(r.spec)}`;
       if (q && !norm(r.name).includes(q)) continue;
       const g = filtered.get(key) ?? { name: r.name, spec: r.spec, points: [] };
       if (!g.points.some((p) => p.price === r.price && p.file.startsWith("材料库")))
@@ -309,6 +310,11 @@ registerTool({
       const best = list.reduce((a, b) => (b.conf > a.conf ? b : a));
       finalPatches.push({ id, patch: { mainMaterialPrice: best.price } });
     }
+    if (!finalPatches.length)
+      return {
+        observation: { applied: 0, unmatchedQuotes: rows.filter((r) => r.status !== "MATCHED").length },
+        message: "没有询价命中清单项，未写回任何主材暂估价",
+      };
 
     const { before, after } = await updateBoqItems(ctx.projectId, finalPatches);
     const diffRows: DiffRow[] = [];
