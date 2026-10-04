@@ -2,7 +2,7 @@
 import { create } from "zustand";
 import type { AgentEventDTO, BoqItemDTO, CostFactDTO, ReceiptDTO, WorkspaceView } from "@shared/types";
 import { toast } from "./primitives";
-import { api, type AdjustSpec, type FileMeta, type NewItemPayload, type PastePatch, type ProjectSummary } from "./api";
+import { api, type AdjustSpec, type FileMeta, type NewItemPayload, type PastePatch, type ProjectSummary, type WorkbenchInit } from "./api";
 import { INGEST_RE, reduceEvent, replayRuns, type ConvBlock } from "./runEvents";
 import { FIXED_VIEWS, seedViews } from "./sections";
 import { isBusy, isDirty } from "./busy";
@@ -48,7 +48,7 @@ interface State {
   /** 最近一轮降级到规则引擎的失败原因；null=模型正常或未配置 */
   modelDown: string | null;
 
-  init(projectId: string, refresh?: boolean): Promise<void>;
+  init(projectId: string, refresh?: boolean, prefetched?: WorkbenchInit): Promise<void>;
   renameProject(name: string): Promise<boolean>;
   send(text: string, extra?: Record<string, unknown>): Promise<void>;
   upload(file: File): Promise<void>;
@@ -157,13 +157,15 @@ export const useStore = create<State>((set, get) => ({
   ...INITIAL,
   boqVersion: 0,
 
-  async init(projectId, refresh = false) {
+  async init(projectId, refresh = false, prefetched) {
     const version = ++loadVersion;
     if (!refresh) set({ projectId, ...INITIAL });
     try {
       // 任何一路请求挂死都不能让工作台停在"正在读取"：20s 超时 → loadingError + 重试
       const t = AbortSignal.timeout(20000);
-      const [p, items, runs, summary] = await Promise.all([api.project(projectId, t), api.boq(projectId, t), api.runs(projectId, t), api.summary(projectId, t)]);
+      const [p, items, runs, summary] = prefetched
+        ? [prefetched.p, prefetched.items, prefetched.runs, prefetched.summary]
+        : await Promise.all([api.project(projectId, t), api.boq(projectId, t), api.runs(projectId, t), api.summary(projectId, t)]);
       if (get().projectId !== projectId || version !== loadVersion) return;
       const replay = replayRuns(runs);
       const previous = get().views;

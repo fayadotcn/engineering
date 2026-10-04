@@ -266,6 +266,12 @@ registerTool({
         const segs: string[] = [];
         if (s.typeConfidence < 0.9)
           segs.push(`类型拿不准（${s.typeEvidence}），暂按「${SHEET_TYPE_LABEL[s.type]}」处理，可在右侧改类型`);
+        // 0 行表必须在批准前说清楚：列映射看着有行、导完却是空的，是数据静默丢失
+        if (
+          s.itemsToImport === 0 &&
+          (s.type === "BOQ" || s.type === "PENDING_QUOTE" || s.type === "QUOTATION" || s.type === "MATERIAL_PRICE")
+        )
+          segs.push("⚠ 按当前映射将导入 0 行（有数据但没认出名称/数量列），请先在右侧列映射里指认名称列再确认");
         segs.push(...low);
         if (high) segs.push(`另 ${high} 列置信≥90%`);
         return `表「${s.sheetName}」(${SHEET_TYPE_LABEL[s.type]})：${segs.join("；")}`;

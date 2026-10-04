@@ -76,3 +76,20 @@ export function decideRows(sheet: ParsedSheet): RowDecision[] {
     return { feeType: cur, skip: false };
   });
 }
+
+/**
+ * 该表确认导入后**实际落库的清单行数**（与 importBoqFromSheets 同一口径：
+ * BOQ/待报价表、父子去重后、名称非空、isItem）。列映射视图拿它提示
+ * 「将导入 N 行」——0 行要在确认前就红标，不能等导入完才发现整表没进来。
+ */
+export function importableRowCount(sheet: ParsedSheet): number {
+  if (sheet.type !== "BOQ" && sheet.type !== "PENDING_QUOTE") return 0;
+  const decisions = decideRows(sheet);
+  let n = 0;
+  for (let i = 0; i < sheet.rows.length; i++) {
+    const row = sheet.rows[i];
+    if (!row.isItem || !(row.cells.name ?? "").trim() || decisions[i].skip) continue;
+    n++;
+  }
+  return n;
+}

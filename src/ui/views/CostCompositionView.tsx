@@ -1,5 +1,6 @@
 "use client";
 import type { CostCompositionRow, WorkspaceView } from "@shared/types";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { EmptyState } from "../primitives";
 import { fmtMoney, PALETTE } from "./shared";
 
@@ -25,16 +26,16 @@ export function CostCompositionView({ view }: { view: Extract<WorkspaceView, { k
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="chip">可计价 {view.rows.length} 项，合价 {fmtMoney(t.revenue)} 元</span>
-        {c.plan > 0 && <span className="chip">定额组价 {c.plan} 项</span>}
-        {c.imported > 0 && <span className="chip">源表分解列 {c.imported} 项</span>}
-        {c.partial > 0 && <span className="chip">仅主材价 {c.partial} 项</span>}
+        <Badge variant="secondary" >可计价 {view.rows.length} 项，合价 {fmtMoney(t.revenue)} 元</Badge>
+        {c.plan > 0 && <Badge variant="secondary" >定额组价 {c.plan} 项</Badge>}
+        {c.imported > 0 && <Badge variant="secondary" >源表分解列 {c.imported} 项</Badge>}
+        {c.partial > 0 && <Badge variant="secondary" >仅主材价 {c.partial} 项</Badge>}
         {c.none > 0 && (
-          <span className="chip warn" title="这些项没有定额组价也没有分解列，合价全部计入「管利及未分解」">
+          <Badge variant="warning"  title="这些项没有定额组价也没有分解列，合价全部计入「管利及未分解」">
             {c.none} 项无成本数据
-          </span>
+          </Badge>
         )}
-        {c.inverted > 0 && <span className="chip danger">{c.inverted} 项成本倒挂（人材机高于合价）</span>}
+        {c.inverted > 0 && <Badge variant="danger" >{c.inverted} 项成本倒挂（人材机高于合价）</Badge>}
       </div>
 
       <div className="mb-4">
@@ -48,12 +49,12 @@ export function CostCompositionView({ view }: { view: Extract<WorkspaceView, { k
             <span key={b.label} className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-sm" style={{ background: b.color }} />
               {b.label}
-              <span className="mono text-neutral-500">{fmtMoney(b.amount)}</span>
-              <span className="mono text-neutral-400">{((Number(b.amount) / rev) * 100).toFixed(1)}%</span>
+              <span className="mono text-muted-foreground">{fmtMoney(b.amount)}</span>
+              <span className="mono text-muted-foreground">{((Number(b.amount) / rev) * 100).toFixed(1)}%</span>
             </span>
           ))}
           {t.marginRate !== null && (
-            <span className="ml-auto text-neutral-500">
+            <span className="ml-auto text-muted-foreground">
               可算口径毛利 <span className="mono font-medium">{fmtMoney(t.margin)}</span> 元
               （{t.marginRate}%，覆盖 {fmtMoney(t.marginRevenue)} 元）
             </span>
@@ -80,20 +81,20 @@ export function CostCompositionView({ view }: { view: Extract<WorkspaceView, { k
           </thead>
           <tbody>
             {view.rows.map((r, i) => (
-              <tr key={r.itemId} style={r.inverted ? { background: "var(--danger-soft-bg)" } : undefined}>
+              <tr key={r.itemId} style={r.inverted ? { background: "var(--destructive-soft)" } : undefined}>
                 <td className="xl-rn">{i + 1}</td>
-                <td className="mono text-neutral-500">{r.code || "—"}</td>
+                <td className="mono text-muted-foreground">{r.code || "—"}</td>
                 <td className="max-w-56 truncate" title={r.name}>{r.name}</td>
-                <td className="mono text-right">{r.quantity}<span className="text-neutral-400"> {r.unit}</span></td>
+                <td className="mono text-right">{r.quantity}<span className="text-muted-foreground"> {r.unit}</span></td>
                 <td className="mono text-right">{fmtMoney(r.revenue)}</td>
-                <td className="mono text-right">{r.labor === null ? <span className="text-neutral-300">—</span> : fmtMoney(r.labor)}</td>
-                <td className="mono text-right">{r.material === null ? <span className="text-neutral-300">—</span> : fmtMoney(r.material)}</td>
-                <td className="mono text-right">{r.machine === null ? <span className="text-neutral-300">—</span> : fmtMoney(r.machine)}</td>
+                <td className="mono text-right">{r.labor === null ? <span className="text-muted-foreground">—</span> : fmtMoney(r.labor)}</td>
+                <td className="mono text-right">{r.material === null ? <span className="text-muted-foreground">—</span> : fmtMoney(r.material)}</td>
+                <td className="mono text-right">{r.machine === null ? <span className="text-muted-foreground">—</span> : fmtMoney(r.machine)}</td>
                 <td className="mono text-right">{fmtMoney(r.other)}</td>
-                <td className="mono text-right" style={r.inverted ? { color: "var(--danger-soft-fg)", fontWeight: 600 } : undefined}>
-                  {r.marginRate === null ? <span className="text-neutral-300">—</span> : `${r.marginRate}%`}
+                <td className="mono text-right" style={r.inverted ? { color: "var(--destructive-soft-fg)", fontWeight: 600 } : undefined}>
+                  {r.marginRate === null ? <span className="text-muted-foreground">—</span> : `${r.marginRate}%`}
                 </td>
-                <td><span className="chip">{COST_SOURCE_LABEL[r.source]}</span></td>
+                <td><Badge variant="secondary" >{COST_SOURCE_LABEL[r.source]}</Badge></td>
               </tr>
             ))}
           </tbody>

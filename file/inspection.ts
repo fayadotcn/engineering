@@ -12,6 +12,8 @@ import { reconcilePriceRole } from "@shared/mapping";
 export interface SheetMeta extends SheetInspection {
   userEdited: boolean;
   needsConfirm: boolean;
+  /** 按当前映射确认导入后会落库的清单行数（0 = 该表不会导入任何行） */
+  itemsToImport?: number;
 }
 
 interface FileMetaJson {
@@ -31,10 +33,23 @@ export async function ensureInspection(
   if (isPdf) return { file, mapping: null, isPdf: true };
 
   const meta = fromJson<FileMetaJson>(file.meta, {});
-  if (meta.mapping) return { file, mapping: meta.mapping, isPdf: false };
+  if (meta.mapping) {
+    // 老文件的识别结果没有 itemsToImport（该提示上线前的数据）：补算一次并落库，
+    // 否则「将导入 0 行」的预警对存量文件永不生效
+    if (Object.values(meta.mapping).some((s) => s.itemsToImport === undefined)) {
+      // 存储块可能已被清理（撤销删除等）——补算失败不能影响识别结果本身
+      try {
+        const buffer = await storage.get(file.storageKey);
+        meta.mapping = await withImportCounts(buffer, meta.mapping);
+        await prisma.projectFile.update({ where: { id: file.id }, data: { meta: toJson(meta) } });
+      } catch { /* 保留旧识别结果 */ }
+    }
+    return { file, mapping: meta.mapping, isPdf: false };
+  }
 
   const buffer = await storage.get(file.storageKey);
-  const mapping = await inspectWithTemplates(buffer, file.filename);
+  // 只有项目文件需要「将导入 N 行」预报（数据集不做清单导入，14k 行定额表不必白算）
+  const mapping = await withImportCounts(buffer, await inspectWithTemplates(buffer, file.filename));
   meta.mapping = mapping;
   await prisma.projectFile.update({
     where: { id: file.id },
@@ -140,6 +155,29 @@ export async function inspectWithTemplates(
 }
 
 /**
+ * 用与正式导入完全相同的解析路径（parseWorkbook + importableRowCount）算出
+ * 每张表「将导入 N 行」。识别结果里带上它，列映射视图才能在确认前红标 0 行表。
+ * 解析失败不阻断识别——只是没有这个提示。
+ */
+export async function withImportCounts(
+  buffer: Buffer,
+  mapping: Record<string, SheetMeta>
+): Promise<Record<string, SheetMeta>> {
+  try {
+    const { parseWorkbook } = await import("@file/excel");
+    const { importableRowCount } = await import("@boq/ingestRules");
+    const sheets = parseWorkbook(buffer, { mapping: toSheetMappings(mapping) });
+    const counts = new Map<string, number>();
+    for (const s of sheets) counts.set(s.sheetName, importableRowCount(s));
+    for (const meta of Object.values(mapping))
+      meta.itemsToImport = counts.get(meta.sheetName) ?? 0;
+  } catch {
+    // 解析失败：保留 undefined，视图退回只显示源表行数
+  }
+  return mapping;
+}
+
+/**
  * 用户在「列映射」视图的手工修改落到一个 sheet 上：
  * 一列只能一个角色，null = 取消该角色；改类型时 price↔unitPrice 角色随类型对齐。
  * 项目文件 PATCH /mapping 与数据集 PATCH /datasets/[id]/mapping 共用。
@@ -234,6 +272,7 @@ export function mappingToView(
       minConfidence: s.minConfidence,
       typeConfidence: s.typeConfidence,
       typeEvidence: s.typeEvidence,
+      itemsToImport: s.itemsToImport,
     })),
   };
 }
@@ -250,6 +289,8 @@ export function toSheetMappings(
       columns: s.columns,
       taxIncluded: s.taxIncluded,
       unitProject: s.unitProject,
+      dataEndRow: s.dataEndRow,
+      headerSpan: s.headerSpan,
     };
   return out;
 }

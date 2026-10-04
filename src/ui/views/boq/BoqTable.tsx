@@ -1,10 +1,13 @@
 "use client";
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../../store";
 import type { BoqItemDTO, WorkspaceView } from "@shared/types";
 import { DISCIPLINE_LABEL, isPricableItem, type Discipline } from "@shared/types";
 import { ChevronDown, Download, FileSpreadsheet, Funnel, Plus, X } from "lucide-react";
 import { ConfirmDialog, EmptyState, toast } from "../../primitives";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { projectTotals } from "@cost-engine/aggregate";
 import { evalExpr } from "@cost-engine/calcExpr";
 import { cn, fmtMoney, FIELD_LABEL, type SortDir, ExcelHead, Hl, displayFeature } from "../shared";
@@ -481,9 +484,9 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
 
   return (
     <div className="flex h-full flex-col">
-      <div className="cost-table-toolbar flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-1.5">
-        <Funnel size={12} className="shrink-0 text-neutral-400" />
-        <input
+      <div className="cost-table-toolbar flex flex-wrap items-center gap-2 border-b border-border bg-[var(--muted)] px-3 py-1.5">
+        <Funnel size={12} className="shrink-0 text-muted-foreground" />
+        <Input
           ref={searchRef}
           disabled={!!editing || saving}
           value={query}
@@ -491,33 +494,36 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
           onKeyDown={(e) => { if (e.key === "Escape" && query) { e.stopPropagation(); setBoqQuery(""); } }}
           placeholder="查找清单项目（/）"
           aria-label="搜索工程清单"
-          className="cost-input w-56"
+          className="w-56 h-8"
         />
-        <button className="cost-btn" aria-pressed={!!boqOnlyUnpriced} disabled={!!editing || saving} onClick={() => { useStore.setState({ boqOnlyUnpriced: !boqOnlyUnpriced }); setLimit(300); }}>只看未报价{unpriced ? `（${unpriced}）` : ""}</button>
+        <Button variant="outline" size="sm" aria-pressed={!!boqOnlyUnpriced} className="aria-pressed:bg-secondary" disabled={!!editing || saving} onClick={() => { useStore.setState({ boqOnlyUnpriced: !boqOnlyUnpriced }); setLimit(300); }}>只看未报价{unpriced ? `（${unpriced}）` : ""}</Button>
         <details className="cost-simple-more"><summary>更多筛选</summary><div className="cost-more-body"><select aria-label="筛选清单专业" disabled={!!editing || saving} value={discipline} className="cost-input" onChange={e => { setDiscipline(e.target.value); setViewFilter({ discipline: e.target.value }); setLimit(300); }}><option value="">全部专业</option>{Object.entries(DISCIPLINE_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><label><input type="checkbox" checked={details} disabled={!!editing || saving} onChange={e => setDetails(e.target.checked)} />显示编码、特征和列筛选</label></div></details>
         {filtering && (
-          <button onClick={clearAll} disabled={!!editing || saving} className="cost-btn sm ghost">
+          <Button variant="ghost" size="xs" onClick={clearAll} disabled={!!editing || saving}>
             <X size={11} /> 清除筛选
-          </button>
+          </Button>
         )}
-        <button className="cost-btn" disabled={!!editing || saving || running || agentRunning || importRunning} onClick={openAdd} title="清单里漏掉的项目可以手工补一行，会记入操作记录"><Plus size={13} />补一行</button>
-        <a
-          className={cn("cost-btn inline-flex items-center gap-1", (!dataTotal || saving || running || agentRunning || importRunning) && "pointer-events-none opacity-40")}
-          href={projectId ? `/api/projects/${projectId}/export` : undefined}
-          download
-          title="把当前清单直接下载为 Excel（含计算式与来源，不经过助手）"
+        <Button variant="outline" size="sm" disabled={!!editing || saving || running || agentRunning || importRunning} onClick={openAdd} title="清单里漏掉的项目可以手工补一行，会记入操作记录"><Plus size={13} />补一行</Button>
+        <Button variant="outline" size="sm" asChild
+          className={cn((!dataTotal || saving || running || agentRunning || importRunning) && "pointer-events-none opacity-40")}
         >
-          <Download size={12} />导出
-        </a>
-        <span className="ml-auto text-[11px] text-neutral-400">
+          <a
+            href={projectId ? `/api/projects/${projectId}/export` : undefined}
+            download
+            title="把当前清单直接下载为 Excel（含计算式与来源，不经过助手）"
+          >
+            <Download size={12} />导出
+          </a>
+        </Button>
+        <span className="ml-auto text-[11px] text-muted-foreground">
           {dataShown === dataTotal
             ? `${dataTotal} 行`
             : `已筛选 ${dataShown} / ${dataTotal} 行`}
           {sort && " · 已排序"}
         </span>
       </div>
-      {editing && <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-neutral-500"><span>Enter 保存并移到下一行，Tab 移到下一格，Esc 取消。</span><button className="cost-btn primary" disabled={saving} onPointerDown={e => e.preventDefault()} onClick={() => void commit()}>保存修改</button><button className="cost-btn" disabled={saving} onPointerDown={e => e.preventDefault()} onClick={cancelEdit}>取消</button></div>}
-      {!editing && <p className="px-3 py-2 text-[11px] text-neutral-500">点击数量、单价或金额即可修改，数量可输计算式（如 3×12+5）；选中行可 Ctrl+C/V 与 Excel 互粘，Shift/Ctrl 点选多行批量调价。按 <kbd className="kbd">?</kbd> 查看全部快捷键。</p>}
+      {editing && <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-muted-foreground"><span>Enter 保存并移到下一行，Tab 移到下一格，Esc 取消。</span><Button size="sm" disabled={saving} onPointerDown={e => e.preventDefault()} onClick={() => void commit()}>保存修改</Button><Button variant="outline" size="sm" disabled={saving} onPointerDown={e => e.preventDefault()} onClick={cancelEdit}>取消</Button></div>}
+      {!editing && <p className="px-3 py-2 text-[11px] text-muted-foreground">点击数量、单价或金额即可修改，数量可输计算式（如 3×12+5）；选中行可 Ctrl+C/V 与 Excel 互粘，Shift/Ctrl 点选多行批量调价。按 <kbd className="kbd">?</kbd> 查看全部快捷键。</p>}
       <div className="xl-scroll flex-1 overflow-auto">
       <table className="xl-table xl-pin-last">
         <thead inert={!!editing || saving}>
@@ -563,7 +569,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
                   <span className="flex items-baseline justify-between gap-3">
                     <span className="min-w-0 truncate">{it.name}</span>
                     {(headerSubtotal.get(it.id) ?? 0) > 0 && (
-                      <span className="mono shrink-0 text-[11px] font-normal text-neutral-500">
+                      <span className="mono shrink-0 text-[11px] font-normal text-muted-foreground">
                         小计 {fmtMoney(headerSubtotal.get(it.id)!)}
                       </span>
                     )}
@@ -587,18 +593,18 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
                   {i + 1}
                   {rowAudit.has(it.id) && <i className="xl-audit" aria-label="该行有改动记录" />}
                 </td>
-                {details && <td className="mono text-neutral-500"><Hl text={it.code} q={query.trim()} /></td>}
+                {details && <td className="mono text-muted-foreground"><Hl text={it.code} q={query.trim()} /></td>}
                 <td className="xl-name max-w-72 truncate" title={it.name}>
                   <Hl text={it.name} q={query.trim()} />
-                  {!details && it.rawFeature && <div className="max-w-64 truncate text-[11px] text-neutral-500" title={it.rawFeature}><Hl text={displayFeature(it.rawFeature, it.name)} q={query.trim()} /></div>}
+                  {!details && it.rawFeature && <div className="max-w-64 truncate text-[11px] text-muted-foreground" title={it.rawFeature}><Hl text={displayFeature(it.rawFeature, it.name)} q={query.trim()} /></div>}
                   {it.feeType && it.feeType !== "分部分项" && (
-                    <span className="chip ml-1 !py-px !text-[10px]">{it.feeType}</span>
+                    <Badge variant="secondary" className="ml-1 !py-px !text-[10px]" >{it.feeType}</Badge>
                   )}
                 </td>
-                {details && <td className="max-w-56 truncate text-neutral-500" title={it.rawFeature}>
+                {details && <td className="max-w-56 truncate text-muted-foreground" title={it.rawFeature}>
                   <Hl text={displayFeature(it.rawFeature, it.name)} q={query.trim()} />
                 </td>}
-                <td className="text-neutral-500">{it.unit}</td>
+                <td className="text-muted-foreground">{it.unit}</td>
                 {(["quantity", "unitPrice", "totalPrice"] as const).map((f) => {
                   const editable = isPricableItem(it) ? f !== "totalPrice" : f === "totalPrice";
                   return (
@@ -609,7 +615,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
                       f === "totalPrice" && "relative",
                       editing?.id === it.id && editing.field === f && "xl-active relative",
                       f === "unitPrice" && Number(it.unitPrice) === 0 && isPricableItem(it) &&
-                        "bg-[var(--warning-soft-bg)] font-medium",
+                        "bg-[var(--warning-soft)] font-medium",
                       f === "unitPrice" && Number(it.unitPrice) === 0 && isPricableItem(it) &&
                         "text-[var(--warning-soft-fg)]"
                     )}
@@ -652,8 +658,8 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
                           className={cn(
                             "pointer-events-none absolute -top-5 right-0 z-10 whitespace-nowrap rounded px-1.5 py-px text-[10px] font-medium shadow-[var(--shadow-sm)]",
                             exprPreview.ok
-                              ? "bg-[var(--brand-accent)] text-white"
-                              : "bg-[var(--danger)] text-white"
+                              ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                              : "bg-[var(--destructive)] text-white"
                           )}
                         >
                           {exprPreview.ok ? `= ${exprPreview.value!.toLocaleString("zh-CN", { maximumFractionDigits: 3 })}` : "式无效"}
@@ -677,11 +683,11 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
                     ) : f === "unitPrice" ? (
                       <>
                         {isPricableItem(it) ? fmtMoney(it[f]) : (
-                          <span className="text-neutral-300" title="总额计价行没有单价，金额填在合价列">—</span>
+                          <span className="text-muted-foreground" title="总额计价行没有单价，金额填在合价列">—</span>
                         )}
                         {details && Number(it.mainMaterialPrice ?? 0) > 0 && (
                           <div
-                            className="text-[10px] font-normal text-neutral-400"
+                            className="text-[10px] font-normal text-muted-foreground"
                             title="主材暂估价（组价输入）"
                           >
                             材 {fmtMoney(it.mainMaterialPrice)}
@@ -690,7 +696,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
                         {(it.pricingPlan?.filter((l) => !l.suggested).length ?? 0) > 0 && (
                           <button
                             type="button"
-                            className="block w-full text-right text-[10px] font-normal text-[var(--brand-ink)] underline-offset-2 hover:underline"
+                            className="block w-full text-right text-[10px] font-normal text-[var(--foreground)] underline-offset-2 hover:underline"
                             aria-expanded={expandedId === it.id}
                             title={
                               `综合单价由 ${it.pricingPlan!.filter((l) => !l.suggested).length} 条定额子目组成 — 点击展开构成明细\n` +
@@ -708,7 +714,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
                       </>
                     ) : f === "quantity" && it.quantityExpr ? (
                       // 点状下划线 = 该数由计算式得出，悬停见原式（审计留痕）
-                      <span className="underline decoration-dotted decoration-neutral-400 underline-offset-[3px]">{it[f]}</span>
+                      <span className="underline decoration-dotted decoration-muted-foreground underline-offset-[3px]">{it[f]}</span>
                     ) : (
                       it[f]
                     )}
@@ -728,9 +734,9 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
           {!shownRows.length && (
             <tr>
               <td colSpan={(details ? 7 : 5) + 1}>
-                <div className="flex flex-col items-center gap-2 py-10 text-[12px] text-neutral-400">
+                <div className="flex flex-col items-center gap-2 py-10 text-[12px] text-muted-foreground">
                   {dataTotal === 0 ? "清单还是空的——先把 Excel 清单传进来，或点「补一行」" : "没有匹配的清单项"}
-                  {dataTotal > 0 && <button type="button" className="cost-btn" onClick={clearAll}>清除筛选</button>}
+                  {dataTotal > 0 && <Button type="button" variant="outline" size="xs" onClick={clearAll}>清除筛选</Button>}
                 </div>
               </td>
             </tr>
@@ -739,9 +745,9 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
       </table>
       {items.length > 0 && dataShown === 0 && <EmptyState title="没有符合筛选条件的清单项" hint="清除筛选或更换关键词后再查看。" />}
       {sorted.length > shown.length && (
-        <button onClick={() => setLimit((l) => l + 500)} className="cost-btn sm mx-auto my-3">
+        <Button variant="outline" size="xs" onClick={() => setLimit((l) => l + 500)} className="mx-auto my-3">
           加载更多（还有 {sorted.length - shown.length} 行）
-        </button>
+        </Button>
       )}
       {!items.length && (
         <EmptyState

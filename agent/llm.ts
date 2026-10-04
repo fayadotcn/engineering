@@ -246,6 +246,30 @@ async function runAnthropicLoop(
   return "已达到最大推理轮数，当前进度请查看工作区。";
 }
 
+/** 一次性问答（不走工具/流式/对话轮次）：工具层的「模型知识兜底」出口，
+ *  供 web.search 断网退化等只读场景用；未配置模型或请求失败返回 null。 */
+export async function askModel(system: string, user: string): Promise<string | null> {
+  const cfg = modelConfig();
+  if (!cfg) return null;
+  try {
+    if (cfg.provider === "anthropic") {
+      const res = await callAnthropic(cfg, system, [{ role: "user", content: user }], []);
+      return res.content.filter((b) => b.type === "text").map((b) => b.text).join("") || null;
+    }
+    const msg = await callOpenAI(
+      cfg,
+      [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      []
+    );
+    return msg.content || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runLLMLoop(
   ctx: RunContext,
   userMessage: string,

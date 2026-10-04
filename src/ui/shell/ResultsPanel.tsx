@@ -1,6 +1,7 @@
 "use client";
 import { BarChart3, Download, RefreshCw, X } from "lucide-react";
 import type { WorkspaceView } from "@shared/types";
+import { Button } from "@/components/ui/button";
 import { useStore } from "../store";
 import { isBusy, isDirty } from "../busy";
 import { resultKey, sectionOf } from "../sections";
@@ -65,8 +66,8 @@ export function ResultsPanel({ projectId, onUpload }: { projectId: string; onUpl
     <BarChart3 size={30} />
     <h3>还没有成果</h3>
     <p>{s.items.length ? "在左侧对话里提出测算、检查或汇总任务，结果会出现在这里。也可以直接生成：" : "先上传工程清单，再生成成果。"}</p>
-    {s.items.length > 0 ? <div className="cost-actions">{QUICK_RESULTS.map((q) => <button key={q.label} className="cost-btn" disabled={blocked} onClick={() => void s.send(q.task)}>{q.label}</button>)}</div>
-      : <button className="cost-btn primary" onClick={onUpload}>上传清单</button>}
+    {s.items.length > 0 ? <div className="cost-actions">{QUICK_RESULTS.map((q) => <Button key={q.label} variant="outline" size="sm" disabled={blocked} onClick={() => void s.send(q.task)}>{q.label}</Button>)}</div>
+      : <Button onClick={onUpload}>上传清单</Button>}
   </div>;
 
   const regen = active && regenTask(active);
@@ -87,10 +88,10 @@ export function ResultsPanel({ projectId, onUpload }: { projectId: string; onUpl
       <header className="results-head">
         <div><small>{KIND_LABEL[active.kind] ?? "成果"}</small><h3>{active.title}</h3></div>
         <div className="cost-actions">
-          {regen && <button className="cost-btn" disabled={blocked} onClick={() => void s.send(regen)} title="成果是生成时的快照；清单或计价设置变化后可重新生成"><RefreshCw size={13} />重新生成</button>}
+          {regen && <Button variant="outline" size="sm" disabled={blocked} onClick={() => void s.send(regen)} title="成果是生成时的快照；清单或计价设置变化后可重新生成"><RefreshCw size={13} />重新生成</Button>}
           {active.kind === "fileCompare" && active.fileAId && active.fileBId
-            ? <a className="cost-btn primary" href={`/api/projects/${projectId}/export-compare?a=${active.fileAId}&b=${active.fileBId}`} download><Download size={13} />导出对审报告</a>
-            : s.items.length > 0 && <a className="cost-btn" href={`/api/projects/${projectId}/export`} download><Download size={13} />导出清单 Excel</a>}
+            ? <Button size="sm" asChild><a href={`/api/projects/${projectId}/export-compare?a=${active.fileAId}&b=${active.fileBId}`} download><Download size={13} />导出对审报告</a></Button>
+            : s.items.length > 0 && <Button variant="outline" size="sm" asChild><a href={`/api/projects/${projectId}/export`} download><Download size={13} />导出清单 Excel</a></Button>}
         </div>
       </header>
       {newest && newest.id !== active.id && <p className="cost-info">这是较早生成的快照，已有更新的结果。<button className="cost-link" onClick={() => s.setActiveView(newest.id)}>查看最新</button></p>}

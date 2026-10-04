@@ -1,5 +1,6 @@
 "use client";
 import { ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useStore } from "../store";
 import { isBusy, isDirty } from "../busy";
 import type { ConvBlock } from "../runEvents";
@@ -21,12 +22,12 @@ export function PendingImports() {
       if (!mapping && s.projectId) void s.init(s.projectId, true);
     };
     if (s.activeViewId !== mappingId)
-      return <div key={block.confirmId} className="import-confirm" role="status"><div><strong>有资料需要核对</strong><p>{block.description}</p></div><button className="cost-btn" onClick={review}>核对并导入<ArrowRight size={14} /></button></div>;
+      return <div key={block.confirmId} className="import-confirm" role="status"><div><strong>有资料需要核对</strong><p>{block.description}</p></div><Button variant="outline" size="sm" onClick={review}>核对并导入<ArrowRight size={14} /></Button></div>;
     return <div key={block.confirmId} className="import-confirm" role="status">
       <div><strong>请核对表格，再导入</strong><p>{s.mappingDirty ? "你改了识别结果，请先保存，再确认导入。" : block.description}</p></div>
       <div className="cost-actions">
-        <button className="cost-btn" disabled={blocked} onClick={() => void s.confirmImport(block.runId, false)}>取消导入</button>
-        <button className="cost-btn primary" disabled={blocked} onClick={() => void s.confirmImport(block.runId, true)}>确认导入</button>
+        <Button variant="outline" size="sm" disabled={blocked} onClick={() => void s.confirmImport(block.runId, false)}>取消导入</Button>
+        <Button size="sm" disabled={blocked} onClick={() => void s.confirmImport(block.runId, true)}>确认导入</Button>
       </div>
     </div>;
   })}</>;

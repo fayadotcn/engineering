@@ -1,16 +1,18 @@
 "use client";
 import { useRef, useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../store";
 import { FileSpreadsheet, FileText } from "lucide-react";
 import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { Button } from "@/components/ui/button";
 import { readResponse } from "../api";
 import { cn } from "./shared";
 
-const FILE_STATUS: Record<string, { label: string; cls: string }> = {
-  UPLOADED: { label: "待解析", cls: "" },
-  PARSED: { label: "已解析", cls: "ok" },
+const FILE_STATUS: Record<string, { label: string; cls: BadgeVariant }> = {
+  UPLOADED: { label: "待解析", cls: "secondary" },
+  PARSED: { label: "已解析", cls: "success" },
   FAILED: { label: "解析失败", cls: "danger" },
-  PARSING: { label: "解析中", cls: "warn" },
+  PARSING: { label: "解析中", cls: "warning" },
 };
 
 const fmtBytes = (n?: number) => {
@@ -79,14 +81,16 @@ export function FileList() {
       <div className="mb-2 flex items-center justify-between gap-3">
         <p className="cost-file-hint !mb-0">上传后系统会整理文件；需要你检查的表格会显示“待核对”。</p>
         {cmpPair && (
-          <button
-            className="cost-btn shrink-0"
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
             disabled={blocked}
             title={`对审「${cmpPair[0].filename}」与「${cmpPair[1].filename}」——价差/量差/独有项与申报口径对比`}
             onClick={() => void send(`对审「${cmpPair[0].filename}」与「${cmpPair[1].filename}」两版清单`)}
           >
             两版对审
-          </button>
+          </Button>
         )}
       </div>
       <div className="xl-sheet overflow-auto rounded-lg">
@@ -107,27 +111,27 @@ export function FileList() {
                 <td>
                   <div className="flex items-center gap-2">
                     {f.filename.toLowerCase().endsWith(".pdf")
-                      ? <FileText size={13} className="shrink-0 text-neutral-400" />
-                      : <FileSpreadsheet size={13} className="shrink-0 text-neutral-400" />}
+                      ? <FileText size={13} className="shrink-0 text-muted-foreground" />
+                      : <FileSpreadsheet size={13} className="shrink-0 text-muted-foreground" />}
                     <div className="min-w-0">
                       <div className="flex max-w-96 items-center gap-1.5">
                         <span className="truncate" title={f.filename}>{f.filename}</span>
-                        {f.stage && <span className="chip info !py-px !text-[10px] shrink-0">{f.stage}</span>}
-                        {f.period && <span className="chip !py-px !text-[10px] shrink-0">{f.period}</span>}
+                        {f.stage && <Badge variant="info" className="!py-px !text-[10px] shrink-0" >{f.stage}</Badge>}
+                        {f.period && <Badge variant="secondary" className="!py-px !text-[10px] shrink-0" >{f.period}</Badge>}
                       </div>
                       {(f.sizeBytes || f.createdAt) && (
-                        <div className="text-[10.5px] text-neutral-400">
+                        <div className="text-[10.5px] text-muted-foreground">
                           {[fmtBytes(f.sizeBytes), f.createdAt && new Date(f.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })].filter(Boolean).join(" · ")}
                         </div>
                       )}
                     </div>
                   </div>
                 </td>
-                <td><span className="chip">{f.kindLabel}</span></td>
+                <td><Badge variant="secondary" >{f.kindLabel}</Badge></td>
                 <td>
-                  <span className={cn("chip", awaiting ? "warn" : FILE_STATUS[f.status]?.cls)}>
+                  <Badge variant={awaiting ? "warning" : (FILE_STATUS[f.status]?.cls ?? "secondary")}>
                     {awaiting ? "待核对" : FILE_STATUS[f.status]?.label ?? f.status}
-                  </span>
+                  </Badge>
                 </td>
                 <td className="text-center">
                   {(f.status === "UPLOADED" || f.status === "FAILED") && !awaiting && (

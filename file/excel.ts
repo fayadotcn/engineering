@@ -33,6 +33,13 @@ export interface ColumnMap {
   price?: number;
   laborPrice?: number;
   machinePrice?: number;
+  /** 表-08「其中：人工费」等分解列——**合价口径**（整行金额，不是每单位单价）。
+   *  落 rawCells.__decomp 供成本构成消费；labor/machine 另折算每单位值进 BoqItem。 */
+  laborFee?: number;
+  machineFee?: number;
+  materialFee?: number;
+  mgmtFee?: number;
+  profitFee?: number;
   region?: number;
   period?: number;
   priceType?: number;
@@ -50,7 +57,7 @@ export interface SheetParse {
 const COLUMN_SYNONYMS: Record<keyof ColumnMap, RegExp> = {
   seq: /^序号$|^序$|^编号$|^no\.?$|^s\/n$|^item\s*no\.?$/i,
   code: /项目编码|清单编码|编码|项目编号|^code$|item\s*code/i,
-  name: /项目名称.*特征|项目名称|分部分项名称|工程名称|^名称$|项目$|^item$|^description$|^desc\.?$|item\s*description/i,
+  name: /项目名称.*特征|项目名称|分部分项名称|单项工作名称|分项工作名称|工作名称|清单名称|名称及规格型号|名称及型号|工程名称|^名称$|项目$|^item$|^description$|^desc\.?$|item\s*description/i,
   feature: /项目特征|特征描述|特征/,
   unit: /计量单位|^单位$|^unit$|^uom$/i,
   quantity: /工程数量|工程量|数量|计算式|^qty\.?$|^quantity$/i,
@@ -65,13 +72,22 @@ const COLUMN_SYNONYMS: Record<keyof ColumnMap, RegExp> = {
   price: /询价|报价|材料单价|主材价|价格|单价|^price$|unit\s*cost/i,
   laborPrice: /人工单价|人工费单价|人工.*单价|单价.*人工|^人工费$|^人工$|labou?r\s*(rate|price|cost)/i,
   machinePrice: /机械单价|机械费单价|机械.*单价|^机械费$|^机械$|machine\s*(rate|price)/i,
+  // 表-08「其中：人工费/材料费/机械费/管理费/利润」（合价口径）。双行表头
+  // 「其中」+「人工费」合并后成「其中人工费」，两种形态都要命中；带「合计/小计」
+  // 的变体一并收编——它们同样是整行金额。
+  laborFee: /其中.*人工|人工费合计|人工费小计/,
+  machineFee: /其中.*机械|机械费合计|机械费小计/,
+  materialFee: /其中.*材料|材料费合计|材料费小计/,
+  mgmtFee: /其中.*管理|管理费合计|管理费小计/,
+  profitFee: /其中.*利润|利润合计|利润小计/,
 };
 
 // 角色尝试顺序即优先级：laborPrice/machinePrice 必须排在 price 前，
 // 否则「人工单价」会被 price 的裸「单价」同义词抢走。
 const BOQ_COLS: (keyof ColumnMap)[] = [
   "seq", "code", "feature", "unit", "quantity", "unitPrice", "totalPrice",
-  "laborPrice", "machinePrice", "name",
+  "laborPrice", "machinePrice", "laborFee", "machineFee", "materialFee", "mgmtFee", "profitFee",
+  "name",
 ];
 // priceType/period 必须排在 price 前：「价格类型」「报价日期」都含「价格/报价」，
 // 会被 price 同义词抢走；laborPrice/machinePrice 同理先于 price。
@@ -142,6 +158,9 @@ function detectColumns(headerCells: string[], kinds: (keyof ColumnMap)[]): ColDe
       if (map[col] !== undefined) continue;
       const re = COLUMN_SYNONYMS[col];
       if (re.test(text)) {
+        // 名称类表头不许被其它角色抢走：「工程量清单项目名称」含「工程量」，
+        // 会被 quantity 先命中 → 名称列丢失 → 整表无名行全部丢弃（真实文件回归）。
+        if (col !== "name" && col !== "materialName" && /名称|品名|项目内容|工作内容/.test(text)) continue;
         if (col === "name" && /材料名称|设备名称|物料|品名/.test(text)) continue;
         if (col === "unitPrice" && /材料|主材|人工|机械/.test(text)) continue;
         if (col === "price" && /综合单价|人工|机械/.test(text)) continue;
@@ -255,16 +274,20 @@ function profileColumns(rows: string[][]): ColumnMap {
       }
     }
   }
-  // name: short-ish han text column that isn't feature
-  best = -1; bestScore = 3;
+  // name：汉字文本列。型号后缀的长名（「配电箱 F/B1-6AEPZ」）不该因超 12 字被丢掉，
+  // 上限放宽到 30；数字占多数的列是量/价列，排除；短标签占比高的列优先（特征/
+  // 工作内容这类长描述列只在没有更像名称的列时才兜底）。
+  best = -1; let bestRank = 0;
   for (let c = 0; c < width; c++) {
     if (Object.values(map).includes(c)) continue;
     const s = stat(c);
+    if (s.text < 3 || s.nums > s.text) continue;
     const short = rows.slice(0, 60).filter((r) => {
       const v = (r[c] ?? "").trim();
-      return v && v.length <= 12 && /[\p{Script=Han}]/u.test(v);
+      return v && v.length <= 30 && /[\p{Script=Han}]/u.test(v);
     }).length;
-    if (s.text > bestScore && short >= s.text * 0.6) { best = c; bestScore = s.text; }
+    const rank = s.text * (short >= s.text * 0.5 ? 2 : 1);
+    if (rank > bestRank) { bestRank = rank; best = c; }
   }
   if (best >= 0) map.name = best;
   return map;
@@ -307,6 +330,12 @@ export interface SheetMapping {
   taxIncluded?: boolean;
   /** 单项/单位工程（多单位工程项目），sheet 名【A‖B】/表内「单位工程名称：X」 */
   unitProject?: string;
+  /** 本表数据区结束行（不含）。同一 sheet 里第二张表的表头行号——打印版/
+   *  宏业多表导出常见；-1/缺省 = 一直到表尾。 */
+  dataEndRow?: number;
+  /** 表头占用的行数（打印版清单会把「单位/综合单价/合价」拆到下面几行，
+   *  表头块累积后可能 >1）。缺省按 merged?2:1 算。 */
+  headerSpan?: number;
 }
 
 export interface SheetInspection extends SheetMapping {
@@ -420,33 +449,108 @@ function lockByArithmetic(
   return { locked: true, stolenPrice };
 }
 
+/**
+ * 表头块累积：打印版清单把表头标签拆到**各自一行**的稀疏列里
+ * （真实文件：「计量」一行、「序号|项目编码|项目名称|项目特征描述|工程量」一行、
+ * 「单位」一行、「综合单价|合价」一行）。只认一行会漏掉价列与单位列，
+ * 整表被判「无价」→ 综合单价全丢。
+ * 只吸收短标签行，且列位不能与已有表头重复（重复=数据行，立即停），
+ * 所以不会把数据行并进表头。
+ */
+const accumulateHeader = (
+  rows: string[][],
+  anchor: number
+): { cells: string[]; span: number } => {
+  const cells = [...(rows[anchor] ?? [])];
+  // 锚点行自己的列位：再出现同样的列 = 数据行（名称/量/价列）→ 立即停。
+  // 被吸收行带来的列允许续写（打印版把「计量」「单位」上下拆开）。
+  const anchorCols = new Set(cells.map((c, i) => (c.trim() ? i : -1)).filter((i) => i >= 0));
+  const labelRow = (row: string[]): [number, string][] | null => {
+    const filled = (row ?? [])
+      .map((c, i) => [i, c.trim()] as const)
+      .filter(([, c]) => c);
+    if (!filled.length) return [];
+    if (filled.length > 3) return null;
+    if (filled.some(([, c]) => c.length > 24 || numVal(c) !== null)) return null;
+    if (filled.some(([i]) => anchorCols.has(i))) return null; // 锚点列位重复 → 数据行
+    return filled.map(([i, c]) => [i, c] as [number, string]);
+  };
+  // 上方至多 1 行（「计量」在「单位」上一行的情况；再多会把上张表的表头卷进来）
+  if (anchor - 1 >= 0) {
+    const up = labelRow(rows[anchor - 1]);
+    if (up) for (const [i, c] of up) cells[i] = cells[i] ? cells[i] + c : c;
+  }
+  let bottom = anchor;
+  for (let k = 1; k <= 6 && anchor + k < rows.length; k++) {
+    const filled = labelRow(rows[anchor + k]);
+    if (filled === null) break;
+    if (!filled.length) { bottom = anchor + k; continue; } // 表头块内的空行
+    for (const [i, c] of filled) cells[i] = cells[i] ? cells[i] + c : c;
+    bottom = anchor + k;
+  }
+  return { cells, span: bottom - anchor + 1 };
+};
+
+/** 表头指纹：去空白小写后的 sha1（ImportTemplate 与多表边界共用同一口径）。 */
+const headerFingerprint = (cells: string[]): string =>
+  createHash("sha1")
+    .update(cells.map((c) => c.replace(/\s+/g, "").toLowerCase()).join("\u0001"))
+    .digest("hex");
+
 /** 单表结构识别：表头定位 → 同义词映射 → 算术锁定 → 类型判定。 */
 function detectSheet(rows: string[][], sheetName: string): SheetInspection {
   const colCount = colWidth(rows);
 
-  // best header: single row OR merged pair, first 15 rows
-  let best = { row: -1, score: 0, merged: false };
-  for (let i = 0; i < Math.min(15, rows.length); i++) {
-    for (const merged of [false, true]) {
-      if (merged && i + 1 >= rows.length) continue;
-      const cells = merged ? mergeRows(rows[i], rows[i + 1]) : rows[i];
-      const bq = headerScore(cells, BOQ_COLS);
-      const qt = headerScore(cells, QUOTE_COLS);
-      const joined = cells.join();
-      const boqish = bq >= 3 && /编码|名称|特征|工程量|单位|单价|合价|code|item|qty|quantity|rate|amount/i.test(joined);
-      const quoteish = qt >= 3 && /材料|规格|单价|品牌|名称|material|brand|price|spec/i.test(joined);
-      const score = Math.max(boqish ? bq : 0, quoteish ? qt : 0);
-      if (score > best.score) best = { row: i, score, merged };
+  // 表头候选打分（单行或双行合并）
+  const scanHeader = (from: number, to: number) => {
+    let hit = { row: -1, score: 0, merged: false, single: 0 };
+    for (let i = from; i < Math.min(to, rows.length); i++) {
+      for (const merged of [false, true]) {
+        if (merged && i + 1 >= rows.length) continue;
+        const cells = merged ? mergeRows(rows[i], rows[i + 1]) : rows[i];
+        const bq = headerScore(cells, BOQ_COLS);
+        const qt = headerScore(cells, QUOTE_COLS);
+        const joined = cells.join();
+        const boqish = bq >= 3 && /编码|名称|特征|工程量|单位|单价|合价|code|item|qty|quantity|rate|amount/i.test(joined);
+        const quoteish = qt >= 3 && /材料|规格|单价|品牌|名称|material|brand|price|spec/i.test(joined);
+        const score = Math.max(boqish ? bq : 0, quoteish ? qt : 0);
+        // 同分优先「本行标签更多」的行：打印版把「计量」单摆一行，
+        // 真表头那一行的标签更全（用单行格数比较，不受双行合并影响）
+        const single = (rows[i] ?? []).filter((c) => c.trim()).length;
+        if (score > hit.score || (score === hit.score && score >= 3 && single > hit.single))
+          hit = { row: i, score, merged, single };
+      }
     }
+    return hit;
+  };
+  // 先扫前 15 行（常规文件行为不变）；找不到再深扫前 200 行——打印版清单
+  // 前面是封面/编制说明/汇总表，真表头常在几十上百行之后（真实文件：第 145 行）。
+  // 深扫要求该行以「短标签」为主，避免把数据行误判成表头。
+  let best = scanHeader(0, 15);
+  if (best.score < 3) {
+    const deep = scanHeader(15, 200);
+    const cells = deep.row < 0 ? [] : deep.merged ? mergeRows(rows[deep.row] ?? [], rows[deep.row + 1] ?? []) : rows[deep.row] ?? [];
+    const filled = cells.filter((c) => c.trim());
+    const labels = filled.filter((c) => c.trim().length <= 24).length;
+    if (deep.score >= 3 && filled.length >= 3 && labels >= filled.length * 0.6) best = deep;
   }
 
   let headerRow = -1;
   let dataStart = 0;
   let headerCells: string[];
   let det: ColDetect;
+  let headerSpan = 1;
   if (best.score >= 3) {
     headerRow = best.row;
     headerCells = best.merged ? mergeRows(rows[headerRow], rows[headerRow + 1]) : rows[headerRow];
+    headerSpan = best.merged ? 2 : 1;
+    // 表头块累积：能多认出列角色才采用（打印版稀疏表头 vs 正常单行表头）
+    const acc = accumulateHeader(rows, headerRow);
+    const scoreOf = (hc: string[]) => headerScore(hc, BOQ_COLS) + headerScore(hc, QUOTE_COLS);
+    if (scoreOf(acc.cells) >= scoreOf(headerCells)) {
+      headerCells = acc.cells;
+      headerSpan = acc.span;
+    }
     // unified detection: QUOTATION keys first, then BOQ keys fill the gaps
     const q = detectColumns(headerCells, QUOTE_COLS);
     const b = detectColumns(headerCells, BOQ_COLS);
@@ -455,7 +559,7 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
       conf: { ...q.conf, ...b.conf },
       ev: { ...q.ev, ...b.ev },
     };
-    dataStart = headerRow + (best.merged ? 2 : 1);
+    dataStart = headerRow + headerSpan;
   } else {
     headerCells = Array.from({ length: colCount }, (_, i) => colLetter(i));
     det = profileColumnsDetect(rows.filter((r) => r.some((c) => c.trim())));
@@ -466,6 +570,32 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
   const { locked, stolenPrice } = lockByArithmetic(
     rows.slice(dataStart), headerCells, det, colCount
   );
+
+  // 表尾边界：打印版/宏业导出常把多张表挤在一个 sheet（清单 + 措施 + 规费税金）。
+  // 第 2 张表头（指纹与首表不同）之后的行不再按首表列位解析——否则规费/税金行
+  // 会被当成清单项导入（真值变假项）。指纹相同的重复表头是分部续表，不裁剪。
+  let dataEndRow = -1;
+  if (headerRow >= 0) {
+    const roleCols = [...new Set(Object.values(columns).filter((c): c is number => typeof c === "number"))];
+    const norm = (x?: string) => (x ?? "").replace(/\s+/g, "");
+    // 同一张表的重复表头（分部续表）：角色列上的标签与首表一致 → 不裁剪。
+    // 纯指纹比对在这里不够——表头块累积会把上下相邻的拆行标签卷进来，
+    // 粘出来的文本可能不同，但角色列上的标签是同一套。
+    const sameHeaderLabels = (probe: string[]) => {
+      const hits = roleCols.filter((c) => norm(probe[c]) && norm(probe[c]) === norm(headerCells[c])).length;
+      return hits >= Math.max(2, Math.ceil(roleCols.length * 0.6));
+    };
+    for (let i = dataStart + 1; i < rows.length; i++) {
+      const filled = rows[i].filter((c) => c.trim());
+      if (filled.length < 3) continue;
+      if (filled.filter((c) => c.trim().length <= 24).length < 3) continue; // 数据行不长这样
+      const cand = accumulateHeader(rows, i).cells;
+      if (headerScore(cand, BOQ_COLS) < 3 && headerScore(cand, QUOTE_COLS) < 3) continue;
+      if (sameHeaderLabels(cand)) continue;
+      dataEndRow = i;
+      break;
+    }
+  }
 
   // 类型判定：内容信号 > 表头信号 > 可用性兜底。
   // 措施/其他项目表（表-11/表-12）只有 名称+编码+金额，没有量/价/单位——
@@ -500,7 +630,9 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     (/招标人|投标人|法定代表人|编制单位|造价咨询/.test(headerText) && rows.length <= 30);
   // COMPARE：两版量/价并列。差值列（价差/量差/增减）是直接证据；
   // 双列版本要按词干去重——「投标报价单价」+「投标报价合价」是一组价不是两版
-  const VERSION_RE = /送审|审定|审核|审批|批准|报审|报批|投标|招标|标底|拦标|控制价|预算|结算|上期|本期|初审|终审|复核|原报|核后|已报|申请|批复/;
+  // 版本/口径词：用于识别「同一张表里多版本量价」的对比表。清标量/上报量是典型的
+  // 两版口径（招标控制量 vs 申报量），漏掉它们会把进度计量审核表当清单导入。
+  const VERSION_RE = /送审|审定|审核|审批|批准|报审|报批|投标|招标|标底|拦标|控制价|预算|结算|上期|本期|初审|终审|复核|原报|核后|已报|申请|批复|清标|上报/;
   const stripPrice = (h: string) => h.replace(/综合单价|单价|合价|金额|价格|报价|价|元|（[^）]*）|\([^)]*\)|\s/g, "");
   const stripQty = (h: string) => h.replace(/工程数量|工程量|数量|工程|量|\s|（[^）]*）|\([^)]*\)/g, "");
   const versionedStems = (word: RegExp, strip: (h: string) => string) =>
@@ -536,6 +668,12 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
   // PENDING_QUOTE：名称+单位+工程量齐但没有任何价列（待报价清单/器材表）
   const noPriceCol =
     columns.unitPrice === undefined && priceCol === undefined && columns.totalPrice === undefined;
+  // LIBRARY：企业定额/标准清单库（一级/二级编码体系 + 清单编号 + 计算规则/工作内容），
+  // 天生没有工程量列。当清单导入会产出成千上万条 0 量 0 价「清单项」污染全表。
+  const librarySignal =
+    !columns.quantity &&
+    (/一级编码|二级编码|三级编码|四级编码|清单编号|计算规则/.test(headerText) ||
+      /企业定额|标准清单|定额库|^定额$|定额表/.test(sheetName));
 
   let type: SheetType;
   let typeConfidence: number;
@@ -548,6 +686,10 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     type = "FACTS";
     typeConfidence = 0.85;
     typeEvidence = "汇总/说明类表（规费税金/工程汇总/扉页），不产清单行";
+  } else if (librarySignal) {
+    type = "GENERIC";
+    typeConfidence = 0.85;
+    typeEvidence = "企业定额/标准清单库（编码体系+计算规则、无工程量列）——按资料忽略，不产清单行；确需导入可在列映射里改成「清单」";
   } else if (compareSignal) {
     type = "COMPARE";
     typeConfidence = deltaCol ? 0.9 : 0.8;
@@ -562,6 +704,12 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     type = "PENDING_QUOTE";
     typeConfidence = 0.8;
     typeEvidence = "有名称/单位/工程量但无价格列，按待报价清单导入（单价留空待补）";
+  } else if (boqUsable && noPriceCol && !hasQty) {
+    // 只有名称+单位、既无工程量也无任何价列（器材清册/待询价材料表）：
+    // 按待报价清单导入（量价留空，走缺价补价流程），而不是当垃圾表丢掉
+    type = "PENDING_QUOTE";
+    typeConfidence = 0.7;
+    typeEvidence = "有名称/单位但无工程量也无价格列，按待报价清单导入（量价留空待补）";
   } else if (boqSignal && boqUsable) {
     type = "BOQ";
     typeConfidence = 0.95;
@@ -631,12 +779,7 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
       ? false
       : saysIncl(upHd) || saysIncl(prHd) || headerCells.some(saysIncl);
 
-  const fingerprint =
-    headerRow >= 0
-      ? createHash("sha1")
-          .update(headerCells.map((c) => c.replace(/\s+/g, "").toLowerCase()).join(""))
-          .digest("hex")
-      : null;
+  const fingerprint = headerRow >= 0 ? headerFingerprint(headerCells) : null;
   const confs = [...Object.keys(columns).map((k) => det.conf[k] ?? 0.9), typeConfidence];
   return {
     sheetName,
@@ -649,7 +792,9 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
       Array.from({ length: colCount }, (_, i) => r[i] ?? "")
     ),
     colCount,
-    rowCount: Math.max(0, rows.length - dataStart),
+    rowCount: Math.max(0, (dataEndRow >= 0 ? dataEndRow : rows.length) - dataStart),
+    dataEndRow: dataEndRow >= 0 ? dataEndRow : undefined,
+    headerSpan,
     confidence: det.conf,
     evidence: det.ev,
     fingerprint,
@@ -791,7 +936,9 @@ export function parseWorkbook(
     const { type, headerRow } = insp;
     const columns = insp.columns as ColumnMap;
     const headerCells = insp.headerCells;
-    const dataStart = headerRow < 0 ? 0 : headerRow + (insp.merged ? 2 : 1);
+    const dataStart = headerRow < 0 ? 0 : headerRow + (insp.headerSpan ?? (insp.merged ? 2 : 1));
+    // 同一 sheet 内的第 2 张表（措施表/规费税金表）不按首表列位解析
+    const dataEnd = insp.dataEndRow && insp.dataEndRow > dataStart ? insp.dataEndRow : rows.length;
     const sheetFeeType = feeTypeOfSheet(sheetName);
 
     // merge continuation rows (multi-line feature/spec text split vertically)
@@ -799,7 +946,7 @@ export function parseWorkbook(
     // 否则小计行的金额数字会污染上一条的合价列（"1589.16\n4395.33" → Decimal 抛错）
     const SUBTOTAL_RE = /小计\s*$|合\s*计\s*$|总计\s*$/; // 名称以小计/合计/总计结尾的都是汇总行
     const merged: { cells: string[]; origIndex: number }[] = [];
-    for (let i = dataStart; i < rows.length; i++) {
+    for (let i = dataStart; i < dataEnd; i++) {
       const cells = rows[i];
       const nameCell = columns.name !== undefined ? (cells[columns.name] ?? "").trim() : "";
       const hasAnchor =
@@ -827,8 +974,38 @@ export function parseWorkbook(
       merged.push({ cells: [...cells], origIndex: i });
     }
 
+    // 打印版清单把一个逻辑行的名称拆到相邻行（「干作业成孔灌注」+「桩」两行夹住
+    // 一条只带编码/量/价的行）。名称列为空 → isItem=false → 整行当无名行丢掉（漏项）。
+    // 回收规则：锚点行缺名称时，取它上下 ±2 行内「无锚点且名称列有短文本」的碎片，
+    // 按行序拼回名称；被吃掉的行不再单独出项（它们本来也不是完整清单行）。
+    const hasAnchorCell = (cells: string[]) =>
+      (["seq", "code", "quantity", "unitPrice", "price"] as const).some(
+        (k) => columns[k] !== undefined && (cells[columns[k]!] ?? "").trim()
+      );
+    const nameCellOf = (cells: string[]) =>
+      columns.name !== undefined ? (cells[columns.name] ?? "").trim() : "";
+    const consumed = new Set<number>();
+    for (let mi = 0; mi < merged.length; mi++) {
+      if (consumed.has(mi) || !hasAnchorCell(merged[mi].cells) || nameCellOf(merged[mi].cells)) continue;
+      const frags: { idx: number; text: string }[] = [];
+      for (let d = -2; d <= 2; d++) {
+        const j = mi + d;
+        if (d === 0 || j < 0 || j >= merged.length || consumed.has(j)) continue;
+        if (hasAnchorCell(merged[j].cells)) continue;
+        const t = nameCellOf(merged[j].cells);
+        if (!t || t.length > 30) continue;
+        frags.push({ idx: j, text: t });
+      }
+      if (!frags.length || columns.name === undefined) continue;
+      frags.sort((a, b) => a.idx - b.idx);
+      merged[mi].cells[columns.name] = frags.map((f) => f.text).join("");
+      for (const f of frags) consumed.add(f.idx);
+    }
+
     const parsedRows: ParsedRow[] = [];
-    for (const { cells, origIndex } of merged) {
+    for (let mi = 0; mi < merged.length; mi++) {
+      if (consumed.has(mi)) continue;
+      const { cells, origIndex } = merged[mi];
       const get = (k: keyof ColumnMap) =>
         columns[k] !== undefined ? cells[columns[k]!] ?? "" : "";
       // 分页重复的表头行：≥2 个已映射列的值命中自己的列名同义词（"项目编码"/"项目名称"/"工程量"）→ 跳过
@@ -842,19 +1019,29 @@ export function parseWorkbook(
       // embedded "N、名称：X / 型号规格：Y" fields — scan the whole row
       const joined = cells.filter((c) => hasEmbedded(c)).join("\n");
       const emb = joined ? extractEmbedded(joined) : {};
-      let name = (get("name") || get("materialName") || emb["名称"] || "").trim();
+      // 询价/价格表常没有「材料名称」列，型号列就是材料身份——此时用规格兜底成名称，
+      // 否则整表被判成「无名行」全部丢弃（真实文件：名称及规格型号 / 只有规格型号）
+      const specFallback =
+        type === "QUOTATION" || type === "MATERIAL_PRICE"
+          ? (emb["型号规格"] || emb["规格"] || get("spec") || "").trim()
+          : "";
+      let name = (get("name") || get("materialName") || emb["名称"] || specFallback || "").trim();
       let feature = (get("feature") || joined).trim();
       const spec = (emb["型号规格"] || emb["规格"] || get("spec") || "").trim();
       const quoteName = (get("materialName") || emb["名称"] || name).trim();
 
       const hasNum = (k: keyof ColumnMap) => numVal(get(k)) !== null;
       // 措施/其他项目表里「安全文明施工费」等条目只有名称+金额，没有编码/量/单位——
-      // 名称+数字金额也算有效计价行，否则整表费用丢失
+      // 名称+数字金额也算有效计价行，否则整表费用丢失。
+      // 金额列写成「详见本标准表 E.4.2」（真实现金流在附表里）时同样是有效行，
+      // 只是金额落 0 等补——总价措施/其他项目表按「有名称即成行」处理。
+      const lumpSheet = sheetFeeType === "总价措施" || sheetFeeType === "其他项目";
       const isItem =
         (name.length > 0 || quoteName.length > 0) &&
         (hasNum("quantity") || hasNum("unitPrice") || hasNum("price") ||
           get("unit") !== "" || get("code") !== "" ||
-          (sheetFeeType !== null && hasNum("totalPrice")));
+          (sheetFeeType !== null && hasNum("totalPrice")) ||
+          (lumpSheet && sheetFeeType !== null));
       const isHeader =
         name.length > 0 && !isItem && !hasNum("quantity") && !hasNum("unitPrice") && !hasNum("price");
       const anyText = cells.some((c) => c.trim().length > 0);

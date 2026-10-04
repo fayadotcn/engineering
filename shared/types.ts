@@ -50,6 +50,18 @@ export interface BoqSemanticFeature {
 /** 清单费用口径：分部分项 | 单价措施 | 总价措施 | 其他项目（计价表体系分层）。 */
 export type FeeType = "分部分项" | "单价措施" | "总价措施" | "其他项目";
 
+/** 组价材料明细：定额用料表的单个未计价材料（主材/管件/法兰/配件…多材料并存）。
+ *  含量为「每清单单位」口径；price/amount 缺价为 null（缺价≠0，缺价使该行测算不完整）。 */
+export interface PlanMaterial {
+  name: string; // 材料名（定额用料表原文）
+  unit: string; // 材料单位
+  qty: string; // 每清单单位含量（含损耗）
+  price: string | null; // 单价
+  amount: string | null; // 合价 = qty × price
+  /** 该定额的首主材（与 detail.mainMaterial 对齐）；其余是管件/配件等辅助未计价材 */
+  primary?: boolean;
+}
+
 /** 组价方案行：一个清单项 = 若干定额子目组合（管道+试压+冲洗…）。
  *  金额均为「每清单单位」口径（定额单位倍数已折算）。 */
 export interface PricingPlanLine {
@@ -64,6 +76,8 @@ export interface PricingPlanLine {
   mainMaterialName: string | null;
   mainQty: string | null;
   mainPrice: string | null;
+  /** 全部未计价材料含量明细（主材+管件+法兰+配件…）；缺省=仅 mainMaterialName 单主材 */
+  materials?: PlanMaterial[];
   /** 该行小计（每清单单位） */
   subtotal: string;
   /** 建议增列：工作内容缺口推断的配套子目，人工确认前不计入测算价 */
@@ -164,12 +178,14 @@ export type ColumnRole =
   | "seq" | "code" | "name" | "feature" | "unit" | "quantity"
   | "unitPrice" | "totalPrice" | "materialName" | "spec" | "brand"
   | "price" | "laborPrice" | "machinePrice"
+  | "laborFee" | "machineFee" | "materialFee" | "mgmtFee" | "profitFee"
   | "region" | "period" | "priceType";
 
 export const COLUMN_ROLES: ColumnRole[] = [
   "seq", "code", "name", "feature", "unit", "quantity",
   "unitPrice", "totalPrice", "materialName", "spec", "brand",
   "price", "laborPrice", "machinePrice",
+  "laborFee", "machineFee", "materialFee", "mgmtFee", "profitFee",
   "region", "period", "priceType",
 ];
 
@@ -187,6 +203,11 @@ export const COLUMN_ROLE_LABEL: Record<ColumnRole, string> = {
   brand: "品牌",
   price: "材料单价(主材)",
   laborPrice: "人工单价",
+  laborFee: "其中:人工费(合价)",
+  machineFee: "其中:机械费(合价)",
+  materialFee: "其中:材料费(合价)",
+  mgmtFee: "其中:管理费(合价)",
+  profitFee: "其中:利润(合价)",
   machinePrice: "机械单价",
   region: "地区",
   period: "价格期",
@@ -367,6 +388,8 @@ export type WorkspaceView =
         minConfidence: number;
         typeConfidence: number;
         typeEvidence: string;
+        /** 按当前映射确认导入后会落库的清单行数；0 = 该表不会导入任何行（确认前红标） */
+        itemsToImport?: number;
       }[];
     };
 
@@ -482,6 +505,10 @@ export interface QuotaResultRow {
   calcPrice: string | null;
   deviation: string | null;
   needsMainPrice: boolean;
+  /** 缺价的具体材料名（管件/法兰/配件等辅助材料缺价也算不完整） */
+  missingMaterials?: string[];
+  /** 未匹配原因（quotaCode 为 null 时）：错档/材料冲突/错册/证据不足等，供核查 */
+  unmatchedReason?: string;
   quotaGcnr?: string | null;
   quotaFb?: string | null;
   quotaChapter?: string | null;

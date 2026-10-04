@@ -59,7 +59,7 @@ export function ProgressRing({ pct, done }: { pct: number; done?: boolean }) {
         <circle cx="21" cy="21" r={R} fill="none" stroke="var(--chart-track)" strokeWidth="5" />
         <circle
           cx="21" cy="21" r={R} fill="none"
-          stroke={done ? "var(--success-soft-fg)" : "var(--brand-ink)"}
+          stroke={done ? "var(--success-soft-fg)" : "var(--foreground)"}
           strokeWidth="5" strokeLinecap="round"
           strokeDasharray={`${p} ${100 - p}`}
           strokeDashoffset="25"

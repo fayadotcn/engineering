@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+/* 明暗切换走 <html data-theme="dark">（非 .dark class），dark: 工具变体同步映射过去 */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* 样式按职责分文件：设计变量 → 通用组件 → 数据表 → 页面 → 工作台外壳 → 对话 → 视图 */
 @import "../ui/styles/tokens.css";

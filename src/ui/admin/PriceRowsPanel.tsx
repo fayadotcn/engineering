@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { ConfirmDialog, toast } from "../primitives";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { readResponse } from "../api";
 
 // 数据集价格行面板：筛选 / 分页浏览 / 行内编辑 / 删除。
@@ -322,7 +324,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           PRICE_TYPE_LABEL[row.priceType] ?? row.priceType ?? "—"
         ) : field === "spec" && row.spec === row.name ? (
           // 报价单常无独立规格列（名称即型号），规格与名称相同不再重复展示
-          <span className="text-neutral-300">同名称</span>
+          <span className="text-muted-foreground">同名称</span>
         ) : (
           String(row[field] ?? "") || "—"
         )}
@@ -331,21 +333,21 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
   };
 
   return (
-    <div className="border-t border-neutral-100" aria-busy={loading || busy}>
+    <div className="border-t border-border" aria-busy={loading || busy}>
       {/* 筛选条 */}
       <div className="flex flex-wrap items-center gap-1.5 px-3 pt-3">
         <div className="relative">
           <Search
             size={12}
-            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-neutral-400"
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
           />
-          <input
+          <Input
             aria-label="搜索价格行"
             disabled={dirty || busy}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="搜索名称 / 规格 / 品牌…"
-            className="cost-input w-52 pl-7"
+            className="w-52 pl-7"
           />
         </div>
         <details className="cost-simple-more"><summary>更多筛选和信息</summary><div className="cost-more-body">
@@ -356,24 +358,26 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           <label><input type="checkbox" checked={details} disabled={dirty || busy} onChange={e => setDetails(e.target.checked)} />显示品牌、地区、日期和价格类型</label>
         </div></details>
         {filtering && (
-          <button onClick={reset} disabled={dirty || busy} className="cost-btn sm ghost">
+          <Button variant="ghost" size="xs" onClick={reset} disabled={dirty || busy}>
             <RotateCcw size={11} /> 重置
-          </button>
+          </Button>
         )}
-        <button
+        <Button
+          variant="outline"
+          size="xs"
           onClick={() => { if (adding) cancelAdd(); else setAdding(true); }}
           disabled={busy || loading || !!editing || !!error || q.trim() !== query}
           aria-pressed={adding}
-          className="cost-btn sm ml-auto"
+          className="ml-auto aria-pressed:bg-secondary"
         >
           {adding ? <X size={11} /> : <Plus size={11} />} {adding ? "取消新增" : "新增行"}
-        </button>
+        </Button>
       </div>
-      {editing && <div className="flex flex-wrap items-center gap-2 px-3 pt-2 text-xs text-neutral-500"><span>改好后点击保存。</span><button className="cost-btn primary" disabled={busy} onPointerDown={e => e.preventDefault()} onClick={() => { const row = data?.rows.find(r => r.id === editing.id); if (row) void commitEdit(row, editing.field, draft); }}>保存修改</button><button className="cost-btn" disabled={busy} onPointerDown={e => e.preventDefault()} onClick={cancelEdit}>取消</button></div>}
-      {error && <div className="cost-error" role="alert">{error}<button className="cost-btn" onClick={() => void load()} disabled={busy || loading}>重试</button></div>}
+      {editing && <div className="flex flex-wrap items-center gap-2 px-3 pt-2 text-xs text-muted-foreground"><span>改好后点击保存。</span><Button size="sm" disabled={busy} onPointerDown={e => e.preventDefault()} onClick={() => { const row = data?.rows.find(r => r.id === editing.id); if (row) void commitEdit(row, editing.field, draft); }}>保存修改</Button><Button variant="outline" size="sm" disabled={busy} onPointerDown={e => e.preventDefault()} onClick={cancelEdit}>取消</Button></div>}
+      {error && <div className="cost-error" role="alert">{error}<Button variant="outline" size="sm" onClick={() => void load()} disabled={busy || loading}>重试</Button></div>}
 
       {/* 数据表 */}
-      <div className="mt-2 max-h-96 overflow-auto border-t border-neutral-100">
+      <div className="mt-2 max-h-96 overflow-auto border-t border-border">
         <table className="xl-table text-[12px]">
           <thead>
             <tr>
@@ -389,14 +393,14 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           <tbody>
             {loading && !data && (
               <tr>
-                <td colSpan={visibleColumns.length + 2} className="py-8 text-center text-neutral-400" role="status">
+                <td colSpan={visibleColumns.length + 2} className="py-8 text-center text-muted-foreground" role="status">
                   <Loader2 size={14} className="mr-2 inline spin" />正在读取价格数据
                 </td>
               </tr>
             )}
             {adding && (
-              <tr style={{ background: "color-mix(in srgb, var(--brand-soft) 45%, var(--surface))" }}>
-                <td className="xl-rn text-[var(--brand-ink)]">新</td>
+              <tr style={{ background: "color-mix(in srgb, var(--secondary) 45%, var(--card))" }}>
+                <td className="xl-rn text-[var(--foreground)]">新</td>
                 {visibleColumns.map((c) => (
                   <td key={c.field} className="xl-edit">
                     {c.field === "priceType" ? (
@@ -434,7 +438,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
                   <button
                     onClick={() => void addRow()}
                     disabled={busy}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--success-soft-fg)] hover:bg-[var(--success-soft-bg)] disabled:opacity-40"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--success-soft-fg)] hover:bg-[var(--success-soft)] disabled:opacity-40"
                     title="保存"
                     aria-label="保存新增价格行"
                   >
@@ -443,7 +447,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
                   <button
                     onClick={cancelAdd}
                     disabled={busy}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 hover:bg-[var(--hover)]"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--accent)]"
                     title="取消"
                     aria-label="取消新增价格行"
                   >
@@ -455,12 +459,12 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
             {data?.rows.map((r, i) => (
               <tr key={r.id}>
                 <td className="xl-rn">{((data?.page ?? 1) - 1) * PAGE_SIZE + i + 1}</td>
-                {visibleColumns.map(c => cell(r, c.field, c.field === "price" ? "mono text-right" : c.field === "spec" ? "text-neutral-500" : undefined))}
+                {visibleColumns.map(c => cell(r, c.field, c.field === "price" ? "mono text-right" : c.field === "spec" ? "text-muted-foreground" : undefined))}
                 <td className="text-center">
                   <button
                     onClick={() => setDelRow(r)}
                     disabled={busy || loading || dirty || !!error}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-[var(--danger-soft-bg)] hover:text-[var(--danger)]"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-[var(--destructive-soft)] hover:text-[var(--destructive)]"
                     title="删除该行"
                     aria-label={`删除${r.name}`}
                   >
@@ -471,7 +475,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
             ))}
             {data && !data.rows.length && (
               <tr>
-                <td colSpan={visibleColumns.length + 2} className="py-8 text-center text-[12px] text-neutral-400">
+                <td colSpan={visibleColumns.length + 2} className="py-8 text-center text-[12px] text-muted-foreground">
                   {loading ? (
                     <Loader2 size={14} className="inline spin" />
                   ) : filtering ? (
@@ -485,7 +489,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           </tbody>
         </table>
         {loading && data && data.rows.length > 0 && (
-          <div className="flex items-center justify-center gap-1.5 border-t border-neutral-100 py-1.5 text-[11px] text-neutral-400">
+          <div className="flex items-center justify-center gap-1.5 border-t border-border py-1.5 text-[11px] text-muted-foreground">
             <Loader2 size={11} className="spin" /> 加载中…
           </div>
         )}
@@ -493,31 +497,33 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
 
       {/* 分页 */}
       <div className="flex items-center gap-2 px-3 py-2">
-        <span className="text-[11px] text-neutral-400">
+        <span className="text-[11px] text-muted-foreground">
           {data ? `共 ${data.total} 行` : " "}
         </span>
         <div className="ml-auto flex items-center gap-1">
-          <button
+          <Button
+            variant="outline"
+            size="icon-xs"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1 || loading || dirty || !!error}
-            className="cost-btn sm !px-1.5"
             title="上一页"
             aria-label="上一页"
           >
             <ChevronLeft size={12} />
-          </button>
-          <span className="px-1 text-[11.5px] text-neutral-500 tabular-nums">
+          </Button>
+          <span className="px-1 text-[11.5px] text-muted-foreground tabular-nums">
             {page} / {totalPages}
           </span>
-          <button
+          <Button
+            variant="outline"
+            size="icon-xs"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages || loading || dirty || !!error}
-            className="cost-btn sm !px-1.5"
             title="下一页"
             aria-label="下一页"
           >
             <ChevronRight size={12} />
-          </button>
+          </Button>
         </div>
       </div>
 

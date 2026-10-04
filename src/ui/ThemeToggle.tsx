@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { resolvedTheme, setThemeChoice, themeChoice, type ThemeChoice } from "./theme";
+import { Button } from "@/components/ui/button";
 
 const NEXT: Record<ThemeChoice, ThemeChoice> = { auto: "light", light: "dark", dark: "auto" };
 const MODE_LABEL: Record<ThemeChoice, string> = { auto: "跟随系统", light: "浅色", dark: "深色" };
@@ -34,15 +35,17 @@ export function ThemeToggle({ className }: { className?: string }) {
 
   const Icon = ICON[choice];
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
       type="button"
       onClick={toggle}
       aria-label={`主题：${MODE_LABEL[choice]}（当前${resolved === "dark" ? "深色" : "浅色"}），点击切换`}
       title={`主题：${MODE_LABEL[choice]}${choice === "auto" ? `（${resolved === "dark" ? "深色" : "浅色"}）` : ""}`}
       aria-pressed={resolved === "dark"}
-      className={["icon-btn", className].filter(Boolean).join(" ")}
+      className={className}
     >
       <Icon size={15} />
-    </button>
+    </Button>
   );
 }

@@ -2,6 +2,13 @@
 // 数值为演示级参考值，来源标记 QUOTA_BUILTIN；接入正式定额库（如四川2020）
 // 时只需替换本表，匹配与组价逻辑不变。
 
+/** 定额未计价材料（含量/耗量）：qtyPerUnit 已折算为每清单单位 */
+export interface QuotaMaterial {
+  name: string; // 材料名（zh_cl.clmc）
+  unit: string; // 材料单位（zh_cl.cldw）
+  qtyPerUnit: number; // 每清单单位含量
+}
+
 export interface QuotaEntry {
   code: string; // 定额编号
   name: string; // 子目名称
@@ -11,14 +18,19 @@ export interface QuotaEntry {
   material: number; // 辅材费
   machine: number; // 机械费
   mainQtyPerUnit: number; // 主材耗量 / 每清单单位（含损耗）
+  /** 全部未计价材料及含量（管件/法兰/配件…多主材并存）；缺省 = 只有 mainQtyPerUnit 单一主材 */
+  materials?: QuotaMaterial[];
   /** 定额详情（解释口径）：工程内容/分册/章节路径/基价/主材名 */
   detail?: { gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string };
   match: {
     category?: string;
     material?: RegExp;
+    /** 材料特征原文（冲突扣分比对用）：regex 测命中，label 测「双方都有但不同」 */
+    materialLabel?: string;
     diameter?: RegExp;
     spec?: RegExp;
     connection?: RegExp;
+    connectionLabel?: string;
     system?: string;
     keywords?: RegExp;
   };

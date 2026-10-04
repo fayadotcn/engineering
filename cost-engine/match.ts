@@ -16,6 +16,17 @@ export const specNorm = (s: string) =>
     .replace(/^(?:DN|DE|Φ|φ)/, "")
     .replace(/[*×X]/g, "x");
 
+/** 规格兼容：归一化相等，或复合芯规格的每段都能在对方找到——
+ *  询价「4×35」应命中清单电缆「4x35+1x16」（+PE 段是辅芯，报价通常只写主芯） */
+export const specCompatible = (a: string, b: string) => {
+  const na = specNorm(a), nb = specNorm(b);
+  if (na === nb) return true;
+  const seg = (s: string) => s.split("+").filter(Boolean).sort();
+  const [sa, sb] = [seg(na), seg(nb)];
+  const [few, many] = sa.length <= sb.length ? [sa, sb] : [sb, sa];
+  return few.length > 0 && few.every((p) => many.includes(p));
+};
+
 function scorePair(boq: BoqItemDTO, q: QuotationItemDTO): number {
   const bf = boq.features ?? {};
   const qf = q.features ?? {};
@@ -25,7 +36,7 @@ function scorePair(boq: BoqItemDTO, q: QuotationItemDTO): number {
   const bSpec = bf.diameter ?? bf.specification;
   const qSpec = qf.diameter ?? qf.specification ?? q.spec;
   if (bSpec && qSpec) {
-    if (specNorm(bSpec) === specNorm(qSpec)) score += 45;
+    if (specCompatible(bSpec, qSpec)) score += 45;
     else return 0; // spec conflict -> different material
   }
 

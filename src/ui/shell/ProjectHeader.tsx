@@ -1,12 +1,13 @@
 "use client";
-import { useState } from "react";
-import { ArrowLeft, BarChart3, ClipboardList, Database, FileSpreadsheet, LayoutDashboard, MessageCircle, Settings2, Upload } from "lucide-react";
+import { BarChart3, ClipboardList, Database, FileSpreadsheet, Layers3, LayoutDashboard, MessageCircle, Settings2, Upload } from "lucide-react";
 import { isPricableItem } from "@shared/types";
+import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "../ThemeToggle";
 import { useStore } from "../store";
 import { isBusy, isDirty } from "../busy";
 import { cn } from "../views/shared";
 import { resultKey, SECTIONS, sectionOf, type SectionId } from "../sections";
+import { ProjectSwitch, type ProjectEntry } from "./ProjectSwitch";
 
 const ICON: Record<SectionId, typeof ClipboardList> = {
   overview: LayoutDashboard,
@@ -16,27 +17,13 @@ const ICON: Record<SectionId, typeof ClipboardList> = {
   settings: Settings2,
 };
 
-/** 工程名点击即可改名：Enter 保存，Esc 放弃。 */
-function ProjectName() {
-  const s = useStore();
-  const [editing, setEditing] = useState<string | null>(null);
-  const commit = async () => {
-    const name = editing?.trim();
-    if (name && name !== s.projectName) await s.renameProject(name);
-    setEditing(null);
-  };
-  if (editing !== null) return <input className="wb-name-input" autoFocus value={editing} maxLength={120} aria-label="工程名称"
-    onChange={(e) => setEditing(e.target.value)} onBlur={() => void commit()}
-    onKeyDown={(e) => { if (e.key === "Enter") void commit(); if (e.key === "Escape") setEditing(null); }} />;
-  return <button className="wb-name" title="点击修改工程名称" onClick={() => setEditing(s.projectName)}>{s.projectName || "工程"}</button>;
-}
-
-export function ProjectHeader({ section, onOpen, onUpload, convOpen, onOpenConv }: {
+export function ProjectHeader({ section, onOpen, onUpload, convOpen, onOpenConv, projects }: {
   section: SectionId;
   onOpen: (id: SectionId) => void;
   onUpload: () => void;
   convOpen: boolean;
   onOpenConv: () => void;
+  projects: ProjectEntry[];
 }) {
   const s = useStore();
   const blocked = isBusy(s) || isDirty(s) || !s.ready;
@@ -51,19 +38,23 @@ export function ProjectHeader({ section, onOpen, onUpload, convOpen, onOpenConv 
   };
   return <header className="wb-header">
     <div className="wb-top">
-      {!convOpen && <button className="icon-btn wb-conv-open" onClick={onOpenConv} title="展开造价助手" aria-label="展开造价助手">
+      {!convOpen && <Button variant="ghost" size="icon" className="wb-conv-open" onClick={onOpenConv} title="展开造价助手" aria-label="展开造价助手">
         <MessageCircle size={16} />{pendingAll > 0 && <i>{pendingAll}</i>}
-      </button>}
+      </Button>}
       <nav className="wb-crumbs" aria-label="位置">
-        <a href="/" className="cost-back"><ArrowLeft size={14} />工程项目</a>
-        <span>/</span>
-        <span className="wb-avatar" aria-hidden="true">{(s.projectName || "造").trim()[0]?.toUpperCase()}</span>
-        <ProjectName />
+        <a href="/" className="wb-brand" title="安装造价 · 返回工程列表" aria-label="安装造价 · 返回工程列表">
+          <span className="brand-tile"><Layers3 size={14} /></span>
+          <span className="wb-brand-name">安装造价</span>
+        </a>
+        <span aria-hidden="true">/</span>
+        <ProjectSwitch projects={projects} />
       </nav>
       <div className="cost-actions">
         <ThemeToggle className="wb-theme" />
-        <a className="cost-btn ghost" href="/admin" title="各工程共用的材料价格与定额库"><Database size={13} />材料与定额库</a>
-        <button className="cost-btn primary" disabled={blocked} onClick={onUpload}><Upload size={13} />上传资料</button>
+        <Button variant="ghost" size="sm" asChild>
+          <a href="/admin" title="各工程共用的材料价格与定额库"><Database size={13} />材料与定额库</a>
+        </Button>
+        <Button size="sm" disabled={blocked} onClick={onUpload}><Upload size={13} />上传资料</Button>
       </div>
     </div>
     <nav className="wb-nav" aria-label="工程工作区">

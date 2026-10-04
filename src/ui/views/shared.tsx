@@ -105,9 +105,9 @@ export function ExcelHead({
             className={cn(
               "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors",
               filtered || sortDir
-                ? "border-transparent bg-[var(--brand-soft)] text-[var(--brand-ink)]"
-                : "border-neutral-300/70 text-neutral-500 hover:border-neutral-400 hover:bg-[var(--active)] hover:text-neutral-700",
-              open && "border-[var(--brand-ink)] bg-[var(--brand-soft)] text-[var(--brand-ink)]"
+                ? "border-transparent bg-[var(--secondary)] text-[var(--foreground)]"
+                : "border-input/70 text-muted-foreground hover:border-input hover:bg-[var(--accent)] hover:text-foreground",
+              open && "border-[var(--foreground)] bg-[var(--secondary)] text-[var(--foreground)]"
             )}
             title="排序与筛选"
             aria-label={`${label}排序与筛选`}
@@ -123,7 +123,7 @@ export function ExcelHead({
           <div
             data-excel-menu
             aria-label={`${label}筛选与排序`}
-            className="menu-in fixed z-40 w-52 overflow-auto rounded-[12px] border border-neutral-200 bg-[var(--surface)] p-1 text-left font-normal shadow-[var(--shadow-menu)]"
+            className="menu-in fixed z-40 w-52 overflow-auto rounded-[12px] border border-border bg-[var(--card)] p-1 text-left font-normal shadow-[var(--shadow-md)]"
             style={{ left: pos.left, top: pos.top, bottom: pos.bottom, maxHeight: 320 }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -135,15 +135,15 @@ export function ExcelHead({
                     onClick={() => { onSort(sortDir === d ? null : d); setOpen(false); btnRef.current?.focus(); }}
                     aria-pressed={sortDir === d}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--hover)]",
-                      sortDir === d && "font-medium text-[var(--brand-ink)]"
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--accent)]",
+                      sortDir === d && "font-medium text-[var(--foreground)]"
                     )}
                   >
                     <Icon size={12} /> {l}
                     {sortDir === d && <span className="ml-auto text-[10px]">✓</span>}
                   </button>
                 ))}
-                <div className="my-1 h-px bg-neutral-100" />
+                <div className="my-1 h-px bg-muted" />
               </>
             )}
             {onText && (
@@ -154,35 +154,35 @@ export function ExcelHead({
                   value={text ?? ""}
                   onChange={(e) => onText(e.target.value)}
                   placeholder="包含文本…"
-                  className="cost-input w-full"
+                  className="cost-input w-full !h-7"
                 />
               </div>
             )}
             {options && (
               <>
-                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--hover)]">
+                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--accent)]">
                   <input
                     type="checkbox"
                     checked={!selected || selected.size === options.length}
                     onChange={onAll}
-                    className="accent-[var(--brand-accent)]"
+                    className="accent-[var(--primary)]"
                   />
-                  <span className="text-neutral-600">（全选）</span>
+                  <span className="text-muted-foreground">（全选）</span>
                 </label>
                 <div className="max-h-48 overflow-auto">
                   {options.map((o) => (
                     <label
                       key={o.v}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-[var(--hover)]"
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-[var(--accent)]"
                     >
                       <input
                         type="checkbox"
                         checked={!selected || selected.has(o.v)}
                         onChange={() => onToggle?.(o.v)}
-                        className="accent-[var(--brand-accent)]"
+                        className="accent-[var(--primary)]"
                       />
                       <span className="min-w-0 flex-1 truncate">{o.v || "（空白）"}</span>
-                      <span className="text-[10.5px] text-neutral-400">{o.n}</span>
+                      <span className="text-[10.5px] text-muted-foreground">{o.n}</span>
                     </label>
                   ))}
                 </div>

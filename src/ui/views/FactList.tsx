@@ -1,5 +1,6 @@
 "use client";
 import { useStore } from "../store";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { EmptyState } from "../primitives";
 import { cn, SOURCE_LABEL } from "./shared";
 
@@ -24,13 +25,13 @@ export function FactList() {
           {facts.map((f, fi) => (
             <tr key={f.id}>
               <td className="xl-rn">{fi + 1}</td>
-              <td className="text-neutral-500">{f.factType}</td>
+              <td className="text-muted-foreground">{f.factType}</td>
               <td>{f.key}</td>
               <td className="max-w-80 truncate" title={f.value}>{f.value}</td>
               <td>
-                <span className={cn("chip", f.source === "INFERRED" && "warn")}>
+                <Badge variant={f.source === "INFERRED" ? "warning" : "secondary"}>
                   {SOURCE_LABEL[f.source] ?? f.source}
-                </span>
+                </Badge>
               </td>
             </tr>
           ))}

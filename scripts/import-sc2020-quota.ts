@@ -112,10 +112,16 @@ async function importBook(zy: DatabaseSync, de: DatabaseSync, p: string, label: 
     const scale = unitScale(r.dw);
     const bu = baseUnit(r.dw);
 
-    // 主材挑选：与子目名称重合度最高 → 单位与定额基单位一致 → 耗量最大
+    // 全部未计价材料都入库（管件/法兰/配件/多主材是组价缺口的直接证据），
+    // mainMaterial/mainQtyPerUnit 仍取与子目名称重合度最高的首主材做兼容。
     const yls = (ylMap.get(r.debh) ?? [])
       .map((y) => ({ ...y, cl: clMap.get(y.clbh) }))
       .filter((y) => y.cl?.clmc);
+    const materials = yls.map((y) => ({
+      name: y.cl!.clmc,
+      unit: y.cl!.cldw ?? "",
+      qtyPerUnit: Number((y.clyl / scale).toFixed(4)),
+    }));
     let mainName = "";
     let mainQty = 0;
     if (yls.length) {
@@ -159,6 +165,7 @@ async function importBook(zy: DatabaseSync, de: DatabaseSync, p: string, label: 
         chapter: chapterOf(r.zjbh),
         mainMaterial: mainName,
       }),
+      materials: JSON.stringify(materials),
     };
   });
 

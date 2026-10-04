@@ -1,7 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Database, FileSpreadsheet, Search, Upload } from "lucide-react";
 import { EmptyState, toast } from "../primitives";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { readResponse } from "../api";
 
 interface DatasetRow {
@@ -37,9 +40,9 @@ const PRICE_TYPE_LABEL: Record<string, string> = {
   LABOR: "人工费",
 };
 
-const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  PARSED: { label: "已入库", cls: "ok" },
-  PENDING: { label: "待核对", cls: "warn" },
+const STATUS_LABEL: Record<string, { label: string; cls: BadgeVariant }> = {
+  PARSED: { label: "已入库", cls: "success" },
+  PENDING: { label: "待核对", cls: "warning" },
   FAILED: { label: "失败", cls: "danger" },
 };
 
@@ -138,40 +141,39 @@ export function PriceLibraryView() {
 
       <div className="xl-sheet mb-4 rounded-lg p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <Database size={15} className="text-neutral-400" />
+          <Database size={15} className="text-muted-foreground" />
           <span className="text-[13px] font-medium">贡献一份价格表</span>
-          <span className="text-[11px] text-neutral-400">Excel / CSV 都行，系统自动识别列</span>
+          <span className="text-[11px] text-muted-foreground">Excel / CSV 都行，系统自动识别列</span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <input
+          <Input
             aria-label="地区（可选）"
             placeholder="地区，如 四川"
             value={region}
             onChange={(e) => setRegion(e.target.value)}
-            className="cost-input w-28"
+            className="w-28"
           />
-          <input
+          <Input
             aria-label="期次（可选）"
             placeholder="期次，如 2026-09"
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
-            className="cost-input w-32"
+            className="w-32"
           />
-          <input
+          <Input
             aria-label="品牌（可选）"
             placeholder="品牌（可选）"
             value={brand}
             onChange={(e) => setBrand(e.target.value)}
-            className="cost-input w-28"
+            className="w-28"
           />
-          <button
-            className="cost-btn primary"
+          <Button
             disabled={uploading}
             onClick={() => fileRef.current?.click()}
           >
             <Upload size={13} />
             {uploading ? "正在上传…" : "选择价格表上传"}
-          </button>
+          </Button>
           <input
             ref={fileRef}
             type="file"
@@ -188,16 +190,16 @@ export function PriceLibraryView() {
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="relative">
-          <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-          <input
+          <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
             aria-label="搜索材料价格"
             placeholder="搜材料名、规格或品牌，如 电缆、DN100"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="cost-input w-72 pl-7"
+            className="w-72 pl-7"
           />
         </div>
-        <span className="text-[11px] text-neutral-400">
+        <span className="text-[11px] text-muted-foreground">
           库里共 {priceCount.toLocaleString()} 条价格{quotaCount ? `、${quotaCount.toLocaleString()} 条定额` : ""}
           {searching ? " · 搜索中…" : ""}
         </span>
@@ -225,18 +227,18 @@ export function PriceLibraryView() {
                 <tr key={i}>
                   <td className="xl-rn">{i + 1}</td>
                   <td className="max-w-56 truncate" title={r.name}>{r.name}</td>
-                  <td className="max-w-48 truncate text-neutral-500" title={r.spec}>{r.spec === r.name ? "" : r.spec}</td>
-                  <td className="text-neutral-500">{r.unit}</td>
-                  <td className="max-w-24 truncate text-neutral-500" title={r.brand}>{r.brand}</td>
+                  <td className="max-w-48 truncate text-muted-foreground" title={r.spec}>{r.spec === r.name ? "" : r.spec}</td>
+                  <td className="text-muted-foreground">{r.unit}</td>
+                  <td className="max-w-24 truncate text-muted-foreground" title={r.brand}>{r.brand}</td>
                   <td className="mono text-right font-medium">{fmtMoney(r.price)}</td>
-                  <td className="max-w-20 truncate text-neutral-500" title={r.region}>{r.region}</td>
-                  <td className="text-neutral-500">{r.period}</td>
+                  <td className="max-w-20 truncate text-muted-foreground" title={r.region}>{r.region}</td>
+                  <td className="text-muted-foreground">{r.period}</td>
                   <td>
-                    <span className="chip !py-px !text-[10px]">
+                    <Badge variant="secondary" className="!py-px !text-[10px]" >
                       {PRICE_TYPE_LABEL[r.priceType] ?? r.priceType ?? "—"}
-                    </span>
+                    </Badge>
                   </td>
-                  <td className="max-w-40 truncate text-[11px] text-neutral-400" title={r.source}>{r.source}</td>
+                  <td className="max-w-40 truncate text-[11px] text-muted-foreground" title={r.source}>{r.source}</td>
                 </tr>
               ))}
             </tbody>
@@ -254,9 +256,9 @@ export function PriceLibraryView() {
       {(datasets ?? []).length > 0 && (
         <>
           <div className="mb-2 mt-5 flex items-center justify-between">
-            <span className="text-[12px] font-medium text-neutral-600">已收集的数据表</span>
+            <span className="text-[12px] font-medium text-muted-foreground">已收集的数据表</span>
             {pendingCount > 0 && (
-              <a href="/admin" className="text-[11.5px] text-[var(--brand-ink)] hover:underline">
+              <a href="/admin" className="text-[11.5px] text-[var(--foreground)] hover:underline">
                 {pendingCount} 份待核对列识别，去数据管理处理 →
               </a>
             )}
@@ -279,23 +281,23 @@ export function PriceLibraryView() {
                     <td className="xl-rn">{i + 1}</td>
                     <td>
                       <div className="flex items-center gap-2">
-                        <FileSpreadsheet size={13} className="shrink-0 text-neutral-400" />
+                        <FileSpreadsheet size={13} className="shrink-0 text-muted-foreground" />
                         <span className="max-w-72 truncate" title={d.filename}>{d.name}</span>
-                        {!d.active && <span className="text-[10px] text-neutral-400">（已停用）</span>}
+                        {!d.active && <span className="text-[10px] text-muted-foreground">（已停用）</span>}
                       </div>
                     </td>
                     <td>
-                      <span className="chip">{d.kindLabel}</span>
+                      <Badge variant="secondary" >{d.kindLabel}</Badge>
                     </td>
-                    <td className="mono text-right text-neutral-500">
+                    <td className="mono text-right text-muted-foreground">
                       {(d.materialRows || d.quotaRows || d.rowCount).toLocaleString()}
                     </td>
                     <td>
-                      <span className={`chip ${STATUS_LABEL[d.status]?.cls ?? ""}`}>
+                      <Badge variant={STATUS_LABEL[d.status]?.cls ?? "secondary"}>
                         {STATUS_LABEL[d.status]?.label ?? d.status}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="text-[11px] text-neutral-400">
+                    <td className="text-[11px] text-muted-foreground">
                       {new Date(d.createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}
                     </td>
                   </tr>

@@ -59,6 +59,14 @@ export interface RunRecord {
   events: AgentEventDTO[];
 }
 
+/** 工作台首屏一次所需的全套数据；服务端预载（initial prop）与客户端 API 拉取产出同一结构。 */
+export interface WorkbenchInit {
+  p: ProjectPayload;
+  items: BoqItemDTO[];
+  runs: RunRecord[];
+  summary: ProjectSummary;
+}
+
 export interface ItemChange { field: string; label: string; from: string | null; to: string | null }
 
 export type NewItemPayload = {

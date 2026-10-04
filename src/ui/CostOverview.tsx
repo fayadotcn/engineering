@@ -1,5 +1,6 @@
 "use client";
 import { ArrowRight, Check, FolderOpen, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useStore } from "./store";
 import { DISCIPLINE_COLOR } from "./colors";
 import { DisciplineDonut, ProgressRing } from "./dashboard";
@@ -63,7 +64,7 @@ export function CostOverview({ onUpload }: { onUpload?: () => void }) {
     <ol className="cost-steps">{steps.map((st, i) => <li key={st.label} className={`${st.done ? "done" : ""} ${i === currentStep ? "current" : ""}`}><button onClick={st.click}><i>{st.done ? <Check size={11} /> : i + 1}</i>{st.label}</button></li>)}</ol>
 
     <div className="dash-hero">
-      <div className="cost-next-step"><div><small>现在做这一步</small><h3>{next.title}</h3><p>{next.text}</p></div><button className="cost-btn primary" disabled={busy} onClick={next.click}>{next.icon}{next.action}<ArrowRight size={14} /></button></div>
+      <div className="cost-next-step"><div><small>现在做这一步</small><h3>{next.title}</h3><p>{next.text}</p></div><Button disabled={busy} onClick={next.click}>{next.icon}{next.action}<ArrowRight size={14} /></Button></div>
       {hasBoq && <div className="dash-kpis">
         <div className="dash-kpi">
           <span>当前总价（暂计）</span>
@@ -104,8 +105,8 @@ export function CostOverview({ onUpload }: { onUpload?: () => void }) {
     {!!driftFiles.length ? null : (r?.declaredChecked ?? 0) > 0 && (
       <p className="cost-file-hint" style={{ color: "var(--success-soft-fg)" }}>✓ 已与 {r!.declaredChecked} 份源表的申报汇总口径核对，无差异。</p>
     )}
-    {!!driftFiles.length && <details className="cost-fact-details cost-drift"><summary>⚠ 与源表申报口径有 {driftCount} 处差异，最大 {wan(String(Math.abs(driftMax.diff)))}（{driftMax.label}）</summary><div className="xl-sheet">{driftFiles.map(d => <div key={d.file}>{driftFiles.length > 1 && <p className="cost-file-hint cost-drift-file">按「{d.file}」口径</p>}<table className="xl-table"><thead><tr><th>口径</th><th className="text-right">源表申报（元）</th><th className="text-right">本次计算（元）</th><th className="text-right">差异</th></tr></thead><tbody>{d.checks.map(c => <tr key={c.label}><td>{c.label}</td><td className="mono text-right">{money(String(c.declared))}</td><td className="mono text-right">{money(String(c.computed))}</td><td className={`mono text-right ${Math.abs(c.pct) > 0.05 ? "warn" : ""}`} title={c.note}>{c.diff > 0 ? "+" : ""}{money(String(c.diff))}（{(c.pct * 100).toFixed(1)}%）{c.note && <small className="block text-[10px] text-neutral-400">{c.note}</small>}</td></tr>)}</tbody></table></div>)}<p className="cost-file-hint">源表申报来自上传文件里的单位工程汇总表；差异常见于规费未取费、暂列金额口径或合价四舍五入。可在台账补录「规费费率」等设置后重新汇总。</p></div></details>}
+    {!!driftFiles.length && <details className="cost-fact-details cost-drift"><summary>⚠ 与源表申报口径有 {driftCount} 处差异，最大 {wan(String(Math.abs(driftMax.diff)))}（{driftMax.label}）</summary><div className="xl-sheet">{driftFiles.map(d => <div key={d.file}>{driftFiles.length > 1 && <p className="cost-file-hint cost-drift-file">按「{d.file}」口径</p>}<table className="xl-table"><thead><tr><th>口径</th><th className="text-right">源表申报（元）</th><th className="text-right">本次计算（元）</th><th className="text-right">差异</th></tr></thead><tbody>{d.checks.map(c => <tr key={c.label}><td>{c.label}</td><td className="mono text-right">{money(String(c.declared))}</td><td className="mono text-right">{money(String(c.computed))}</td><td className={`mono text-right ${Math.abs(c.pct) > 0.05 ? "warn" : ""}`} title={c.note}>{c.diff > 0 ? "+" : ""}{money(String(c.diff))}（{(c.pct * 100).toFixed(1)}%）{c.note && <small className="block text-[10px] text-muted-foreground">{c.note}</small>}</td></tr>)}</tbody></table></div>)}<p className="cost-file-hint">源表申报来自上传文件里的单位工程汇总表；差异常见于规费未取费、暂列金额口径或合价四舍五入。可在台账补录「规费费率」等设置后重新汇总。</p></div></details>}
     <details className="cost-fact-details"><summary>查看费用明细</summary><div className="xl-sheet"><table className="xl-table"><thead><tr><th>专业</th><th className="text-right">金额（元）</th></tr></thead><tbody>{r?.disciplines.map(d => <tr key={d.key}><td>{d.label}</td><td className="mono text-right">{money(d.amount)}</td></tr>)}</tbody></table>{!r?.disciplines.length && <p className="cost-file-hint">上传清单后显示费用明细。</p>}</div><p className="cost-file-hint">税前金额：{money(r?.fees.preTax ?? "0")} 元</p></details>
-    <details className="cost-fact-details"><summary>查看操作记录</summary>{s.receipts.slice(0, 5).map(receipt => <div className="cost-recent-row" key={receipt.id}><div><p>{receipt.summary}</p><small>{new Date(receipt.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}</small></div></div>)}{!s.receipts.length && <p className="cost-file-hint">还没有操作记录。</p>}<button className="cost-btn" onClick={() => s.setActiveView("view:receipts")}>全部记录</button></details>
+    <details className="cost-fact-details"><summary>查看操作记录</summary>{s.receipts.slice(0, 5).map(receipt => <div className="cost-recent-row" key={receipt.id}><div><p>{receipt.summary}</p><small>{new Date(receipt.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}</small></div></div>)}{!s.receipts.length && <p className="cost-file-hint">还没有操作记录。</p>}<Button variant="outline" size="sm" onClick={() => s.setActiveView("view:receipts")}>全部记录</Button></details>
   </div>;
 }

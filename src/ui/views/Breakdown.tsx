@@ -36,9 +36,9 @@ export function Breakdown({ view }: { view: Extract<WorkspaceView, { kind: "brea
         })}
       </svg>
       <div className="min-w-0 flex-1 basis-80">
-        <div className="mono mb-4 text-xl font-medium">{fmtMoney(total)} <span className="text-xs font-normal text-neutral-400">元</span></div>
+        <div className="mono mb-4 text-xl font-medium">{fmtMoney(total)} <span className="text-xs font-normal text-muted-foreground">元</span></div>
         {view.slices.map((s, i) => (
-          <div key={s.key} className="flex items-center gap-3 border-b border-neutral-100 py-1.5 text-[12.5px] max-[420px]:flex-wrap max-[420px]:gap-x-2.5 max-[420px]:gap-y-0.5">
+          <div key={s.key} className="flex items-center gap-3 border-b border-border py-1.5 text-[12.5px] max-[420px]:flex-wrap max-[420px]:gap-x-2.5 max-[420px]:gap-y-0.5">
             <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: colorOf(s, i) }} />
             <span className="w-24 shrink-0 truncate max-[420px]:w-auto max-[420px]:min-w-0 max-[420px]:flex-1" title={s.label}>{s.label}</span>
             <div className="h-1.5 min-w-8 flex-1 rounded max-[420px]:min-w-6" style={{ background: "var(--chart-track)" }}>
@@ -46,8 +46,8 @@ export function Breakdown({ view }: { view: Extract<WorkspaceView, { kind: "brea
             </div>
             <span className="mono w-28 shrink-0 text-right max-[420px]:w-auto">{fmtMoney(s.amount)}</span>
             <span className="hidden max-[420px]:block max-[420px]:basis-full" aria-hidden="true" />
-            <span className="mono w-12 shrink-0 text-right text-neutral-500 max-[420px]:w-auto max-[420px]:text-left">{(s.share * 100).toFixed(1)}%</span>
-            <span className="w-14 shrink-0 whitespace-nowrap text-right text-[11px] text-neutral-400 max-[420px]:ml-auto max-[420px]:w-auto">{s.count} 项</span>
+            <span className="mono w-12 shrink-0 text-right text-muted-foreground max-[420px]:w-auto max-[420px]:text-left">{(s.share * 100).toFixed(1)}%</span>
+            <span className="w-14 shrink-0 whitespace-nowrap text-right text-[11px] text-muted-foreground max-[420px]:ml-auto max-[420px]:w-auto">{s.count} 项</span>
           </div>
         ))}
         {(() => {

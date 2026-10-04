@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../store";
 import type { WorkspaceView } from "@shared/types";
 import { cn, fmtMoney } from "./shared";
@@ -44,19 +45,19 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
                 key={r.seq}
                 style={
                   r.level === "total"
-                    ? { background: "color-mix(in srgb, var(--brand-accent) 8%, var(--surface))" }
+                    ? { background: "color-mix(in srgb, var(--primary) 8%, var(--card))" }
                     : r.level === "subtotal"
-                      ? { background: "var(--sidebar)" }
+                      ? { background: "var(--muted)" }
                       : undefined
                 }
               >
-                <td className="text-center text-neutral-500">{r.seq}</td>
+                <td className="text-center text-muted-foreground">{r.seq}</td>
                 <td className={cn("truncate", r.level !== "leaf" && "font-medium")} title={r.name}>{r.name}</td>
-                {details && <><td className="truncate text-neutral-500" title={r.basis}>{r.basis}</td><td className="mono text-right">{r.rate ?? "—"}</td></>}
+                {details && <><td className="truncate text-muted-foreground" title={r.basis}>{r.basis}</td><td className="mono text-right">{r.rate ?? "—"}</td></>}
                 <td className={cn("mono text-right", r.level === "total" && "text-[13px] font-semibold", r.level === "subtotal" && "font-medium")}>
                   {fmtMoney(r.amount)}
                 </td>
-                <td className="truncate text-[11.5px] text-neutral-400" title={r.note ?? ""}>{r.note ?? ""}</td>
+                <td className="truncate text-[11.5px] text-muted-foreground" title={r.note ?? ""}>{r.note ?? ""}</td>
               </tr>
             ))}
           </tbody>
@@ -65,13 +66,13 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
       {view.indicators?.length ? (
         <div className="mt-3 flex flex-wrap justify-end gap-2">
           {view.indicators.map((i) => (
-            <span key={i.label} className="chip">{i.label} <b className="mono font-medium">{i.value}</b></span>
+            <Badge variant="secondary" key={i.label} >{i.label} <b className="mono font-medium">{i.value}</b></Badge>
           ))}
         </div>
       ) : null}
-      <div className="mt-3 flex items-baseline justify-end gap-2 text-[12px] text-neutral-500">
+      <div className="mt-3 flex items-baseline justify-end gap-2 text-[12px] text-muted-foreground">
         含税工程造价
-        <span className="mono text-xl font-semibold" style={{ color: "var(--ink-1)" }}>
+        <span className="mono text-xl font-semibold" style={{ color: "var(--foreground)" }}>
           {fmtMoney(view.grandTotal)}
         </span>
         元

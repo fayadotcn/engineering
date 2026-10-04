@@ -90,10 +90,33 @@ function partsFromPlan(item: BoqItemDTO, qty: Decimal): Parts | null {
   };
 }
 
+/**
+ * 表-08「其中：人工费/材料费/机械费/管理费/利润」分解列（**合价口径**，
+ * mapRow 落进 rawCells.__decomp）。有真值就直接采信：人工/材料/机械三分量
+ * 都有了才算 directCost，管利由 other 残差承担。缺列 = null（不猜），
+ * 非数值/空串按未知处理——错的分量比没有更糟。
+ */
+function decompParts(item: BoqItemDTO): Parts | null {
+  const d = item.rawCells?.__decomp;
+  if (!d || typeof d !== "object") return null;
+  const num = (k: string): Decimal | null => {
+    const raw = (d as Record<string, unknown>)[k];
+    const t = String(raw ?? "").trim();
+    if (!t || !Number.isFinite(Number(t))) return null;
+    return D(t);
+  };
+  const labor = num("labor"), material = num("material"), machine = num("machine");
+  if (labor === null && material === null && machine === null) return null;
+  return { labor, material, machine, source: "imported" };
+}
+
 function itemParts(item: BoqItemDTO): Parts {
   const qty = D(item.quantity);
   const plan = partsFromPlan(item, qty);
   if (plan) return plan;
+
+  const decomp = decompParts(item);
+  if (decomp) return decomp;
 
   const { labor: laborU, machine: machineU } = legacyCostColumns(item);
   const mainMat = D(item.mainMaterialPrice ?? 0);

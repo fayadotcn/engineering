@@ -1,8 +1,10 @@
 "use client";
 import { useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../store";
 import { FileSpreadsheet } from "lucide-react";
 import { EmptyState, toast } from "../primitives";
+import { Button } from "@/components/ui/button";
 import { cn } from "./shared";
 
 /* ---------------- 变更记录 ----------------
@@ -53,29 +55,30 @@ export function ReceiptsView() {
                 onClick={jumpable ? () => focusBoqRows?.(r.affectedIds!) : undefined}
               >
                 <td className="xl-rn">{i + 1}</td>
-                <td className="mono text-[11px] text-neutral-400">
+                <td className="mono text-[11px] text-muted-foreground">
                     {new Date(r.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}
                 </td>
                 <td>
-                  <span className={cn("chip", r.reverted && "opacity-60")}>
+                  <Badge variant="secondary" className={cn(r.reverted && "opacity-60")}>
                     {ACTION_LABEL[r.actionType] ?? r.actionType}
-                  </span>
+                  </Badge>
                 </td>
-                <td className={`max-w-96 truncate ${r.reverted ? "text-neutral-400 line-through decoration-neutral-300" : "text-neutral-600"} ${jumpable ? "group-hover:text-neutral-800 group-hover:underline decoration-neutral-300 underline-offset-2" : ""}`} title={r.summary}>{r.summary}</td>
-                <td className="text-[11px] text-neutral-400">{r.createdBy === "user" ? "手动" : "Agent"}</td>
+                <td className={`max-w-96 truncate ${r.reverted ? "text-muted-foreground line-through decoration-border" : "text-muted-foreground"} ${jumpable ? "group-hover:text-foreground group-hover:underline decoration-border underline-offset-2" : ""}`} title={r.summary}>{r.summary}</td>
+                <td className="text-[11px] text-muted-foreground">{r.createdBy === "user" ? "手动" : "Agent"}</td>
                 <td className="text-center" onClick={(e) => e.stopPropagation()}>
                   {r.actionType === "REVERT" ? null : r.reverted ? (
-                    <span className="text-[10.5px] text-neutral-400">已撤销</span>
+                    <span className="text-[10.5px] text-muted-foreground">已撤销</span>
                   ) : r.reversible ? (
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="xs"
                       onClick={() => revert(r.id)}
                       disabled={!!busy || running || agentRunning || importRunning}
-                      className="cost-btn sm ghost"
                     >
                       {busy === r.id ? "…" : "撤销"}
-                    </button>
+                    </Button>
                   ) : (
-                    <span className="text-[10.5px] text-neutral-300">不可撤销</span>
+                    <span className="text-[10.5px] text-muted-foreground">不可撤销</span>
                   )}
                 </td>
               </tr>

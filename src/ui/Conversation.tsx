@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useStore } from "./store";
 import { isBusy, isDirty } from "./busy";
+import { Button } from "@/components/ui/button";
 import { toast } from "./primitives";
 import type { ConvBlock } from "./runEvents";
 
@@ -332,11 +333,11 @@ function Blocks() {
             <strong>{b.decided === "approved" ? "已批准" : b.decided === "rejected" ? "已取消" : "需要你确认"}</strong>
             <p>{b.description}</p>
             {!b.decided && <div className="conv-confirm-actions">
-              <button className="cost-btn" disabled={blocked} onClick={() => void s.confirmImport(b.runId, false)}><X size={12} />取消</button>
+              <Button variant="outline" size="sm" disabled={blocked} onClick={() => void s.confirmImport(b.runId, false)}><X size={12} />取消</Button>
               {/* 导入必须先看到识别出的列映射再批准：对话里只给核对入口，批准在映射页上 */}
               {b.fileId
-                ? <button className="cost-btn primary" onClick={() => s.setActiveView(mapping?.id ?? "view:files")}>核对表格<ArrowUpRight size={12} /></button>
-                : <button className="cost-btn primary" disabled={blocked} onClick={() => void s.confirmImport(b.runId, true)}><Check size={12} />确认执行</button>}
+                ? <Button size="sm" onClick={() => s.setActiveView(mapping?.id ?? "view:files")}>核对表格<ArrowUpRight size={12} /></Button>
+                : <Button size="sm" disabled={blocked} onClick={() => void s.confirmImport(b.runId, true)}><Check size={12} />确认执行</Button>}
             </div>}
           </div>);
           break;
@@ -401,7 +402,7 @@ export function Conversation({ onCollapse }: { onCollapse?: () => void }) {
       <div className="conv-head">
         <span className="conv-title"><Sparkles size={14} />造价助手</span>
         <span className="conv-hint">{s.agentRunning ? "处理中…" : s.importRunning ? "导入中…" : ""}</span>
-        {onCollapse && <button className="icon-btn" onClick={onCollapse} title="收起对话" aria-label="收起对话"><PanelLeftClose size={15} /></button>}
+        {onCollapse && <Button variant="ghost" size="icon-xs" onClick={onCollapse} title="收起对话" aria-label="收起对话"><PanelLeftClose size={15} /></Button>}
       </div>
       {s.modelDown && (
         <div className="conv-banner" role="status" title={s.modelDown}>
@@ -454,7 +455,7 @@ export function Conversation({ onCollapse }: { onCollapse?: () => void }) {
           }}
         />
         <div className="conv-compose-bar">
-          <button className="icon-btn" title="上传清单 / 询价表 / 资料" aria-label="上传文件" disabled={busy || dirty} onClick={() => fileRef.current?.click()}><Paperclip size={15} /></button>
+          <Button variant="ghost" size="icon-xs" title="上传清单 / 询价表 / 资料" aria-label="上传文件" disabled={busy || dirty} onClick={() => fileRef.current?.click()}><Paperclip size={15} /></Button>
           <span>{dirty ? <><PencilLine size={11} />有未保存的修改</> : busy && s.ready ? <><Loader2 size={11} className="spin" />{s.saving ? "正在保存" : "正在处理"}</> : "Enter 发送 · Shift+Enter 换行"}</span>
           <button className="conv-send" title="发送" aria-label="发送" disabled={busy || dirty || !text.trim()} onClick={() => send(text)}><SendHorizonal size={14} /></button>
         </div>

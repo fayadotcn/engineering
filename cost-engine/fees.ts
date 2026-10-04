@@ -66,11 +66,16 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
 
   // 含税价清单（源表「含税单价」列）：单价已含增值税，不进税前基数、不再叠税。
   // 它们的合价在税金之后直接并入含税造价，行内注明口径。
+  // 含税过滤必须覆盖单价措施——只过滤分部分项会让含税的单价措施行先并入
+  // 税前造价、随后又按含税口径并一次（重复计税）。
   const taxableParts = byType("分部分项").filter((i) => !i.taxIncluded);
-  const taxInclParts = byType("分部分项").filter((i) => i.taxIncluded);
+  const allMeasure = byType("单价措施").concat(byType("总价措施"));
+  const measureItems = allMeasure.filter((i) => !i.taxIncluded);
+  const taxInclParts = byType("分部分项")
+    .filter((i) => i.taxIncluded)
+    .concat(allMeasure.filter((i) => i.taxIncluded));
   const taxInclTotal = sum(taxInclParts.map((i) => i.totalPrice));
   const boqTotal = sum(taxableParts.map((i) => i.totalPrice));
-  const measureItems = byType("单价措施").concat(byType("总价措施"));
   const otherItems = byType("其他项目");
   const importedMeasure = sum(measureItems.map((i) => i.totalPrice));
   const importedOther = sum(otherItems.map((i) => i.totalPrice));

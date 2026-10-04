@@ -1,5 +1,6 @@
 "use client";
 import type { WorkspaceView } from "@shared/types";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { EmptyState } from "../primitives";
 import { FIELD_LABEL } from "./shared";
 
@@ -24,14 +25,14 @@ export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff"
             {view.rows.map((r, i) => (
               <tr key={i}>
                 <td className="xl-rn">{i + 1}</td>
-                <td className="mono text-neutral-500">{r.code || "—"}</td>
+                <td className="mono text-muted-foreground">{r.code || "—"}</td>
                 <td className="max-w-56 truncate" title={r.name}>{r.name}</td>
-                <td className="text-neutral-500">{FIELD_LABEL[r.field] ?? r.field}</td>
+                <td className="text-muted-foreground">{FIELD_LABEL[r.field] ?? r.field}</td>
                 <td className="mono text-right">
-                  <span className="chip danger line-through">{r.before}</span>
+                  <Badge variant="danger" className="line-through" >{r.before}</Badge>
                 </td>
                 <td className="mono text-right">
-                  <span className="chip ok">{r.after}</span>
+                  <Badge variant="success" >{r.after}</Badge>
                 </td>
               </tr>
             ))}

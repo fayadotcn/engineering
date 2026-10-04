@@ -2,12 +2,14 @@
 import { useEffect, useRef, useState } from "react";
 import { ClipboardList, Loader2, Upload } from "lucide-react";
 import { useStore, OPEN_CONV_EVENT } from "./store";
-import { api } from "./api";
+import { api, type WorkbenchInit } from "./api";
 import { isBusy, isDirty } from "./busy";
 import { Conversation, FOCUS_COMPOSER } from "./Conversation";
 import { ConfirmDialog, Modal, toast } from "./primitives";
+import { Button } from "@/components/ui/button";
 import { SECTIONS, sectionOf, type SectionId } from "./sections";
 import { ProjectHeader, StatusBar } from "./shell/ProjectHeader";
+import type { ProjectEntry } from "./shell/ProjectSwitch";
 import { ResultsPanel } from "./shell/ResultsPanel";
 import { SubTabs } from "./shell/SubTabs";
 import { PendingImports } from "./shell/PendingImports";
@@ -34,10 +36,10 @@ function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void })
     <Modal open={open} label="快捷键" width={400} onClose={onClose}>
       <div className="dlg-title">快捷键</div>
       <p className="dlg-desc">工作台支持键盘操作，效率操作不必伸手摸鼠标。</p>
-      <div className="mt-4 divide-y divide-neutral-100">
+      <div className="mt-4 divide-y divide-border">
         {SHORTCUTS.map(([k, d]) => (
           <div key={k} className="flex items-center justify-between gap-4 py-2 text-[12.5px]">
-            <span className="text-neutral-600">{d}</span>
+            <span className="text-muted-foreground">{d}</span>
             <kbd className="kbd !h-[19px] !min-w-0 px-1.5">{k}</kbd>
           </div>
         ))}
@@ -81,7 +83,7 @@ const CONV_W_KEY = "cost-conv-w";
 const CONV_W_MIN = 300;
 const CONV_W_MAX = 560;
 
-export function Workbench({ projectId }: { projectId: string }) {
+export function Workbench({ projectId, projects = [], initial }: { projectId: string; projects?: ProjectEntry[]; initial?: WorkbenchInit }) {
   const s = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -121,7 +123,9 @@ export function Workbench({ projectId }: { projectId: string }) {
   };
 
   useEffect(() => {
-    void s.init(projectId);
+    // 服务端预载只在 id 对得上时采用（防串项目）；重复 init 复用同一份是幂等的，
+    // 之后的 digest 轮询/手动刷新仍走 API 拉新数据
+    void s.init(projectId, false, initial?.p.id === projectId ? initial : undefined);
     remembered.current = {};
     // 空闲轮询只打轻量 digest 探针（KB 级），指纹变化才全量刷新——
     // 之前每 10s 直接 init 会拉 boq+runs+summary ~2MB，页面常驻抖动。
@@ -177,7 +181,7 @@ export function Workbench({ projectId }: { projectId: string }) {
     if (section === "results") return <ResultsPanel projectId={projectId} onUpload={pickFile} />;
     if (section === "boq" && !s.items.length) return <div className="cost-empty">
       <ClipboardList size={30} /><h3>还没有工程清单</h3><p>上传招标清单、投标报价或结算清单（Excel / PDF），系统会自动识别表格结构。</p>
-      <button className="cost-btn primary" disabled={blocked} onClick={pickFile}><Upload size={14} />上传清单</button>
+      <Button disabled={blocked} onClick={pickFile}><Upload size={14} />上传清单</Button>
     </div>;
     const view = active ?? sectionViews[0];
     return view ? <>
@@ -221,10 +225,10 @@ export function Workbench({ projectId }: { projectId: string }) {
       </aside>
     )}
     <div className="wb-main">
-      <ProjectHeader section={section} onOpen={open} onUpload={pickFile} convOpen={convOpen} onOpenConv={() => setConvOpen(true)} />
+      <ProjectHeader section={section} onOpen={open} onUpload={pickFile} convOpen={convOpen} onOpenConv={() => setConvOpen(true)} projects={projects} />
       <section className={`wb-body ${section === "results" ? "is-results" : ""}`}>
         <PendingImports />
-        {s.loadingError && <div className="cost-error" role="alert">{s.loadingError}<button className="cost-btn" disabled={isBusy(s)} onClick={() => void s.init(projectId, true)}>重试</button></div>}
+        {s.loadingError && <div className="cost-error" role="alert">{s.loadingError}<Button variant="outline" size="sm" disabled={isBusy(s)} onClick={() => void s.init(projectId, true)}>重试</Button></div>}
         {body}
       </section>
       {s.ready && <StatusBar />}

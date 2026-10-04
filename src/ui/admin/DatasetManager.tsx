@@ -1,5 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Check,
   ChevronDown,
@@ -52,8 +55,6 @@ const sourceLabel = (d: DatasetDTO) => {
 };
 
 type CardPanel = "preview" | "prices" | "mapping";
-
-const toggleBtn = "cost-btn sm ghost";
 
 function DatasetCard({
   d,
@@ -135,13 +136,13 @@ function DatasetCard({
   );
 
   return (
-    <div className="overflow-hidden rounded-md border border-neutral-200 bg-[var(--surface)]">
+    <div className="overflow-hidden rounded-md border border-border bg-[var(--card)]">
       <div className="cost-dataset-row flex flex-wrap items-center gap-3 px-4 py-3">
-        <FileSpreadsheet size={15} className="shrink-0 text-neutral-400" />
+        <FileSpreadsheet size={15} className="shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium">{d.name}</div>
           <div
-            className="mt-0.5 break-words text-[11px] text-neutral-500"
+            className="mt-0.5 break-words text-[11px] text-muted-foreground"
             title={sourceLabel(d) === d.filename ? undefined : `源文件：${d.filename}`}
           >
             {[
@@ -157,56 +158,58 @@ function DatasetCard({
               .join(" · ")}
           </div>
         </div>
-        {d.status === "FAILED" && <span className="chip danger">失败</span>}
-        {d.status === "PENDING" && <span className="chip warn">待确认</span>}
-        {!d.active && <span className="chip">已停用</span>}
+        {d.status === "FAILED" && <Badge variant="danger" >失败</Badge>}
+        {d.status === "PENDING" && <Badge variant="warning" >待确认</Badge>}
+        {!d.active && <Badge variant="secondary" >已停用</Badge>}
         {d.kind === "MATERIAL_PRICE" && (d.status === "PENDING" || d.status === "FAILED") && (
-          <button
+          <Button
+            size="xs"
             onClick={() => togglePanel("mapping")}
             disabled={dirty || busy}
             aria-expanded={panel === "mapping"}
-            className="cost-btn sm primary"
           >
             <Check size={12} /> 核对表格
-          </button>
+          </Button>
         )}
         {d.kind === "MATERIAL_PRICE" && d.status === "PARSED" && (
-          <button disabled={dirty || busy} aria-expanded={panel === "prices"} onClick={() => togglePanel("prices")} className="cost-btn">
+          <Button variant="outline" size="sm" disabled={dirty || busy} aria-expanded={panel === "prices"} onClick={() => togglePanel("prices")}>
             <Table size={12} /> {panel === "prices" ? "收起数据" : "打开数据"}
-          </button>
+          </Button>
         )}
         {d.kind !== "MATERIAL_PRICE" && (
-          <button disabled={busy || previewLoading} aria-expanded={panel === "preview"} onClick={() => void togglePreview()} className={toggleBtn}>
+          <Button variant="ghost" size="xs" disabled={busy || previewLoading} aria-expanded={panel === "preview"} onClick={() => void togglePreview()}>
             {panel === "preview" ? "收起数据" : "打开数据"} {chevron("preview")}
-          </button>
+          </Button>
         )}
         <details className="cost-simple-more cost-dataset-more"><summary>更多</summary><div className="cost-more-body">
-        {d.kind === "MATERIAL_PRICE" && d.status === "PARSED" && <button disabled={dirty || busy} aria-expanded={panel === "mapping"} onClick={() => togglePanel("mapping")} className={toggleBtn}><Columns3 size={12} />调整表格识别</button>}
-        <button
+        {d.kind === "MATERIAL_PRICE" && d.status === "PARSED" && <Button variant="ghost" size="xs" disabled={dirty || busy} aria-expanded={panel === "mapping"} onClick={() => togglePanel("mapping")}><Columns3 size={12} />调整表格识别</Button>}
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={toggleActive}
           disabled={busy || dirty}
           role="switch"
           aria-checked={d.active}
           aria-label={`${d.name}参与匹配与测算`}
-          className={toggleBtn}
           title={d.active ? "已启用 — 点击停用" : "已停用 — 点击启用"}
         >
           {d.active ? "停用这份数据" : "启用这份数据"}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => setConfirmDel(true)}
           disabled={busy || dirty}
           aria-label={`删除数据集${d.name}`}
-          className={toggleBtn}
           title="删除数据集"
         >
           {busy ? <Loader2 size={12} className="spin" /> : <Trash2 size={13} />}删除
-        </button>
+        </Button>
         </div></details>
       </div>
-      {dirty && <p className="px-4 pb-2 text-xs text-neutral-500" role="status">请先保存或取消编辑，再切换面板、筛选或停用数据集。</p>}
+      {dirty && <p className="px-4 pb-2 text-xs text-muted-foreground" role="status">请先保存或取消编辑，再切换面板、筛选或停用数据集。</p>}
       {panel === "preview" && previewLoading && <div className="cost-empty" role="status"><Loader2 size={14} className="spin" />正在加载预览</div>}
-      {panel === "preview" && previewError && <div className="cost-error" role="alert">{previewError}<button className="cost-btn" onClick={() => void togglePreview(true)}>重试</button></div>}
+      {panel === "preview" && previewError && <div className="cost-error" role="alert">{previewError}<Button variant="outline" size="sm" onClick={() => void togglePreview(true)}>重试</Button></div>}
       <ConfirmDialog
         open={confirmDel}
         danger
@@ -218,7 +221,7 @@ function DatasetCard({
         onCancel={() => setConfirmDel(false)}
       />
       {panel === "preview" && preview && (
-        <div className="max-h-72 overflow-auto border-t border-neutral-100">
+        <div className="max-h-72 overflow-auto border-t border-border">
           <table className="xl-table text-[12px]">
             <thead>
               <tr>
@@ -239,9 +242,9 @@ function DatasetCard({
               ))}
             </tbody>
           </table>
-          {!preview.rows.length && <p className="px-3 py-5 text-center text-xs text-neutral-500">暂无可预览的行数据</p>}
+          {!preview.rows.length && <p className="px-3 py-5 text-center text-xs text-muted-foreground">暂无可预览的行数据</p>}
           {preview.total > preview.rows.length && (
-            <div className="px-3 py-2 text-[11px] text-neutral-400">
+            <div className="px-3 py-2 text-[11px] text-muted-foreground">
               显示前 {preview.rows.length} 行，共 {preview.total} 行
             </div>
           )}
@@ -331,11 +334,11 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
   return (
     <div className="cost-datasets mt-8 space-y-8">
       <nav className="cost-library-tabs" aria-label="共享数据类型">{KINDS.map(k => <button key={k.k} aria-current={kind === k.k ? "page" : undefined} className={kind === k.k ? "active" : ""} disabled={blocked} onClick={() => { setKind(k.k); setQuery(""); }}><strong>{k.label}</strong><span>{datasets.filter(d => d.kind === k.k).length}</span></button>)}</nav>
-      {loadError && <div className="cost-error" role="alert">{loadError}<button className="cost-btn" disabled={busy} onClick={() => void refresh()}>重试</button></div>}
+      {loadError && <div className="cost-error" role="alert">{loadError}<Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>重试</Button></div>}
       {/* 上传区 */}
-      <div className="rounded-md border border-neutral-200 bg-[var(--surface)] p-4">
+      <div className="rounded-md border border-border bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <div><strong className="text-sm">导入{KINDS.find(k => k.k === kind)?.label}</strong><p className="text-xs text-neutral-500">各工程共用，启用后参与匹配与测算</p></div>
+          <div><strong className="text-sm">导入{KINDS.find(k => k.k === kind)?.label}</strong><p className="text-xs text-muted-foreground">各工程共用，启用后参与匹配与测算</p></div>
           <input
             ref={fileRef}
             type="file"
@@ -347,14 +350,14 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               e.target.value = "";
             }}
           />
-          <button
+          <Button
             onClick={() => fileRef.current?.click()}
             disabled={blocked}
-            className="cost-btn primary ml-auto !h-9 !px-4 !text-[12.5px]"
+            className="ml-auto"
           >
             {busy ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
             上传{KINDS.find((k) => k.k === kind)?.label}
-          </button>
+          </Button>
         </div>
         {kind === "MATERIAL_PRICE" && (
           <details className="cost-simple-more mt-2.5"><summary>补充地区、日期或品牌（可选）</summary><div className="cost-more-body">
@@ -372,33 +375,33 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               <option value="SUPPLY">供应商价</option>
               <option value="LABOR">人工价</option>
             </select>
-            <input
+            <Input
               disabled={busy}
               aria-label="整表默认地区"
               value={defRegion}
               onChange={(e) => setDefRegion(e.target.value)}
               placeholder="地区"
-              className="cost-input w-24"
+              className="w-24"
             />
-            <input
+            <Input
               disabled={busy}
               aria-label="整表默认期次"
               value={defPeriod}
               onChange={(e) => setDefPeriod(e.target.value)}
               placeholder="如 2024-06，留空自动从表/文件名识别"
-              className="cost-input w-64"
+              className="w-64"
             />
-            <input
+            <Input
               disabled={busy}
               aria-label="整表默认品牌"
               value={defBrand}
               onChange={(e) => setDefBrand(e.target.value)}
               placeholder="品牌（整表默认）"
-              className="cost-input w-32"
+              className="w-32"
             />
           </div></details>
         )}
-        <p className="mt-2.5 text-[11.5px] text-neutral-400">
+        <p className="mt-2.5 text-[11.5px] text-muted-foreground">
           {KINDS.find((k) => k.k === kind)?.hint}
         </p>
       </div>
@@ -409,7 +412,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
         <section key={g.k}>
           <div className="mb-2 flex items-baseline gap-2">
             <h2 className="text-[13.5px] font-medium">{g.label}</h2>
-            <span className="text-[11px] text-neutral-400">{g.items.length} 个数据集</span>
+            <span className="text-[11px] text-muted-foreground">{g.items.length} 个数据集</span>
           </div>
           <div className="space-y-2">
             {g.items.map((d) => (
@@ -422,7 +425,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               />
             ))}
             {!g.items.length && (
-              <div className="rounded-xl border border-dashed border-neutral-300 px-4 py-6 text-center text-[12px] text-neutral-400">
+              <div className="rounded-xl border border-dashed border-input px-4 py-6 text-center text-[12px] text-muted-foreground">
                 {query.trim() ? "没有匹配的数据集" : "还没有数据集，上传 Excel 开始整理"}
               </div>
             )}

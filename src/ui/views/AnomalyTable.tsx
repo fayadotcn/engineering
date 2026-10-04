@@ -1,23 +1,26 @@
 "use client";
-import { Fragment } from "react";
+import { Fragment, type ComponentProps } from "react";
 import { useStore } from "../store";
 import type { AnomalyRow, WorkspaceView } from "@shared/types";
 import { AlertTriangle } from "lucide-react";
 import { EmptyState } from "../primitives";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn, fmtMoney, displayFeature } from "./shared";
 
 /* ---------------- 异常表 ---------------- */
 
-const ANOMALY_BADGE: Record<string, string> = {
+type BadgeVariant = NonNullable<ComponentProps<typeof Badge>["variant"]>;
+const ANOMALY_BADGE: Record<string, BadgeVariant> = {
   SAME_ITEM_DIFF_PRICE: "danger",
-  PRICE_ANOMALY: "warn",
+  PRICE_ANOMALY: "warning",
   FEATURE_MISMATCH: "info",
-  DUPLICATE: "",
+  DUPLICATE: "secondary",
   ARITHMETIC: "danger",
   UNIT_INCONSISTENT: "danger",
-  CODE_MISMATCH: "warn",
-  INVALID_CODE: "warn",
-  MISSING_CODE: "warn",
+  CODE_MISMATCH: "warning",
+  INVALID_CODE: "warning",
+  MISSING_CODE: "warning",
   DATA_QUALITY: "danger",
   OWNER_SUPPLIED: "danger",
 };
@@ -50,14 +53,14 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                     <td className="xl-rn"></td>
                     <td colSpan={6}>
                       <div className="flex items-center gap-2">
-                        <AlertTriangle size={12} className="shrink-0 text-amber-600" />
+                        <AlertTriangle size={12} className="shrink-0 text-[var(--warning-soft-fg)]" />
                         <span className="shrink-0">{g.label}</span>
                         {g.spread && (
-                          <span className={cn("chip shrink-0", ANOMALY_BADGE[view.anomalyType])}>
+                          <Badge variant={ANOMALY_BADGE[view.anomalyType] ?? "secondary"} className="shrink-0">
                             价差 {fmtMoney(g.spread)}
-                          </span>
+                          </Badge>
                         )}
-                        <span className="ml-auto truncate pr-1 text-[11px] font-normal text-neutral-400" title={g.reason}>{g.reason}</span>
+                        <span className="ml-auto truncate pr-1 text-[11px] font-normal text-muted-foreground" title={g.reason}>{g.reason}</span>
                       </div>
                     </td>
                   </tr>
@@ -68,30 +71,31 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                     return (
                       <tr key={it.id} className="group">
                         <td className="xl-rn">{rn}</td>
-                        <td className="mono truncate text-neutral-500" title={it.code ?? ""}>{it.code || "—"}</td>
+                        <td className="mono truncate text-muted-foreground" title={it.code ?? ""}>{it.code || "—"}</td>
                         <td className="overflow-hidden">
                           <div className="truncate" title={it.name}>{it.name}</div>
-                          {feature && <div className="truncate text-[11px] text-neutral-400" title={feature}>{feature}</div>}
+                          {feature && <div className="truncate text-[11px] text-muted-foreground" title={feature}>{feature}</div>}
                         </td>
-                        <td className="truncate text-neutral-500" title={it.unit}>{it.unit}</td>
+                        <td className="truncate text-muted-foreground" title={it.unit}>{it.unit}</td>
                         <td className="mono text-right">{it.quantity}</td>
                         <td
                           className={cn(
                             "mono text-right font-medium",
-                            p === max && max !== min && "text-red-600",
-                            p === min && max !== min && "text-green-700"
+                            p === max && max !== min && "text-[var(--destructive-soft-fg)]",
+                            p === min && max !== min && "text-[var(--success-soft-fg)]"
                           )}
                         >
                           {fmtMoney(it.unitPrice)}
                         </td>
                         <td className="w-12 text-center">
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="xs"
                             onClick={() => gotoBoqItem(it.code || it.name)}
-                            className="cost-btn sm ghost"
                             title="在清单中定位"
                           >
                             定位
-                          </button>
+                          </Button>
                         </td>
                       </tr>
                     );

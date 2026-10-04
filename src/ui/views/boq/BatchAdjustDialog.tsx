@@ -2,6 +2,8 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { BoqItemDTO } from "@shared/types";
 import { Modal } from "../../primitives";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { fmtMoney } from "../shared";
 import { ADJ_FIELD, type AdjForm } from "./constants";
 
@@ -49,32 +51,31 @@ export function BatchAdjustDialog({ adjRows, saving, adjForm, setAdjForm, onClos
         </div>
         <label className="cost-field">
           <span>{adjForm.mode === "percent" ? "增减百分比（%）— 下浮填负数" : "目标值"}</span>
-          <input
+          <Input
             autoFocus
             value={adjForm.value}
             onChange={(e) => setAdjForm(f => ({ ...f, value: e.target.value }))}
             placeholder={adjForm.mode === "percent" ? "如：-5（下浮 5%）" : "如：52.30"}
             inputMode="decimal"
-            className="cost-input lg w-full"
+            className="w-full"
           />
         </label>
         {adjForm.mode === "percent" && adjForm.value.trim() && Number.isFinite(Number(adjForm.value)) && (
           Number(adjForm.value) <= -100
-            ? <p className="text-[11.5px] text-[var(--danger)]">下浮不能超过 100%（会得到负值）</p>
-            : <p className="text-[11.5px] text-neutral-400">
+            ? <p className="text-[11.5px] text-[var(--destructive)]">下浮不能超过 100%（会得到负值）</p>
+            : <p className="text-[11.5px] text-muted-foreground">
                 即 {ADJ_FIELD[adjForm.field]} ×{(1 + Number(adjForm.value) / 100).toFixed(4)}
                 {adjRows?.length ? `，以首行「${adjRows[0].name}」为例：${fmtMoney(Number(adjRows[0][adjForm.field]))} → ${fmtMoney(Number(adjRows[0][adjForm.field]) * (1 + Number(adjForm.value) / 100))} 元` : ""}
               </p>
         )}
         <div className="dlg-actions">
-          <button type="button" className="cost-btn" disabled={saving} onClick={() => onClose()}>取消</button>
-          <button
+          <Button type="button" variant="outline" disabled={saving} onClick={() => onClose()}>取消</Button>
+          <Button
             type="submit"
             disabled={saving || !adjForm.value.trim() || !Number.isFinite(Number(adjForm.value)) || (adjForm.mode === "percent" && Number(adjForm.value) <= -100)}
-            className="cost-btn primary"
           >
             {saving ? "应用中…" : `应用到 ${adjRows?.length ?? 0} 行`}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

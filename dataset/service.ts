@@ -73,6 +73,7 @@ const quotaRowsData = (rows: ParsedQuotaRow[], datasetId: string) =>
     material: r.material,
     machine: r.machine,
     mainQtyPerUnit: r.mainQtyPerUnit,
+    materials: toJson(r.materials ?? []),
     matchKeys: toJson(r.matchKeys),
     raw: toJson(r.raw),
   }));

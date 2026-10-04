@@ -1,9 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../store";
 import { COLUMN_ROLE_LABEL, COLUMN_ROLES, type WorkspaceView } from "@shared/types";
 import { reconcilePriceRole } from "@shared/mapping";
 import { ConfirmDialog, toast } from "../primitives";
+import { Button } from "@/components/ui/button";
 import { readResponse } from "../api";
 import { FileSpreadsheet, Save, RefreshCw } from "lucide-react";
 
@@ -21,6 +23,10 @@ const TYPE_LABEL: Record<Sheet["type"], string> = {
   FACTS: "汇总/说明表",
   MATERIAL_PRICE: "材料价格表",
 };
+/** 会往清单/价格库里导行的类型：这些表的 itemsToImport=0 必须红标，
+ *  COMPARE/APPROVAL/FACTS/GENERIC 本来就不导行，标了反而吓人 */
+const IMPORTABLE_TYPES = new Set<Sheet["type"]>(["BOQ", "PENDING_QUOTE", "QUOTATION", "MATERIAL_PRICE"]);
+
 const TYPE_OPTIONS: Sheet["type"][] = [
   "BOQ", "PENDING_QUOTE", "QUOTATION", "MATERIAL_PRICE",
   "COMPARE", "APPROVAL", "FACTS", "GENERIC",
@@ -167,9 +173,9 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2 break-words">
-        <FileSpreadsheet size={15} className="text-neutral-400" />
+        <FileSpreadsheet size={15} className="text-muted-foreground" />
         <span className="text-[13px] font-medium">{view.filename}</span>
-        <span className="text-[11px] text-neutral-400">
+        <span className="text-[11px] text-muted-foreground">
           {store.blocks.some(b => b.type === "confirm" && !b.decided) ? "检查表格类型和各列名称；有错误就改一下，再保存。" : "修改后保存修改，再重新导入更新已有数据。"}
         </span>
       </div>
@@ -178,7 +184,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         const d = drafts[s.sheetName] ?? toDraft(s);
         return (
           <div key={s.sheetName} className="xl-sheet mb-4 overflow-hidden rounded-lg">
-            <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--sidebar)] px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 border-b border-border bg-[var(--muted)] px-3 py-2">
               <span className="text-[12.5px] font-medium">{s.sheetName}</span>
               <select
                 value={d.type}
@@ -190,7 +196,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                   s.typeConfidence < 0.9
                     ? {
                         borderColor: "var(--warning-soft-fg)",
-                        background: "var(--warning-soft-bg)",
+                        background: "var(--warning-soft)",
                       }
                     : undefined
                 }
@@ -201,12 +207,23 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                   </option>
                 ))}
               </select>
-              {s.templateHit && <span className="chip ok">已识别</span>}
-              {s.userEdited && <span className="chip warn">已修改</span>}
-              <span className="ml-auto text-[11px] text-neutral-400">
+              {s.templateHit && <Badge variant="success" >已识别</Badge>}
+              {s.userEdited && <Badge variant="warning" >已修改</Badge>}
+              {IMPORTABLE_TYPES.has(s.type) && s.itemsToImport === 0 && (
+                <Badge
+                  variant="danger"
+                  title="表里有数据，但按当前映射认不出任何清单行（名称列为空最常见）——请指认名称列，必要时指认工程量/单价列，再保存并确认导入"
+                >
+                  将导入 0 行
+                </Badge>
+              )}
+              <span className="ml-auto text-[11px] text-muted-foreground">
                 {s.minConfidence < 0.9 ? "需要核对" : "已识别"}
                 {s.typeConfidence < 0.9 && " · 请核对表格类型"}
-                {" · "}{s.rowCount} 行
+                {" · "}
+                {IMPORTABLE_TYPES.has(s.type) && s.itemsToImport !== undefined
+                  ? `将导入 ${s.itemsToImport} 行（表内 ${s.rowCount} 行）`
+                  : `${s.rowCount} 行`}
               </span>
             </div>
             <div className="overflow-x-auto">
@@ -215,7 +232,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                   <tr>
                     <th className="xl-rn"></th>
                     {Array.from({ length: s.colCount }, (_, i) => (
-                      <th key={i} className="text-center text-neutral-400">
+                      <th key={i} className="text-center text-muted-foreground">
                         {colLetter(i)}
                       </th>
                     ))}
@@ -230,7 +247,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                           onChange={(e) => setRole(s.sheetName, i, e.target.value)}
                           className={cn(
                             "cost-input w-full min-w-16 !h-[22px] !px-0.5 !text-[10.5px]",
-                            d.byCol[i] && "border-[var(--hairline-strong)] font-medium"
+                            d.byCol[i] && "border-[var(--input)] font-medium"
                           )}
                         >
                           <option value="">— 忽略 —</option>
@@ -256,7 +273,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                           className="max-w-40 truncate text-[10.5px] font-normal"
                           style={
                             role && conf < 0.9
-                              ? { background: "var(--warning-soft-bg)" }
+                              ? { background: "var(--warning-soft)" }
                               : undefined
                           }
                         >
@@ -271,7 +288,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                     <tr key={ri}>
                       <td className="xl-rn">{ri + 1}</td>
                       {Array.from({ length: s.colCount }, (_, i) => (
-                        <td key={i} className="max-w-48 truncate text-neutral-600" title={r[i]}>
+                        <td key={i} className="max-w-48 truncate text-muted-foreground" title={r[i]}>
                           {r[i]}
                         </td>
                       ))}
@@ -285,25 +302,24 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
       })}</fieldset>
 
       <div className="flex flex-wrap gap-2">
-        <button
+        <Button
           onClick={save}
           disabled={!dirty || blocked}
-          className="cost-btn primary"
         >
           <Save size={13} /> 保存修改
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="outline"
           onClick={() => {
             if (view.fileStatus === "PARSED") setConfirmReingest(true);
             else void reingest();
           }}
           disabled={blocked || dirty || store.blocks.some(b => b.type === "confirm" && !b.decided)}
           title={dirty ? "请先保存修改" : undefined}
-          className="cost-btn"
         >
           <RefreshCw size={13} /> 重新导入
-        </button>
-        <button className="cost-btn" disabled={!dirty || blocked} onClick={() => setDrafts(Object.fromEntries(baseline.sheets.map(s => [s.sheetName, toDraft(s)])))}>取消修改</button>
+        </Button>
+        <Button variant="outline" disabled={!dirty || blocked} onClick={() => setDrafts(Object.fromEntries(baseline.sheets.map(s => [s.sheetName, toDraft(s)])))}>取消修改</Button>
       </div>
 
       <ConfirmDialog

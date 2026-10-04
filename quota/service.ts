@@ -1,5 +1,6 @@
 import { QUOTA_LIBRARY, type QuotaEntry } from "./library";
 import { fromJson } from "@shared/json";
+import { parseSemanticFeature } from "@cost-engine/semantic";
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const toRe = (v: unknown) =>
   typeof v === "string" && v ? new RegExp(escapeRe(v), "i") : undefined;
@@ -26,7 +27,11 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
     const db: QuotaEntry[] = rows.map((r) => {
       // 脏 JSON 行不拖垮整库匹配——兜底为空对象，该行退化为低分候选
       const mk = fromJson<Record<string, string>>(r.matchKeys, {});
+      const fresh = parseSemanticFeature(r.name, "");
       const raw = fromJson<{ gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string }>(r.raw, {});
+      const mats = fromJson<{ name?: string; unit?: string; qtyPerUnit?: number }[]>(r.materials, [])
+        .filter((m) => m.name && Number(m.qtyPerUnit) > 0)
+        .map((m) => ({ name: String(m.name), unit: String(m.unit ?? ""), qtyPerUnit: Number(m.qtyPerUnit) }));
       // 脏数字行兜底为 0——NaN 会沿测算公式传播成 "NaN" 字符串单价；
       // 负数人材机在定额里无意义；unitScale 必须为正（否则折算翻号）
       const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; };
@@ -40,14 +45,19 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
         material: num(r.material),
         machine: num(r.machine),
         mainQtyPerUnit: pos(r.mainQtyPerUnit, 1),
+        materials: mats,
         detail: { gcnr: raw.gcnr, fb: raw.fb, chapter: raw.chapter, jj: raw.jj, mainMaterial: raw.mainMaterial },
         match: {
-          category: mk.category,
-          material: toRe(mk.material),
-          diameter: toExactRe(mk.diameter),
-          spec: toExactRe(mk.spec),
+          // matchKeys 是导入时固化的旧规则产物——按当前语义规则重解析定额名，
+          // 新类别（卫生器具/计量表/装饰类）立即可用，无需重导定额库
+          category: fresh.category ?? mk.category,
+          material: toRe(fresh.material ?? mk.material),
+          materialLabel: fresh.material ?? mk.material,
+          diameter: toExactRe(fresh.diameter ?? mk.diameter),
+          spec: toExactRe(fresh.specification ?? mk.spec),
           // DB 特征值常带后缀（"沟槽连接" vs 清单特征 "沟槽"），剥掉使匹配方向一致
-          connection: toRe(mk.connection?.replace(/(连接|方式|敷设|安装)$/, "")),
+          connection: toRe((fresh.connectionMethod ?? mk.connection)?.replace(/(连接|方式|敷设|安装)$/, "")),
+          connectionLabel: (fresh.connectionMethod ?? mk.connection)?.replace(/(连接|方式|敷设|安装)$/, ""),
           keywords: toRe(mk.keywords),
           // xmbh 是软件内部的「册章节树码」(03+册序+章+节)，不是 GB 清单编码，不能拿来比对 item.code。
           // 改用定额编号前缀推断所属系统，给跨册同名子目做系统词 tiebreak。

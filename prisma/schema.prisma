@@ -292,6 +292,9 @@ model QuotaRow {
   material      Decimal  @default(0)
   machine       Decimal  @default(0)
   mainQtyPerUnit Float   @default(1) // 主材耗量/每清单单位
+  // 全部未计价材料（az_yl 用料表）：[{name,unit,qtyPerUnit}]，按定额单位倍数折算为每清单单位。
+  // 管件/法兰/配件/多主材（如坐便器=便器+水箱+配件+桶盖）都在这里——mainQtyPerUnit 只是首个主材
+  materials     String   @default("[]")
   matchKeys     String   @default("{}") // JSON: 从名称解析出的语义特征（匹配依据）
   raw           String   @default("{}")
   createdAt     DateTime @default(now())

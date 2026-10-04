@@ -117,7 +117,7 @@ it("概况只突出一个下一步，费用和操作记录默认折叠", () => {
   const html = renderToStaticMarkup(React.createElement(CostOverview));
   expect(html).toContain("现在做这一步");
   expect(html).toContain("一键报价");
-  expect(html.match(/class="cost-btn primary"/g)).toHaveLength(1);
+  expect(html.match(/data-variant="default"/g)).toHaveLength(1);
   expect(html).toMatch(/<details class="cost-fact-details"><summary>查看费用明细/);
   expect(html).toMatch(/<details class="cost-fact-details"><summary>查看操作记录/);
   expect(html).not.toContain("cost-workflow");

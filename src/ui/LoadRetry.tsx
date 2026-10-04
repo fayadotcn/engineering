@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 /**
  * 路由级加载兜底：流式渲染在弱网/服务重启时可能截断，
@@ -16,7 +17,7 @@ export function LoadRetry() {
   return (
     <p className="cost-empty-hint">
       等待时间有点长，可能是网络波动。
-      <button className="cost-btn" onClick={() => location.reload()}>重新加载</button>
+      <Button variant="outline" size="sm" onClick={() => location.reload()}>重新加载</Button>
     </p>
   );
 }

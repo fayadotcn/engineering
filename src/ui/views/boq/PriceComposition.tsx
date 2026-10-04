@@ -1,5 +1,6 @@
 "use client";
 import { useStore } from "../../store";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import type { BoqItemDTO, PricingPlanLine } from "@shared/types";
 import { cn, fmtMoney } from "../shared";
 
@@ -17,37 +18,47 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
   const line = (l: PricingPlanLine, i: number, dim = false) => (
     <tr key={i} className={cn(dim && "opacity-55")}>
       <td className="max-w-72 py-1 pr-3 align-top">
-        <span className="mono mr-1.5 text-[10.5px] text-neutral-400">{l.quotaCode}</span>
-        <span className="text-neutral-700">{l.quotaName}</span>
-        {l.manual && <span className="chip ml-1 !py-0 !text-[10px]">指定</span>}
-        {dim && <span className="chip ml-1 !py-0 !text-[10px]">建议</span>}
-        {l.scope && <div className="mt-0.5 text-[10.5px] leading-snug text-neutral-400">{l.scope}</div>}
+        <span className="mono mr-1.5 text-[10.5px] text-muted-foreground">{l.quotaCode}</span>
+        <span className="text-foreground">{l.quotaName}</span>
+        {l.manual && <Badge variant="secondary" className="ml-1 !py-0 !text-[10px]" >指定</Badge>}
+        {dim && <Badge variant="secondary" className="ml-1 !py-0 !text-[10px]" >建议</Badge>}
+        {l.scope && <div className="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">{l.scope}</div>}
       </td>
       <td className="mono py-1 align-top text-right">{money(l.labor)}</td>
       <td className="mono py-1 align-top text-right">{money(l.materialAux)}</td>
       <td className="mono py-1 align-top text-right">{money(l.machine)}</td>
       <td className="mono py-1 align-top text-right">{money(l.fee)}</td>
-      <td className="max-w-56 py-1 align-top text-right text-neutral-500">
-        {l.mainMaterialName ? (
+      <td className="max-w-56 py-1 align-top text-right text-muted-foreground">
+        {l.materials?.length ? (
+          <div className="space-y-0.5">
+            {l.materials.map((m, mi) => (
+              <div key={mi} className="leading-tight"
+                title={m.price == null ? `${m.name} 缺价（未计入小计）` : `${m.name} = ${money(m.qty)}${m.unit || ""} × ${money(m.price)} 元`}>
+                <span className={m.primary ? "text-muted-foreground" : ""}>{m.primary ? "※" : ""}{m.name}</span>{" "}
+                <span className="mono">{money(m.qty)}{m.unit || ""}×{m.price == null ? <span className="text-[var(--warning-soft-fg)]">缺价</span> : money(m.price)}</span>
+              </div>
+            ))}
+          </div>
+        ) : l.mainMaterialName ? (
           <span title={`主材费 = 耗量 × 主材价 = ${money(l.mainQty)} × ${money(l.mainPrice)} 元`}>
-            <span className="text-neutral-600">{l.mainMaterialName}</span>{" "}
+            <span className="text-muted-foreground">{l.mainMaterialName}</span>{" "}
             <span className="mono">{money(l.mainQty)}×{money(l.mainPrice)}</span>
           </span>
         ) : "—"}
       </td>
-      <td className="mono py-1 align-top text-right font-medium text-neutral-700">{money(l.subtotal)}</td>
+      <td className="mono py-1 align-top text-right font-medium text-foreground">{money(l.subtotal)}</td>
     </tr>
   );
   return (
-    <div className="border-l-2 px-4 py-2.5" style={{ borderColor: "var(--brand-ink)", background: "color-mix(in srgb, var(--brand-soft) 16%, var(--surface))" }}>
+    <div className="border-l-2 px-4 py-2.5" style={{ borderColor: "var(--foreground)", background: "color-mix(in srgb, var(--secondary) 16%, var(--card))" }}>
       <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-[11.5px] font-medium text-neutral-700">综合单价构成</span>
-        <span className="text-[11px] text-neutral-400">
-          {item.name} · <b className="mono font-medium text-neutral-600">{fmtMoney(item.unitPrice)}</b> 元/{unit} · 由 {lines.length} 条定额子目组成
+        <span className="text-[11.5px] font-medium text-foreground">综合单价构成</span>
+        <span className="text-[11px] text-muted-foreground">
+          {item.name} · <b className="mono font-medium text-muted-foreground">{fmtMoney(item.unitPrice)}</b> 元/{unit} · 由 {lines.length} 条定额子目组成
         </span>
         <button
           type="button"
-          className="ml-auto shrink-0 text-[11px] text-[var(--brand-ink)] hover:underline"
+          className="ml-auto shrink-0 text-[11px] text-[var(--foreground)] hover:underline"
           onClick={(e) => {
             e.stopPropagation();
             void send?.(`帮我核对清单项「${item.name}」的综合单价构成：定额子目是否齐全、人材机与主材价取费是否合理`);
@@ -58,21 +69,21 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
       </div>
       <table className="w-full text-[11.5px]">
         <thead>
-          <tr className="text-left text-[10.5px] text-neutral-400">
+          <tr className="text-left text-[10.5px] text-muted-foreground">
             <th className="pb-1 font-normal">定额子目</th>
             <th className="pb-1 text-right font-normal">人工费</th>
             <th className="pb-1 text-right font-normal">辅材</th>
             <th className="pb-1 text-right font-normal">机械</th>
             <th className="pb-1 text-right font-normal">管利</th>
-            <th className="pb-1 text-right font-normal">主材（耗量×价）</th>
+            <th className="pb-1 text-right font-normal">未计价材料（含量×价）</th>
             <th className="pb-1 text-right font-normal">小计（元）</th>
           </tr>
         </thead>
-        <tbody className="text-neutral-600">
+        <tbody className="text-muted-foreground">
           {lines.map((l, i) => line(l, i))}
           {suggested.length > 0 && (
             <tr>
-              <td colSpan={7} className="pt-1.5 text-[10.5px] text-neutral-400">
+              <td colSpan={7} className="pt-1.5 text-[10.5px] text-muted-foreground">
                 — 建议增列的子目（未计入单价，可由助手确认后追加） —
               </td>
             </tr>
@@ -80,18 +91,18 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
           {suggested.map((l, i) => line(l, i, true))}
         </tbody>
       </table>
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-neutral-200/70 pt-1.5 text-[11px] text-neutral-500">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/70 pt-1.5 text-[11px] text-muted-foreground">
         <span>
           子目小计合计 <b className="mono">{fmtMoney(sumSub)}</b> 元/{unit}
         </span>
         {lines.length > 0 && (Math.abs(diff) <= 0.01 ? (
-          <span className="text-neutral-400">· 与综合单价一致</span>
+          <span className="text-muted-foreground">· 与综合单价一致</span>
         ) : (
           <span style={{ color: "var(--warning-soft-fg)" }}>
             · 与综合单价差 {fmtMoney(diff)}，可能有未计入的调整
           </span>
         ))}
-        <span className="ml-auto text-neutral-400">金额均为每{unit}口径</span>
+        <span className="ml-auto text-muted-foreground">金额均为每{unit}口径</span>
       </div>
     </div>
   );

@@ -1,6 +1,8 @@
 "use client";
 import type { Dispatch, SetStateAction } from "react";
 import { Modal } from "../../primitives";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "../shared";
 import type { AddForm } from "./constants";
 
@@ -25,13 +27,13 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
         onSubmit={(e) => { e.preventDefault(); void onSubmit(); }}
       >
         <label className="cost-field">
-          <span>项目名称 <i className="not-italic" style={{ color: "var(--danger)" }}>*</i></span>
-          <input
+          <span>项目名称 <i className="not-italic" style={{ color: "var(--destructive)" }}>*</i></span>
+          <Input
             autoFocus
             value={addForm.name}
             onChange={(e) => setAddForm(f => ({ ...f, name: e.target.value }))}
             placeholder="如：UPVC排水管 DN110"
-            className="cost-input lg w-full"
+            className="w-full"
           />
         </label>
         <div className="grid grid-cols-2 gap-3">
@@ -50,32 +52,32 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
           </label>
           <label className="cost-field">
             <span>项目编码（选填）</span>
-            <input
+            <Input
               value={addForm.code}
               onChange={(e) => setAddForm(f => ({ ...f, code: e.target.value }))}
               placeholder="如：031001006"
-              className="cost-input lg w-full"
+              className="w-full"
             />
           </label>
         </div>
         <label className="cost-field">
           <span>项目特征（选填）</span>
-          <input
+          <Input
             value={addForm.feature}
             onChange={(e) => setAddForm(f => ({ ...f, feature: e.target.value }))}
             placeholder="如：DN100 沟槽连接 室内消防——影响定额/询价匹配"
-            className="cost-input lg w-full"
+            className="w-full"
           />
         </label>
         {unitProjects.length > 0 && (
           <label className="cost-field">
             <span>单位工程（选填）</span>
-            <input
+            <Input
               value={addForm.unitProject}
               onChange={(e) => setAddForm(f => ({ ...f, unitProject: e.target.value }))}
               placeholder="归属单位工程"
               list="boq-unitprojects"
-              className="cost-input lg w-full"
+              className="w-full"
             />
             <datalist id="boq-unitprojects">
               {unitProjects.map((u) => <option key={u} value={u} />)}
@@ -85,55 +87,55 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
         {addLumpSum ? (
           <label className="cost-field">
             <span>金额（元）</span>
-            <input
+            <Input
               value={addForm.totalPrice}
               onChange={(e) => setAddForm(f => ({ ...f, totalPrice: e.target.value }))}
               placeholder="如：5000"
               inputMode="decimal"
-              className="cost-input lg w-full"
+              className="w-full"
             />
           </label>
         ) : (
           <div className="grid grid-cols-3 gap-3">
             <label className="cost-field">
               <span>单位</span>
-              <input
+              <Input
                 value={addForm.unit}
                 onChange={(e) => setAddForm(f => ({ ...f, unit: e.target.value }))}
                 placeholder="m / 个 / 套"
-                className="cost-input lg w-full"
+                className="w-full"
               />
             </label>
             <label className="cost-field">
               <span>工程量</span>
-              <input
+              <Input
                 value={addForm.quantity}
                 onChange={(e) => setAddForm(f => ({ ...f, quantity: e.target.value }))}
                 placeholder="可输 3×12+5"
                 inputMode="decimal"
-                className="cost-input lg w-full"
+                className="w-full"
               />
-              {addQtyPreview && <span className={cn("mt-0.5 block text-[11px]", addQtyPreview === "计算式无效" ? "text-[var(--danger)]" : "text-neutral-400")}>{addQtyPreview}</span>}
+              {addQtyPreview && <span className={cn("mt-0.5 block text-[11px]", addQtyPreview === "计算式无效" ? "text-[var(--destructive)]" : "text-muted-foreground")}>{addQtyPreview}</span>}
             </label>
             <label className="cost-field">
               <span>综合单价（元）</span>
-              <input
+              <Input
                 value={addForm.unitPrice}
                 onChange={(e) => setAddForm(f => ({ ...f, unitPrice: e.target.value }))}
                 placeholder="选填"
                 inputMode="decimal"
-                className="cost-input lg w-full"
+                className="w-full"
               />
             </label>
           </div>
         )}
         <div className="dlg-actions">
-          <button type="button" onClick={() => onClose()} disabled={saving} className="cost-btn">
+          <Button type="button" variant="outline" onClick={() => onClose()} disabled={saving}>
             取消
-          </button>
-          <button type="submit" disabled={saving || !addForm.name.trim()} className="cost-btn primary">
+          </Button>
+          <Button type="submit" disabled={saving || !addForm.name.trim()}>
             {saving ? "保存中…" : "补录到清单"}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

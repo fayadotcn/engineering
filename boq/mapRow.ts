@@ -66,8 +66,33 @@ export function rowToBoqInput(
   // 清单表里的「材料单价/主材价」列 → mainMaterialPrice（组价输入，非综合单价）
   const mainMat = D(numCell(row.cells.price));
   // 综合单价分析表自带的人材机分解列（每清单单位）→ 成本构成分析直接消费
-  const laborUnit = D(numCell(row.cells.laborPrice));
-  const machineUnit = D(numCell(row.cells.machinePrice));
+  let laborUnit = D(numCell(row.cells.laborPrice));
+  let machineUnit = D(numCell(row.cells.machinePrice));
+  // 表-08「其中：人工费/材料费/机械费/管理费/利润」是**合价口径**（整行金额）。
+  // 留一份原文进 rawCells.__decomp 供成本构成消费；人/机同时折算成每清单单位值，
+  // 让既有的「来源表分解列」链路也能用（只在没有单价格时折算，避免覆盖原值）。
+  const feeRoles = {
+    labor: row.cells.laborFee,
+    machine: row.cells.machineFee,
+    material: row.cells.materialFee,
+    mgmt: row.cells.mgmtFee,
+    profit: row.cells.profitFee,
+  };
+  const hasFeeDecomp = Object.values(feeRoles).some((v) => (v ?? "").trim() !== "");
+  const decomp: Record<string, string> = {};
+  if (hasFeeDecomp) {
+    for (const [k, v] of Object.entries(feeRoles)) {
+      const raw = (v ?? "").trim();
+      const n = numCell(raw);
+      decomp[k] = raw === "" ? "0" : n; // 非数值原文（「—」「详见」）落 0，原文仍在 rawCells
+    }
+    // 折算成每清单单位值（4 位小数，避免 500/2772.83 这类除法在 2 位上丢钱）；
+    // 精确的合价口径留在 __decomp，成本构成优先用它
+    const perUnit = (v: string | undefined) =>
+      qty.isZero() ? D(0) : D(v ?? "0").div(qty).toDecimalPlaces(4);
+    if (sheet.columns.laborPrice === undefined) laborUnit = perUnit(decomp.labor);
+    if (sheet.columns.machinePrice === undefined) machineUnit = perUnit(decomp.machine);
+  }
   // 合价单元格非数值（「—」「详见计算式」）时退回 量×价，别落 0 吃掉一行真钱
   const totalCell = (row.cells.totalPrice ?? "").trim();
   const total =
@@ -80,6 +105,11 @@ export function rowToBoqInput(
   if (sheet.columns.unitPrice === undefined && total.gt(0) && qty.gt(0)) {
     price = round2(total.div(qty));
     derived.push("unitPrice");
+  }
+  // 表-08 分解列（合价口径）原文留痕：成本构成分析直接读它，人/机折算值只是副产品
+  if (hasFeeDecomp) {
+    rawCells.__decomp = Object.fromEntries(Object.entries(decomp).map(([k, v]) => [k, v]));
+    if (sheet.columns.laborPrice === undefined || sheet.columns.machinePrice === undefined) derived.push("feeUnitPrice");
   }
   if (nonNumeric.length) rawCells.__nonNumeric = nonNumeric;
   if (derived.length) rawCells.__derived = derived;

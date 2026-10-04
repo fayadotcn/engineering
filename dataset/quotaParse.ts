@@ -14,6 +14,8 @@ export interface ParsedQuotaRow {
   material: number;
   machine: number;
   mainQtyPerUnit: number;
+  /** 未计价材料含量表（每清单单位口径）；Excel 定额表只有单列主材时即 1 行 */
+  materials: { name: string; unit: string; qtyPerUnit: number }[];
   matchKeys: Record<string, string>;
   raw: Record<string, string>;
 }
@@ -97,6 +99,10 @@ export function parseQuotaWorkbook(buffer: Buffer): ParsedQuotaRow[] {
       // 否则自建定额库所有子目永远不计主材价且 needsMainPrice 不报警
       const mainName = (cols.mainName !== undefined ? (row[cols.mainName] ?? "").trim() : "")
         || (rawQty > 0 ? "主材" : "");
+      // Excel 定额表通常只有单列主材：有名称就记一条含量，没名称但耗量>0 记占位「主材」
+      const materials = mainName && rawQty > 0
+        ? [{ name: mainName, unit: "", qtyPerUnit: mainQtyPerUnit }]
+        : [];
       const f = parseSemanticFeature(`${name} ${unit}`, "");
       const matchKeys: Record<string, string> = {};
       if (f.category) matchKeys.category = f.category;
@@ -115,6 +121,7 @@ export function parseQuotaWorkbook(buffer: Buffer): ParsedQuotaRow[] {
         material: num(row[cols.material] ?? ""),
         machine: num(row[cols.machine] ?? ""),
         mainQtyPerUnit,
+        materials,
         matchKeys,
         raw: {
           ...Object.fromEntries(

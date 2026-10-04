@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Plus, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { toast } from "./primitives";
 
 export function NewProject() {
@@ -40,14 +41,14 @@ export function NewProject() {
           disabled={busy}
           autoFocus
         />
-        <footer><a className="cost-btn" href="/">返回工程列表</a>
-        <button
+        <footer><Button variant="outline" asChild><a href="/">返回工程列表</a></Button>
+        <Button
           type="submit"
+          size="lg"
           disabled={!name.trim() || busy}
-          className="cost-btn primary !h-10 !px-5"
         >
           {busy ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}{busy ? "正在创建…" : "创建工程"}
-        </button>
+        </Button>
         </footer>
     </form>
   );

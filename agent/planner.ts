@@ -477,6 +477,17 @@ export class RulePlanner implements Planner {
       };
     }
 
+    // 联网检索（显式要求上网才触发：「上网查…」「联网搜…」「网上查一下…」）
+    // ——本地定额手册是定额口径第一信源；这条是兜底，且只读不写
+    if (/联网|上网|网上查|网搜|百度|谷歌|bing|web\.?search/i.test(m)) {
+      const q = m
+        .replace(/联网|上网|网上查|网搜|百度|谷歌|bing|web|search|请|帮我|查一下|查|搜|一下|的/gi, " ")
+        .replace(/\s+/g, " ").trim();
+      return {
+        steps: [{ tool: "web.search", args: { query: q || m.slice(0, 40) }, activity: "正在联网检索" }],
+      };
+    }
+
     // 人工组价：「镀锌钢管 定额改为 5H0332」「消防管 增列定额 5G0110」「XX 清除组价方案」
     // ——存疑匹配的专业处置出口。必须在「定额测算」之前：这些句式也含「定额」
     const quotaM = m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(?:定额|组价)?(?:改|换|设)(?:为|成)?\s*[：:=""]?\s*(?:定额|定额编号)?\s*([0-9A-Za-z][\w-]{2,15})\s*$/);

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import type { WorkspaceView } from "@shared/types";
 import { cn, fmtMoney } from "./shared";
 
@@ -9,10 +10,10 @@ const CMP_LABEL: Record<string, string> = {
   SAME: "一致", PRICE_DIFF: "价差", QTY_DIFF: "量差",
   BOTH_DIFF: "量价均差", ONLY_A: "仅A有", ONLY_B: "仅B有",
 };
-const CMP_STYLE: Record<string, string> = {
-  SAME: "opacity-60", PRICE_DIFF: "warn",
+const CMP_STYLE: Record<string, BadgeVariant> = {
+  SAME: "secondary", PRICE_DIFF: "warning",
   QTY_DIFF: "info", BOTH_DIFF: "danger",
-  ONLY_A: "", ONLY_B: "ok",
+  ONLY_A: "secondary", ONLY_B: "success",
 };
 
 export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind: "fileCompare" }> }) {
@@ -25,19 +26,19 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
   const s = view.summary;
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-[var(--surface)] px-4 py-2 text-[12px]">
-        <span className="text-neutral-500">
-          差额合计 <b className="mono text-neutral-800">{fmtMoney(s.totalDelta)}</b> 元
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-[var(--card)] px-4 py-2 text-[12px]">
+        <span className="text-muted-foreground">
+          差额合计 <b className="mono text-foreground">{fmtMoney(s.totalDelta)}</b> 元
         </span>
         {(s as { qtyOver15?: number }).qtyOver15 ? (
-          <span className="chip danger" title="GB50500：工程量偏差超15%应重新组价/调整综合单价">
+          <Badge variant="danger"  title="GB50500：工程量偏差超15%应重新组价/调整综合单价">
             {(s as { qtyOver15?: number }).qtyOver15} 项量差&gt;15% 应调价
-          </span>
+          </Badge>
         ) : null}
         {(s as { compliance?: number }).compliance ? (
-          <span className="chip warn" title="能对齐的两版清单行中，名称/单位/项目特征不响应招标口径的条数（五统一符合性）">
+          <Badge variant="warning"  title="能对齐的两版清单行中，名称/单位/项目特征不响应招标口径的条数（五统一符合性）">
             {(s as { compliance?: number }).compliance} 项五统一不符
-          </span>
+          </Badge>
         ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-1">
           {[
@@ -54,28 +55,28 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
               className={cn(
                 "rounded px-2 py-1 text-[11.5px] transition-colors",
                 filter === k
-                  ? "font-medium text-[var(--bg)]"
-                  : "text-neutral-500 hover:bg-[var(--hover)]"
+                  ? "font-medium text-[var(--background)]"
+                  : "text-muted-foreground hover:bg-[var(--accent)]"
               )}
-              style={filter === k ? { background: "var(--ink-1)" } : undefined}
+              style={filter === k ? { background: "var(--foreground)" } : undefined}
             >
               {l}
             </button>
           ))}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs text-neutral-500">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs text-muted-foreground">
         <span className="break-words">A：{view.labelA}
-          {(view.stageA || view.periodA) && <em className="chip info ml-1 !text-[10.5px] not-italic">{[view.stageA, view.periodA].filter(Boolean).join(" · ")}</em>}
+          {(view.stageA || view.periodA) && <Badge variant="info" className="ml-1 !text-[10.5px] not-italic" >{[view.stageA, view.periodA].filter(Boolean).join(" · ")}</Badge>}
         </span>
-        <span className="text-neutral-300">↔</span>
+        <span className="text-muted-foreground">↔</span>
         <span className="break-words">B：{view.labelB}
-          {(view.stageB || view.periodB) && <em className="chip warn ml-1 !text-[10.5px] not-italic">{[view.stageB, view.periodB].filter(Boolean).join(" · ")}</em>}
+          {(view.stageB || view.periodB) && <Badge variant="warning" className="ml-1 !text-[10.5px] not-italic" >{[view.stageB, view.periodB].filter(Boolean).join(" · ")}</Badge>}
         </span>
       </div>
       {!!view.declared?.labels.length && (
-        <details className="mx-4 mb-2 rounded-lg border border-neutral-200 bg-[var(--surface)]" open={view.declared.labels.some(l => l.label === "合计" && Math.abs(l.diff) > 0)}>
-          <summary className="cursor-pointer px-3 py-2 text-[12px] font-medium text-neutral-700">申报口径对比（源表汇总真值）</summary>
+        <details className="mx-4 mb-2 rounded-lg border border-border bg-[var(--card)]" open={view.declared.labels.some(l => l.label === "合计" && Math.abs(l.diff) > 0)}>
+          <summary className="cursor-pointer px-3 py-2 text-[12px] font-medium text-foreground">申报口径对比（源表汇总真值）</summary>
           <table className="xl-table text-[12px]">
             <thead><tr><th>口径</th><th className="w-28 text-right">A 申报</th><th className="w-28 text-right">B 申报</th><th className="w-28 text-right">差（B−A）</th></tr></thead>
             <tbody>
@@ -84,19 +85,19 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
                   <td>{l.label}</td>
                   <td className="mono text-right">{fmtMoney(l.a)}</td>
                   <td className="mono text-right">{fmtMoney(l.b)}</td>
-                  <td className={cn("mono text-right", l.diff !== 0 && "font-medium text-amber-700")}>{l.diff > 0 ? "+" : ""}{fmtMoney(l.diff)}</td>
+                  <td className={cn("mono text-right", l.diff !== 0 && "font-medium text-[var(--warning-soft-fg)]")}>{l.diff > 0 ? "+" : ""}{fmtMoney(l.diff)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {!!view.declared.units.filter(u => u.side !== "both" || u.diff !== 0).length && (
-            <div className="border-t border-neutral-100 px-3 py-2">
-              <p className="mb-1 text-[11px] text-neutral-400">变动集中在这些单位工程：</p>
+            <div className="border-t border-border px-3 py-2">
+              <p className="mb-1 text-[11px] text-muted-foreground">变动集中在这些单位工程：</p>
               <div className="flex flex-wrap gap-1.5">
                 {view.declared.units.filter(u => u.side !== "both" || u.diff !== 0).map(u => (
-                  <span key={u.name} className="chip" title={`A ${fmtMoney(u.a)} → B ${fmtMoney(u.b)}`}>
+                  <Badge variant="secondary" key={u.name}  title={`A ${fmtMoney(u.a)} → B ${fmtMoney(u.b)}`}>
                     {u.name} {u.side === "a" ? "（仅A）" : u.side === "b" ? "（仅B）" : `${u.diff > 0 ? "+" : ""}${fmtMoney(u.diff)}`}
-                  </span>
+                  </Badge>
                 ))}
               </div>
             </div>
@@ -122,37 +123,37 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
             {rows.map((r, ri) => (
               <tr key={r.key}>
                 <td className="xl-rn">{ri + 1}</td>
-                <td className="mono text-neutral-500">{r.code || "—"}</td>
+                <td className="mono text-muted-foreground">{r.code || "—"}</td>
                 <td className="max-w-44 truncate" title={r.name}>{r.name}</td>
                 <td>
-                  <span className={cn("chip !text-[10.5px]", CMP_STYLE[r.status])}>
+                  <Badge variant={CMP_STYLE[r.status] ?? "secondary"} className={cn("!text-[10.5px]", r.status === "SAME" && "opacity-60")}>
                     {CMP_LABEL[r.status]}
-                  </span>
+                  </Badge>
                   {r.qtyOver15 && (
-                    <span className="chip danger ml-1 !py-px !text-[9.5px]" title="量差超15%，应重新组价">
+                    <Badge variant="danger" className="ml-1 !py-px !text-[9.5px]"  title="量差超15%，应重新组价">
                       &gt;15%
-                    </span>
+                    </Badge>
                   )}
                   {r.nameMismatch && (
-                    <span className="chip warn ml-1 !py-px !text-[9.5px]" title="两版名称原文不一致（五统一）">名称异</span>
+                    <Badge variant="warning" className="ml-1 !py-px !text-[9.5px]"  title="两版名称原文不一致（五统一）">名称异</Badge>
                   )}
                   {r.unitMismatch && (
-                    <span className="chip danger ml-1 !py-px !text-[9.5px]" title="两版单位量纲不一致（五统一）">单位异</span>
+                    <Badge variant="danger" className="ml-1 !py-px !text-[9.5px]"  title="两版单位量纲不一致（五统一）">单位异</Badge>
                   )}
                   {r.featureConflict?.length ? (
-                    <span className="chip warn ml-1 !py-px !text-[9.5px]" title={r.featureConflict.join("；")}>特征异</span>
+                    <Badge variant="warning" className="ml-1 !py-px !text-[9.5px]"  title={r.featureConflict.join("；")}>特征异</Badge>
                   ) : null}
                 </td>
                 <td className="mono text-right">{r.aQty ?? "—"}</td>
-                <td className={cn("mono text-right", r.qtyDelta && "font-medium text-blue-700")}>{r.bQty ?? "—"}</td>
+                <td className={cn("mono text-right", r.qtyDelta && "font-medium text-[var(--info-soft-fg)]")}>{r.bQty ?? "—"}</td>
                 <td className="mono text-right">{r.aPrice ?? "—"}</td>
-                <td className={cn("mono text-right", r.priceDelta && "font-medium text-amber-700")}>{r.bPrice ?? "—"}</td>
+                <td className={cn("mono text-right", r.priceDelta && "font-medium text-[var(--warning-soft-fg)]")}>{r.bPrice ?? "—"}</td>
                 <td className={cn("mono text-right", Number(r.totalDelta) !== 0 && "font-medium")}>
                   {r.totalDelta ? fmtMoney(r.totalDelta) : "—"}
                 </td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={9} className="py-8 text-center text-neutral-500">{filter === "DIFF" ? "两版清单没有差异" : "该类别没有清单项"}</td></tr>}
+            {!rows.length && <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">{filter === "DIFF" ? "两版清单没有差异" : "该类别没有清单项"}</td></tr>}
           </tbody>
         </table>
       </div>
