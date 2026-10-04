@@ -115,9 +115,13 @@ export const colLetter = (i: number): string => {
   return s;
 };
 
-/** 数值解析：去千分位/空格；不可解析返回 null。 */
+/** 金钱文本归一：￥/¥/$ 前缀、会计括号负数 (123)→-123、「元」后缀（与 boq/mapRow.ts 同口径）。 */
+const moneyish = (s: string): string =>
+  s.replace(/[￥¥$＄]/g, "").replace(/^\((.+)\)$/, "-$1").replace(/元$/, "");
+
+/** 数值解析：去千分位/货币符/空格；不可解析返回 null。 */
 const numVal = (v: string | undefined): number | null => {
-  const t = (v ?? "").replace(/[,\s]/g, "");
+  const t = moneyish((v ?? "").replace(/[,\s]/g, ""));
   return t !== "" && Number.isFinite(Number(t)) ? Number(t) : null;
 };
 
@@ -197,7 +201,7 @@ function profileColumns(rows: string[][]): ColumnMap {
       if (!v) continue;
       if (CODE_RE.test(v)) codes++;
       if (UNIT_RE.test(v)) units++;
-      if (v !== "" && !isNaN(Number(v.replace(/,/g, "")))) nums++;
+      if (numVal(v) !== null) nums++;
       if (hasEmbedded(v)) embedded++;
       if (/[\p{Script=Han}]/u.test(v)) text++;
     }
@@ -843,8 +847,7 @@ export function parseWorkbook(
       const spec = (emb["型号规格"] || emb["规格"] || get("spec") || "").trim();
       const quoteName = (get("materialName") || emb["名称"] || name).trim();
 
-      const hasNum = (k: keyof ColumnMap) =>
-        get(k) !== "" && !isNaN(Number(get(k).replace(/,/g, "")));
+      const hasNum = (k: keyof ColumnMap) => numVal(get(k)) !== null;
       // 措施/其他项目表里「安全文明施工费」等条目只有名称+金额，没有编码/量/单位——
       // 名称+数字金额也算有效计价行，否则整表费用丢失
       const isItem =
@@ -933,8 +936,8 @@ export async function writeBackPrices(
     // 脏值纵深防御：NaN/Infinity 落进单元格会把源文件写成坏值且批注记「→ NaN」——宁可中止整个写回
     if (!Number.isFinite(val)) throw new Error(`写回数值无效（${val}），已中止避免污染源文件`);
     const old = cellText(cell.value);
-    const oldNum = Number(old.replace(/,/g, ""));
-    const changed = old === "" || !Number.isFinite(oldNum) || oldNum !== val;
+    const oldNum = numVal(old);
+    const changed = old === "" || oldNum === null || oldNum !== val;
     if (changed) {
       const prev = typeof cell.note === "string" ? cell.note
         : (cell.note as { texts?: { text: string }[] } | undefined)?.texts?.map((t) => t.text).join("") ?? "";
@@ -1005,8 +1008,8 @@ export async function buildExportWorkbook(
     for (const r of s.rows) {
       const row = ws.addRow(labels.map((l) => {
         const v = r.values[l] ?? "";
-        const num = Number(v.replace(/,/g, ""));
-        return v !== "" && !isNaN(num) && /单价|合价|工程量|金额|价格|估价/.test(l)
+        const num = numVal(v);
+        return num !== null && /单价|合价|工程量|金额|价格|估价/.test(l)
           ? num
           : v;
       }));

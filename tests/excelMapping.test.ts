@@ -386,4 +386,25 @@ describe("通用清单列映射", () => {
     ]);
     expect(inspectWorkbook(mixed)[0].taxIncluded).toBe(false);
   });
+
+  it("货币符号/千分位/括号负数/「元」后缀的数字单元格解析为数值", async () => {
+    const buf = await wb([
+      ["序号", "名称", "单位", "工程量", "单价", "合价"],
+      [1, "镀锌钢管", "m", "1,200", "￥85.50", "￥102,600"],
+      [2, "电缆", "m", 200, "40元", 8000],
+      [3, "让利项", "m", 10, "(5)", -50],
+    ]);
+    const s = firstSheet(parseWorkbook(buf));
+    expect(s.type).toBe("BOQ");
+    const rows = s.rows.filter((r) => r.isItem);
+    const ctx = { projectId: "p", fileId: "f", sortOrder: 0, section: "", feeType: "分部分项" as const };
+    const out0 = rowToBoqInput(rows[0], s, { ...ctx });
+    expect(String(out0.unitPrice)).toBe("85.5");
+    expect(String(out0.quantity)).toBe("1200");
+    const out1 = rowToBoqInput(rows[1], s, { ...ctx, sortOrder: 1 });
+    expect(String(out1.unitPrice)).toBe("40");
+    const out2 = rowToBoqInput(rows[2], s, { ...ctx, sortOrder: 2 });
+    expect(String(out2.unitPrice)).toBe("-5");
+    expect(out2.__flags.nonNumericQty).toBeFalsy();
+  });
 });

@@ -9,9 +9,13 @@ import { colLetter, type ParsedRow, type ParsedSheet, type SheetFeeType } from "
 // 原始单元格全量保留在 rawCells（键=表头标签，无表头用列字母），
 // 非数值/推导列通过 __nonNumeric/__derived 标记，供成本模型与审计回溯。
 
-/** 数值单元格容错：取首行、去千分位/空格；非数值落 "0"（decimal.js 遇 "暂估" 会抛错打断导入） */
+/** 金钱文本归一：￥/¥/$ 前缀、会计括号负数 (123)→-123、「元」后缀。 */
+const moneyish = (s: string): string =>
+  s.replace(/[￥¥$＄]/g, "").replace(/^\((.+)\)$/, "-$1").replace(/元$/, "");
+
+/** 数值单元格容错：取首行、去千分位/货币符；非数值落 "0"（decimal.js 遇 "暂估" 会抛错打断导入） */
 const numCell = (v?: string): string => {
-  const first = (v ?? "").split("\n")[0].replace(/[,\s]/g, "");
+  const first = moneyish((v ?? "").split("\n")[0].replace(/[,\s]/g, ""));
   return first !== "" && Number.isFinite(Number(first)) ? first : "0";
 };
 
@@ -20,7 +24,7 @@ const isNonNumeric = (v?: string): boolean => {
   return t !== "" && numValIsNaN(t);
 };
 const numValIsNaN = (t: string) =>
-  !Number.isFinite(Number(t.replace(/[,\s]/g, "")));
+  !Number.isFinite(Number(moneyish(t).replace(/[,\s]/g, "")));
 
 export function rowToBoqInput(
   row: ParsedRow,
