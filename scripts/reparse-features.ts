@@ -10,11 +10,13 @@ import { toJson } from "@shared/json";
 
 async function main() {
   const boq = await prisma.boqItem.findMany({
-    select: { id: true, name: true, rawFeature: true },
+    select: { id: true, name: true, rawFeature: true, features: true },
   });
-  let updated = 0;
+  let updated = 0, skipped = 0;
   for (const it of boq) {
     const next = toJson(parseSemanticFeature(it.name, it.rawFeature ?? ""));
+    // 特征未变跳过写库——重复执行应为零写入的纯校验
+    if (it.features === next) { skipped++; continue; }
     await prisma.boqItem.update({
       where: { id: it.id },
       data: { features: next },
@@ -22,13 +24,14 @@ async function main() {
     updated++;
   }
   const quotes = await prisma.quotationItem.findMany({
-    select: { id: true, materialName: true, spec: true },
+    select: { id: true, materialName: true, spec: true, features: true },
   });
-  let qUpdated = 0;
+  let qUpdated = 0, qSkipped = 0;
   for (const q of quotes) {
     const next = toJson(
       parseSemanticFeature(`${q.materialName} ${q.spec ?? ""}`, "")
     );
+    if (q.features === next) { qSkipped++; continue; }
     await prisma.quotationItem.update({
       where: { id: q.id },
       data: { features: next },
@@ -36,11 +39,12 @@ async function main() {
     qUpdated++;
   }
   const prices = await prisma.materialPrice.findMany({
-    select: { id: true, name: true, spec: true },
+    select: { id: true, name: true, spec: true, features: true },
   });
-  let pUpdated = 0;
+  let pUpdated = 0, pSkipped = 0;
   for (const p of prices) {
     const next = toJson(parseSemanticFeature(`${p.name} ${p.spec ?? ""}`, ""));
+    if (p.features === next) { pSkipped++; continue; }
     await prisma.materialPrice.update({
       where: { id: p.id },
       data: { features: next },
@@ -48,7 +52,7 @@ async function main() {
     pUpdated++;
   }
   console.log(
-    `re-parsed ${updated} BoqItems, ${qUpdated} QuotationItems, ${pUpdated} MaterialPrices`
+    `re-parsed ${updated} BoqItems (${skipped} unchanged), ${qUpdated} QuotationItems (${qSkipped} unchanged), ${pUpdated} MaterialPrices (${pSkipped} unchanged)`
   );
 }
 
