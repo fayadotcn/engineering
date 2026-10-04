@@ -358,37 +358,40 @@ registerTool({
       }
     }
 
-    // 模板学习：确认过/人工改过的映射按表头指纹沉淀，下次同构表直接命中
+    // 模板学习：确认过/人工改过的映射按表头指纹沉淀，下次同构表直接命中。
+    // 模板写失败不该把已完成的导入报失败——它是辅助沉淀，容错放行
     const mapping = insp.mapping;
-    if (mapping) {
-      for (const s of Object.values(mapping)) {
-        if (!s.fingerprint) continue;
-        if (s.templateHit) {
-          await prisma.importTemplate.updateMany({
-            where: { fingerprint: s.fingerprint },
-            data: { useCount: { increment: 1 } },
-          });
-        } else if (s.type !== "GENERIC" && (s.needsConfirm || s.userEdited)) {
-          await prisma.importTemplate.upsert({
-            where: { fingerprint: s.fingerprint },
-            create: {
-              fingerprint: s.fingerprint,
-              headerText: s.headerCells.join(" | "),
-              sheetType: s.type,
-              columns: toJson(s.columns),
-              useCount: 1,
-            },
-            update: {
-              headerText: s.headerCells.join(" | "),
-              sheetType: s.type,
-              columns: toJson(s.columns),
-              useCount: { increment: 1 },
-            },
-          });
+    try {
+      if (mapping) {
+        for (const s of Object.values(mapping)) {
+          if (!s.fingerprint) continue;
+          if (s.templateHit) {
+            await prisma.importTemplate.updateMany({
+              where: { fingerprint: s.fingerprint },
+              data: { useCount: { increment: 1 } },
+            });
+          } else if (s.type !== "GENERIC" && (s.needsConfirm || s.userEdited)) {
+            await prisma.importTemplate.upsert({
+              where: { fingerprint: s.fingerprint },
+              create: {
+                fingerprint: s.fingerprint,
+                headerText: s.headerCells.join(" | "),
+                sheetType: s.type,
+                columns: toJson(s.columns),
+                useCount: 1,
+              },
+              update: {
+                headerText: s.headerCells.join(" | "),
+                sheetType: s.type,
+                columns: toJson(s.columns),
+                useCount: { increment: 1 },
+              },
+            });
+          }
+          s.needsConfirm = false;
         }
-        s.needsConfirm = false;
       }
-    }
+    } catch { /* 模板沉淀失败不阻断导入 */ }
 
     const meta = {
       sheets:

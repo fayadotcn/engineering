@@ -58,8 +58,9 @@ interface DatasetMetaJson {
   [k: string]: unknown;
 }
 
+// 与 priceMatch.norm 同口径：分隔符 ×÷* 归一为 X（原写法 x→X 被 toUpperCase 抵消）
 const norm = (s: string | null | undefined): string =>
-  String(s ?? "").replace(/\s/g, "").replace(/X/gi, "x").toUpperCase();
+  String(s ?? "").replace(/\s/g, "").toUpperCase().replace(/[×*]/g, "X");
 
 const quotaRowsData = (rows: ParsedQuotaRow[], datasetId: string) =>
   rows.map((r) => ({
@@ -253,36 +254,39 @@ export async function ingestDataset(
         notes.push("未识别到材料价格行（需要 名称/单价 等列）");
       meta.note = notes.join("；");
 
-      // 模板学习（同 file.ingest）：确认过/人工改过的映射按表头指纹沉淀，下次同构表直接命中
-      if (meta.mapping) {
-        for (const s of Object.values(meta.mapping)) {
-          if (!s.fingerprint) continue;
-          if (s.templateHit) {
-            await prisma.importTemplate.updateMany({
-              where: { fingerprint: s.fingerprint },
-              data: { useCount: { increment: 1 } },
-            });
-          } else if (s.type !== "GENERIC" && (s.needsConfirm || s.userEdited)) {
-            await prisma.importTemplate.upsert({
-              where: { fingerprint: s.fingerprint },
-              create: {
-                fingerprint: s.fingerprint,
-                headerText: s.headerCells.join(" | "),
-                sheetType: s.type,
-                columns: toJson(s.columns),
-                useCount: 1,
-              },
-              update: {
-                headerText: s.headerCells.join(" | "),
-                sheetType: s.type,
-                columns: toJson(s.columns),
-                useCount: { increment: 1 },
-              },
-            });
+      // 模板学习（同 file.ingest）：确认过/人工改过的映射按表头指纹沉淀，下次同构表直接命中。
+      // 模板写失败不该把已成功导入的行标成 FAILED——它是辅助沉淀，容错放行
+      try {
+        if (meta.mapping) {
+          for (const s of Object.values(meta.mapping)) {
+            if (!s.fingerprint) continue;
+            if (s.templateHit) {
+              await prisma.importTemplate.updateMany({
+                where: { fingerprint: s.fingerprint },
+                data: { useCount: { increment: 1 } },
+              });
+            } else if (s.type !== "GENERIC" && (s.needsConfirm || s.userEdited)) {
+              await prisma.importTemplate.upsert({
+                where: { fingerprint: s.fingerprint },
+                create: {
+                  fingerprint: s.fingerprint,
+                  headerText: s.headerCells.join(" | "),
+                  sheetType: s.type,
+                  columns: toJson(s.columns),
+                  useCount: 1,
+                },
+                update: {
+                  headerText: s.headerCells.join(" | "),
+                  sheetType: s.type,
+                  columns: toJson(s.columns),
+                  useCount: { increment: 1 },
+                },
+              });
+            }
+            s.needsConfirm = false;
           }
-          s.needsConfirm = false;
         }
-      }
+      } catch { /* 模板沉淀失败不阻断导入结果 */ }
 
       await prisma.dataset.update({
         where: { id },
