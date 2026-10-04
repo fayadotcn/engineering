@@ -27,7 +27,7 @@ MODEL_API_KEY=sk-...               # 只给 DEEPSEEK_API_KEY 也行（自动按�
 MODEL_NAME=deepseek-chat
 ```
 
-DeepSeek Harness 为可选遗留模式：`npm run harness`（3210 官方面板 + 3211 业务服务，工作台在 iframe 内仍可用——send() 打自己源）。正式构建 `npm run build`，运行 `npm start`。
+正式构建 `npm run build`，运行 `npm start`。（旧 DeepSeek Harness 模式已下线；存量 planner="harness" 的 run 仅作历史数据展示。）
 
 ## 架构红线
 
@@ -37,7 +37,7 @@ DeepSeek Harness 为可选遗留模式：`npm run harness`（3210 官方面板 +
 - **通用清单接入管道**（任意格式 Excel）：`file.inspect`（`inspectWorkbook` 识别 → 套 `ImportTemplate` 模板 → 存 `ProjectFile.meta.mapping` → 推 `columnMapping` 视图）→ `file.ingest`（async 确认门：模板命中/用户改过/minConfidence≥0.9 才自动放行，否则暂停等用户在视图改列/改类型后批准；先 `deleteByFile` 保证重导幂等；确认过的映射按表头指纹 sha1 沉淀为全局模板）。列角色最强证据是**数值一致性**（`lockByArithmetic`：数量×单价≈合价 锁定三列，0.97），不是表头字；类型判定顺序：措施表名 > 清单信号(项目编码/工程量/综合单价) > 强询价信号(材料名称/品牌/询价) > 有量有价→清单(裸「单价」=综合单价) ；「规格型号+量×价=合价」在简式清单与询价单间真实歧义（typeConfidence 0.6）→ 靠文件名 `applyTypeHint` 纠偏或让用户确认。改类型时 price↔unitPrice 角色必须用 `shared/mapping.ts reconcilePriceRole` 同步（客户端/服务端共用）。`BoqItem.rawCells` 保留整行原文 + `__nonNumeric/__derived`；无综合单价列时 unitPrice=合价÷量。`ProjectFile.contentHash` 同项目同内容不重复导入；`POST /api/files/[id]/reingest` 按当前映射重导。人工/机械单价列（laborPrice/machinePrice）导入时升格为 `BoqItem.laborUnitPrice/machineUnitPrice`（rawCells 仍留原文），由 `cost.composition` 人材机成本构成分析直接消费。
 - `file/pdf.ts` PDF 文本层提取（pdfjs-dist，serverExternal）+ BOQ 行识别（编码+单位+量+价正则）；≥5 行自动导入清单，否则按文档展示（document 视图）。
 - `cost-engine/fileCompare.ts` 两版清单对审：编码优先对齐、无编码按语义组键；输出 价差/量差/独有项 + 总额差（fileCompare 视图）。
-- 确认门：Harness 对带 `confirm` 标记的专业工具调用原生 approval；批准后才执行。文件导入的映射确认使用 AWAITING_CONFIRM 与 POST /api/runs/[runId]/confirm。跨请求的导入待确认表和事件订阅必须存 globalThis（Next 每个 route 独立 module graph）。
+- 确认门：带 `confirm` 标记的专业工具经 `agent/pending.ts` 挂起 run（AWAITING_CONFIRM），POST /api/runs/[runId]/confirm 批准后才执行；文件导入的映射确认同走此门。跨请求的导入待确认表和事件订阅必须存 globalThis（Next 每个 route 独立 module graph）。
 - `cost-engine/calcExpr.ts` 工程量计算式求值（递归下降，禁 eval；×÷（）全角与单位词自动处理）。
 - 前端样式：`src/ui/styles/` 分文件，`tokens.css` 管全部设计变量。明暗主题走 `<html data-theme>`：`layout.tsx` 内联脚本首帧前落定（localStorage `cost-theme`=auto|light|dark，auto 跟随系统+跨页签同步），`ui/ThemeToggle.tsx` 三态切换。**品牌蓝分两档**：填充背景/按钮底用 `--brand-accent`，作前景（文字、图标、细线、焦点描边）一律用 `--brand-ink`（深色下提亮、浅色下加深，保小字对比度）；`#fff` 文字配品牌底时用 `--brand-on-accent`。打印强制浅色口径（tokens.css 尾部 @media print 重置）。
 - 语义比较：BoqSemanticFeature 分组 → featureCompatible 冲突检查 → 价格比。禁止纯字符串匹配。
