@@ -29,10 +29,17 @@ vi.mock("@project/facts", () => ({
 vi.mock("@project/service", () => ({
   createProject: vi.fn(async (name: string) => ({ id: "newp", name })),
 }));
-vi.mock("@database/client", () => ({ prisma: {} }));
+const quoteRows = vi.hoisted(() => ({ rows: [] as { materialName: string; spec: string; price: string; file: { filename: string; createdAt: Date }; createdAt: Date }[] }));
+vi.mock("@database/client", () => ({
+  prisma: {
+    quotationItem: { findMany: vi.fn(async () => quoteRows.rows) },
+    materialPrice: { findMany: vi.fn(async () => []) },
+  },
+}));
 
 import "../agent/tools/boqTools";
 import "../agent/tools/costTools";
+import "../agent/tools/materialTools";
 import "../agent/tools/projectTools";
 import { getTool } from "../agent/tools/registry";
 
@@ -155,6 +162,16 @@ describe("检查类工具接线（boq.find*）", () => {
     expect(r.views?.[0].anomalyType).toBe("DATA_QUALITY");
   });
 
+  it("findFeatureMismatch 命中同码异特征", async () => {
+    db.items = [
+      item({ id: "fm1", code: "030404017001", name: "配电箱", unit: "台", quantity: "1", unitPrice: "1500", totalPrice: "1500.00", features: { category: "配电箱", specification: "AL-1" } }),
+      item({ id: "fm2", code: "030404017001", name: "配电箱", unit: "台", quantity: "1", unitPrice: "1500", totalPrice: "1500.00", features: { category: "配电箱", specification: "AL-9" } }),
+    ];
+    const r = await run("boq.findFeatureMismatch");
+    expect(r.observation.count).toBeGreaterThan(0);
+    expect(r.views?.[0].anomalyType).toBe("FEATURE_MISMATCH");
+  });
+
   it("干净清单各检查均 0 命中且视图行空", async () => {
     db.items = [
       item({ id: "ok1", code: "030404017001", name: "配电箱", unit: "台", quantity: "2", unitPrice: "1500", totalPrice: "3000.00", features: { category: "配电箱" } }),
@@ -197,6 +214,13 @@ describe("cost.* 聚合工具接线", () => {
     const r = await run("cost.materialBreakdown", { categories: ["配电箱"] }) as ToolResult & { observation: { slices: { label: string }[] } };
     expect(r.observation.slices.every((s) => s.label === "配电箱")).toBe(true);
   });
+
+  it("cost.composition 出人材机构成视图", async () => {
+    db.items = FIXTURE;
+    const r = await run("cost.composition") as ToolResult & { views: { kind: string }[]; observation: { totals: { revenue: string } } };
+    expect(r.views[0].kind).toBe("costComposition");
+    expect(Number(r.observation.totals.revenue)).toBeGreaterThan(0);
+  });
 });
 
 describe("quantity.calculate / quantity.adjust 守卫", () => {
@@ -230,5 +254,19 @@ describe("project.* 工具接线", () => {
     const r = await run("project.create", { name: "新工程" });
     expect(createProject).toHaveBeenCalledWith("新工程");
     expect((r.observation as { projectId: string }).projectId).toBe("newp");
+  });
+});
+
+describe("material.getPriceHistory 接线", () => {
+  it("同材料不同规格写法（4×35≡4x35）归并为一条价格轨迹", async () => {
+    quoteRows.rows = [
+      { materialName: "电力电缆", spec: "YJV-4x35", price: "120.00", file: { filename: "询价1.xlsx", createdAt: new Date("2024-01-01") }, createdAt: new Date("2024-01-01") },
+      { materialName: "电力电缆", spec: "YJV-4×35", price: "125.00", file: { filename: "询价2.xlsx", createdAt: new Date("2024-03-01") }, createdAt: new Date("2024-03-01") },
+    ];
+    const r = await run("material.getPriceHistory", {}) as ToolResult & {
+      observation: { materials: number; detail: { spec: string; points: unknown[] }[] };
+    };
+    expect(r.observation.materials).toBe(1);
+    expect(r.observation.detail[0].points.length).toBe(2);
   });
 });
