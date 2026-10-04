@@ -88,3 +88,20 @@ describe("parseSemanticFeature", () => {
     expect(inferDiscipline("散热器", "", "采暖工程")).toBe("PLUMBING");
   });
 });
+
+describe("normUnit 量纲归一", () => {
+  it("同义单位归一到引擎口径", async () => {
+    const { normUnit } = await import("@cost-engine/semantic");
+    expect(normUnit("米")).toBe("m");
+    expect(normUnit("M")).toBe("m");
+    expect(normUnit("平米")).toBe("㎡");
+    expect(normUnit("m2")).toBe("㎡");
+    expect(normUnit("千米")).toBe("km");
+    expect(normUnit("立方米")).toBe("m³");
+  });
+  it("全角字符与空白先规整再归一", async () => {
+    const { normUnit } = await import("@cost-engine/semantic");
+    expect(normUnit("Ｍ")).toBe("m"); // 全角 M
+    expect(normUnit(" m ")).toBe("m");
+  });
+});

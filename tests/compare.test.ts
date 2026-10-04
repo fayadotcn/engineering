@@ -260,3 +260,31 @@ describe("findDuplicateItems", () => {
     expect(findDuplicateItems([a, b])).toHaveLength(0);
   });
 });
+
+describe("findPriceAnomalies", () => {
+  it("组内≥3项时偏离中位价>15%的项被标出", async () => {
+    const { findPriceAnomalies } = await import("@cost-engine/compare");
+    const items = [
+      item("镀锌钢管", "DN100 沟槽连接", "m", "10", "100.00"),
+      item("镀锌钢管", "DN100 沟槽连接", "m", "20", "105.00"),
+      item("镀锌钢管", "DN100 沟槽连接", "m", "30", "98.00"),
+      item("镀锌钢管", "DN100 沟槽连接", "m", "40", "150.00"), // +47% 离中位 101.5
+    ];
+    const rows = findPriceAnomalies(items);
+    expect(rows.length).toBe(1);
+    expect(rows[0].items.map((i) => i.unitPrice)).toContain("150.00");
+  });
+
+  it("偏离≤15%不报；组内<3项不报", async () => {
+    const { findPriceAnomalies } = await import("@cost-engine/compare");
+    expect(findPriceAnomalies([
+      item("镀锌钢管", "DN100 沟槽连接", "m", "10", "100.00"),
+      item("镀锌钢管", "DN100 沟槽连接", "m", "20", "110.00"),
+      item("镀锌钢管", "DN100 沟槽连接", "m", "30", "95.00"),
+    ]).length).toBe(0);
+    expect(findPriceAnomalies([
+      item("镀锌钢管", "DN100 沟槽连接", "m", "10", "100.00"),
+      item("镀锌钢管", "DN100 沟槽连接", "m", "20", "500.00"),
+    ]).length).toBe(0);
+  });
+});
