@@ -25,14 +25,21 @@ export async function PATCH(
   if (!sheet)
     return NextResponse.json({ error: "sheet 不存在" }, { status: 404 });
 
-  applySheetPatch(sheet, body);
-
-  const meta = fromJson<Record<string, unknown>>(file.meta, {});
-  meta.mapping = mapping;
-  await prisma.projectFile.update({
-    where: { id: file.id },
-    data: { meta: toJson(meta) },
+  // 读-改-写竞态：两个并发 PATCH（不同 sheet）或导入写 meta 时，
+  // 拿请求开始时的 meta 整写会丢对方改动——事务内重读最新 meta 再打补丁
+  const finalMapping = await prisma.$transaction(async (tx) => {
+    const fresh = await tx.projectFile.findUnique({ where: { id: file.id }, select: { meta: true } });
+    const meta = fromJson<Record<string, unknown>>(fresh?.meta ?? "{}", {});
+    const latest = meta.mapping as typeof mapping | undefined;
+    const target = latest?.[body.sheetName];
+    if (!target) return null; // 提交间隙 sheet 被重识别改名/删除
+    applySheetPatch(target, body);
+    meta.mapping = latest;
+    await tx.projectFile.update({ where: { id: file.id }, data: { meta: toJson(meta) } });
+    return latest;
   });
+  if (!finalMapping)
+    return NextResponse.json({ error: "sheet 不存在" }, { status: 404 });
 
-  return NextResponse.json({ view: mappingToView(file, mapping) });
+  return NextResponse.json({ view: mappingToView(file, finalMapping) });
 }

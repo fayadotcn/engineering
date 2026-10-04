@@ -370,15 +370,25 @@ export async function saveDatasetMapping(
 ) {
   const ds = await prisma.dataset.findUnique({ where: { id } });
   if (!ds) return null;
-  const meta = fromJson<DatasetMetaJson>(ds.meta, {});
-  if (!meta.mapping) {
-    const buffer = await storage.get(ds.storageKey);
-    meta.mapping = await inspectWithTemplates(buffer, ds.filename);
-  }
-  const sheet = meta.mapping[sheetName];
-  if (!sheet) return null;
-  applySheetPatch(sheet, { columns, type });
-  await prisma.dataset.update({ where: { id }, data: { meta: toJson(meta) } });
+  // 事务内重读 meta 再打补丁——两个并发 PATCH（不同 sheet）或 ingest 写
+  // meta 时，拿入口处的 meta 整写会静默丢对方的改动
+  const ok = await prisma.$transaction(async (tx) => {
+    const fresh = await tx.dataset.findUnique({ where: { id }, select: { meta: true } });
+    if (!fresh) return false;
+    const meta = fromJson<DatasetMetaJson>(fresh.meta, {});
+    if (!meta.mapping) {
+      // 首次映射需要解析源文件——偶发路径，读盘+inspect 在事务内完成，
+      // 保证写回的 meta 以最新行为底
+      const buffer = await storage.get(ds.storageKey);
+      meta.mapping = await inspectWithTemplates(buffer, ds.filename);
+    }
+    const sheet = meta.mapping[sheetName];
+    if (!sheet) return false;
+    applySheetPatch(sheet, { columns, type });
+    await tx.dataset.update({ where: { id }, data: { meta: toJson(meta) } });
+    return true;
+  });
+  if (!ok) return null;
   return getDatasetMapping(id);
 }
 
