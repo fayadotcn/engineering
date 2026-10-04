@@ -94,8 +94,12 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
         qtyDiff && !D(ia.quantity).isZero() &&
         D(ib.quantity).minus(ia.quantity).abs().div(D(ia.quantity).abs()).gt(0.15);
       // 五统一符合性：编码/语义能对齐但名称原文、单位、项目特征不响应招标口径
-      const nameMismatch =
-        ia.name.trim().replace(/\s+/g, "") !== ib.name.trim().replace(/\s+/g, "");
+      // 全半角归一：全角（）Ａ１２３与半角 ()A123 视为同字，否则标点排版差异全是误报
+      const normName = (s: string) =>
+        s.trim().replace(/\s+/g, "")
+          .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+          .toLowerCase();
+      const nameMismatch = normName(ia.name) !== normName(ib.name);
       const unitMismatch = normUnit(ia.unit) !== normUnit(ib.unit);
       const featureConflict = featureCompatible(ia.features, ib.features).conflicts;
       rows.push({

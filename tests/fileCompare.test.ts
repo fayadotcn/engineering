@@ -71,6 +71,17 @@ describe("compareBoqSets", () => {
     expect(compareBoqSets(a, b)[0].status).toBe("SAME");
   });
 
+  it("名称全半角/大小写排版差不误报 nameMismatch", () => {
+    const a = [item("钢管（热镀锌）", "DN100", "m", "10", "85", "C001")];
+    const b = [item("钢管(热镀锌)", "DN100", "m", "10", "85", "C001", "fB")];
+    const r = compareBoqSets(a, b)[0];
+    expect(r.status).toBe("SAME");
+    expect(r.nameMismatch).toBeUndefined();
+    // 真改名仍标
+    const c = [item("钢管(衬塑)", "DN100", "m", "10", "85", "C001", "fB")];
+    expect(compareBoqSets(a, c)[0].nameMismatch).toBe(true);
+  });
+
   it("marks identical sets all SAME", () => {
     const a = [item("桥架", "200x100", "m", "30", "45", "C1")];
     const b = [item("桥架", "200x100", "m", "30", "45", "C1", "fB")];
