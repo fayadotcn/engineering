@@ -240,6 +240,37 @@ describe("report.generate 措施与其他项目表", () => {
   });
 });
 
+describe("report.generate 分部分项清单未定价标记", () => {
+  it("未定价行单价/合价留白且整行琥珀底纹；已定价行不受影响", async () => {
+    mocks.items.mockResolvedValue([
+      item({ id: "i1", name: "镀锌钢管", unitPrice: "120", totalPrice: "1200" }),
+      item({ id: "i2", name: "未定价管", code: "030002", unitPrice: "0", totalPrice: "0" }),
+    ]);
+    await getTool("report.generate")!.handler!(ctx, {});
+    const wb = await load(mocks.put.mock.calls[0][0]);
+    const sB = wb.getWorksheet("分部分项清单")!;
+    let pricedRow: ExcelJS.Row | undefined;
+    let unpricedRow: ExcelJS.Row | undefined;
+    sB.eachRow((row) => {
+      const vals = row.values as unknown[];
+      if (String(vals[3]).includes("镀锌钢管")) pricedRow = row;
+      if (String(vals[3]).includes("未定价管")) unpricedRow = row;
+    });
+    expect(pricedRow).toBeTruthy();
+    expect(unpricedRow).toBeTruthy();
+    // 已定价：单价/合价是真数字
+    expect(Number(pricedRow!.getCell(7).value)).toBe(120);
+    expect(Number(pricedRow!.getCell(8).value)).toBe(1200);
+    // 未定价：留白而非 0.00
+    expect(unpricedRow!.getCell(7).value === null || unpricedRow!.getCell(7).value === "").toBe(true);
+    expect(unpricedRow!.getCell(8).value === null || unpricedRow!.getCell(8).value === "").toBe(true);
+    // 琥珀底纹
+    const fill = unpricedRow!.getCell(3).fill as ExcelJS.FillPattern | undefined;
+    expect(fill?.type).toBe("pattern");
+    expect((fill?.fgColor as { argb?: string } | undefined)?.argb).toBe("FFFFF7E0");
+  });
+});
+
 describe("report.generate 单位工程汇总", () => {
   it("多个单位工程 → 出汇总 sheet 带合计", async () => {
     mocks.items.mockResolvedValue([

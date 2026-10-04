@@ -7,6 +7,7 @@ import { storage } from "@file/storage";
 import { writeBackPrices, buildExportWorkbook, type ColumnMap, type CellPatch } from "@file/excel";
 import { ensureInspection, mappingToView } from "@file/inspection";
 import { fromJson } from "@shared/json";
+import { isPricableItem } from "@shared/types";
 import { projectTotals } from "@cost-engine/aggregate";
 import { D, fmtMoney } from "@cost-engine/money";
 
@@ -250,9 +251,19 @@ registerTool({
         r.font = bold.font;
         return;
       }
-      const r = sBoq.addRow([++boqSeq, it.code, it.name, it.rawFeature, it.unit, Number(it.quantity), Number(it.unitPrice), Number(it.totalPrice)]);
+      // 未定价行：单价/合价留白 + 淡琥珀底纹（与导出件同口径），「0.00」会误读成已组价
+      const unpriced = isPricableItem(it) && D(it.unitPrice || "0").isZero();
+      const r = sBoq.addRow([
+        ++boqSeq, it.code, it.name, it.rawFeature, it.unit, Number(it.quantity),
+        unpriced ? "" : Number(it.unitPrice),
+        unpriced && D(it.totalPrice || "0").isZero() ? "" : Number(it.totalPrice),
+      ]);
       r.getCell(7).numFmt = moneyFmt;
       r.getCell(8).numFmt = moneyFmt;
+      if (unpriced)
+        r.eachCell({ includeEmpty: true }, (c) => {
+          c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF7E0" } };
+        });
     });
     sBoq.columns = [{ width: 6 }, { width: 16 }, { width: 30 }, { width: 40 }, { width: 8 }, { width: 12 }, { width: 12 }, { width: 14 }];
 
@@ -414,7 +425,6 @@ registerTool({
     if (suppliedRows.length) {
       // 逐行核对：甲供材对应的清单项若已计主材暂估价 = 重复计价（甲供材不计入承包价）
       const { matchQuotations } = await import("@cost-engine/match");
-      const { isPricableItem } = await import("@shared/types");
       const byItem = new Map(items.map((it) => [it.id, it]));
       const checkRows = matchQuotations(items, suppliedRows).rows.map((r) => {
         const hits = r.matchedBoqItemIds.map((id) => byItem.get(id)).filter((it): it is typeof items[number] => !!it && isPricableItem(it));
