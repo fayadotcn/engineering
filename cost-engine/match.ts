@@ -11,7 +11,7 @@ const norm = (s: string) =>
 
 // 规格比对归一化：公称直径前缀与裸数字等价（DN100 ≡ Φ100 ≡ 100），
 // 尺寸分隔符统一 x（4*25 ≡ 4×25 ≡ 4x25 ≡ 4X25）。
-const specNorm = (s: string) =>
+export const specNorm = (s: string) =>
   norm(s)
     .replace(/^(?:DN|DE|Φ|φ)/, "")
     .replace(/[*×X]/g, "x");

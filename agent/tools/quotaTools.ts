@@ -4,6 +4,7 @@ import { registerTool } from "./registry";
 import { listBoq } from "@boq/service";
 import { listQuotations } from "@material/service";
 import { calcQuota, matchQuota, top2Quota, mainPriceKey, lineFromQuota, planPrice, quotaLaborTotals } from "@cost-engine/quota";
+import { specNorm } from "@cost-engine/match";
 import { getQuotaLibrary } from "@quota/service";
 import { findLibraryPrice, getPricePrefs } from "@dataset/service";
 import { getFact, setFact, parseRateValue } from "@project/facts";
@@ -38,7 +39,8 @@ async function resolveMainPrices(
       const qSpec = qf.diameter ?? qf.specification ?? q.spec;
       const sameSpec = !!(
         spec && qSpec &&
-        spec.toLowerCase().replace(/x/gi, "x") === qSpec.toLowerCase().replace(/x/gi, "x")
+        // 与 matchQuotations 同一归一化口径：DN前缀/×÷*分隔符等价
+        specNorm(spec) === specNorm(qSpec)
       );
       const nameHit = !!(
         q.materialName &&

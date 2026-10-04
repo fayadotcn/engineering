@@ -128,6 +128,21 @@ describe("quota.search 结果序确定性", () => {
   });
 });
 
+describe("quota.calculate 主材询价规格归一化", () => {
+  it("询价规格 4×35 命中清单特征 4x35（×/x 等价），不再回退材料库", async () => {
+    const { listQuotations } = await import("@material/service");
+    const { findLibraryPrice } = await import("@dataset/service");
+    vi.mocked(listQuotations).mockResolvedValueOnce([{
+      id: "q1", fileId: "f", materialName: "电力电缆", spec: "4×35", unit: "m",
+      brand: "", price: "60", sheetName: "s", features: {},
+    }] as never);
+    vi.mocked(findLibraryPrice).mockClear();
+    db.items = [item({ name: "电力电缆", rawFeature: "YJV-4x35+1x16", features: { specification: "4x35" } as never })];
+    await getTool("quota.calculate")!.handler!(ctx as never, {} as never);
+    expect(vi.mocked(findLibraryPrice)).not.toHaveBeenCalled(); // 项目询价已命中
+  });
+});
+
 describe("spec.search 定额说明检索", () => {
   const specCall = (args: { query: string }) =>
     getTool("spec.search")!.handler!(ctx as never, args as never) as Promise<{
