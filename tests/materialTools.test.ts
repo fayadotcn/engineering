@@ -29,6 +29,10 @@ vi.mock("@boq/service", () => ({
   }),
 }));
 vi.mock("@material/service", () => ({ listQuotations: vi.fn(async () => db.quotes) }));
+vi.mock("@cost-engine/match", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@cost-engine/match")>();
+  return { ...orig, matchQuotations: vi.fn(orig.matchQuotations) };
+});
 vi.mock("@dataset/service", () => ({
   getPricePrefs: vi.fn(async () => ({})),
   searchMaterialPrices: vi.fn(async () => []),
@@ -188,6 +192,34 @@ describe("material.clearOwnerSuppliedPrice 甲供材扣减", () => {
     vi.mocked(updateBoqItems).mockClear();
     const r = (await call("material.clearOwnerSuppliedPrice")) as { observation: { cleared: number }; message?: string };
     expect(r.observation.cleared).toBe(0);
+    expect(vi.mocked(updateBoqItems)).not.toHaveBeenCalled();
+  });
+
+  it("低置信疑似匹配不清价——弱匹配清掉真主材价不可逆", async () => {
+    const { matchQuotations } = await import("@cost-engine/match");
+    const a = boq("不锈钢水管", "DN50");
+    a.mainMaterialPrice = "80";
+    db.items = [a];
+    db.ownerFiles = [{ id: "f-owner", filename: "甲供材表.xlsx" }];
+    db.quotes = [quote("水管", "", "50", "m", "f-owner")];
+    // matchQuotations 当前实现里 LOW_CONFIDENCE 行的 matchedBoqItemIds 恒为空，
+    // 但扣减是写操作——防御守卫要在匹配器口径变化时也兜住弱匹配
+    vi.mocked(matchQuotations).mockReturnValueOnce({
+      rows: [{
+        quotationItemId: "q1", materialName: "水管", spec: "", brand: "", price: "50",
+        matchedBoqItemIds: [a.id], matchedNames: [a.name],
+        confidence: 35, status: "LOW_CONFIDENCE",
+      }],
+      unmatched: [],
+    });
+    const { updateBoqItems } = await import("@boq/service");
+    vi.mocked(updateBoqItems).mockClear();
+    const r = (await call("material.clearOwnerSuppliedPrice")) as {
+      observation: { cleared: number; suspected?: number }; message?: string;
+    };
+    expect(r.observation.cleared).toBe(0);
+    expect(r.observation.suspected).toBe(1);
+    expect(r.message).toContain("置信度不足");
     expect(vi.mocked(updateBoqItems)).not.toHaveBeenCalled();
   });
 });

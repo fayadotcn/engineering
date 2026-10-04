@@ -369,7 +369,7 @@ async function ownerSuppliedScan(ctx: { projectId: string }) {
   const { rows: matched } = matchQuotations(items, supplied);
   const byId = new Map(items.map((i) => [i.id, i]));
   const seen = new Set<string>();
-  const conflicts: { item: BoqItemDTO; via: string }[] = [];
+  const conflicts: { item: BoqItemDTO; via: string; status: "MATCHED" | "LOW_CONFIDENCE" }[] = [];
   let matchedClean = 0;
   for (const r of matched) {
     if (r.status === "UNMATCHED") continue;
@@ -378,7 +378,7 @@ async function ownerSuppliedScan(ctx: { projectId: string }) {
       if (!it || !isPricableItem(it) || seen.has(it.id)) continue;
       seen.add(it.id);
       if (D(it.mainMaterialPrice ?? "0").gt(0))
-        conflicts.push({ item: it, via: `${r.materialName}${r.spec ? ` ${r.spec}` : ""}` });
+        conflicts.push({ item: it, via: `${r.materialName}${r.spec ? ` ${r.spec}` : ""}`, status: r.status });
       else matchedClean++;
     }
   }
@@ -410,7 +410,7 @@ registerTool({
         sectionPath: c.item.sectionPath,
       }],
       prices: [c.item.mainMaterialPrice ?? "0"],
-      reason: `甲供材「${c.via}」对应的清单项已计主材暂估价 ${c.item.mainMaterialPrice} 元——甲供材由发包人供货，不应计入承包价，请核实扣减`,
+      reason: `甲供材「${c.via}」对应的清单项已计主材暂估价 ${c.item.mainMaterialPrice} 元——甲供材由发包人供货，不应计入承包价，请核实扣减${c.status === "LOW_CONFIDENCE" ? "（低置信匹配，先人工核对材料是否同一项）" : ""}`,
     }));
     return {
       observation: { supplied: supplied.length, matchedItems, conflicts: conflicts.length, clean: matchedClean },
@@ -441,25 +441,35 @@ registerTool({
       return { observation: { cleared: 0 }, message: "甲供材文件没有材料行，无需扣减" };
     if (!conflicts.length)
       return { observation: { cleared: 0 }, message: "未发现甲供材重复计价，无需扣减" };
-    const patches = conflicts.map((c) => ({ id: c.item.id, patch: { mainMaterialPrice: "0" } }));
+    // 低置信匹配只是疑似——扣减是写操作，弱匹配清掉真主材价不可逆风险大；
+    // 只动确定命中的冲突，疑似项留在核对表里人工判
+    const firm = conflicts.filter((c) => c.status === "MATCHED");
+    if (!firm.length)
+      return {
+        observation: { cleared: 0, suspected: conflicts.length },
+        message: `有 ${conflicts.length} 项疑似甲供材重复计价但匹配置信度不足，未自动扣减——请先看「甲供材核对」表人工核实`,
+      };
+    const patches = firm.map((c) => ({ id: c.item.id, patch: { mainMaterialPrice: "0" } }));
     const { before, after } = await updateBoqItems(ctx.projectId, patches);
     const diffRows: DiffRow[] = before.map((b, i) => ({
       itemId: b.id, code: b.code, name: b.name,
       field: "mainMaterialPrice", before: b.mainMaterialPrice ?? "0", after: after[i].mainMaterialPrice,
     }));
+    const suspected = conflicts.length - firm.length;
     return {
-      observation: { cleared: conflicts.length },
+      observation: { cleared: firm.length, suspected },
       views: [
         { kind: "diff", id: `view:diff:${ctx.runId}`, title: "甲供材扣减 Diff", receiptId: "", rows: diffRows },
         { kind: "boqTable", id: "view:boq", title: "工程量清单" },
       ],
       receipts: [{
         actionType: "MATERIAL_PRICE_FILL",
-        summary: `甲供材扣减：${conflicts.length} 项主材暂估价清零（发包人供货不计入承包价）`,
+        summary: `甲供材扣减：${firm.length} 项主材暂估价清零（发包人供货不计入承包价）`,
         before: before.map((b) => ({ id: b.id, name: b.name, mainMaterialPrice: b.mainMaterialPrice ?? "0" })),
         after: after.map((a) => ({ id: a.id, name: a.name, mainMaterialPrice: a.mainMaterialPrice })),
       }],
-      message: `已清零 ${conflicts.length} 项清单的主材暂估价（${conflicts.slice(0, 5).map((c) => c.item.name).join("、")}${conflicts.length > 5 ? " 等" : ""}）——综合单价请重新「测算组价」`,
+      message: `已清零 ${firm.length} 项清单的主材暂估价（${firm.slice(0, 5).map((c) => c.item.name).join("、")}${firm.length > 5 ? " 等" : ""}）——综合单价请重新「测算组价」` +
+        (suspected ? `；另有 ${suspected} 项疑似匹配（低置信）未动，见「甲供材核对」` : ""),
     };
   },
 });
