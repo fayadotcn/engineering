@@ -57,8 +57,10 @@ async function main() {
     sheet.addRow(["名称", "规格型号", "单位", "数量", "单价", "金额"]);
     sheet.addRow(["镀锌钢管", "DN100", "m", 10, 50, 500]);
     sheet.addRow(["镀锌钢管", "DN50", "m", 10, 30, 300]);
+    // xlsx.writeBuffer 每次产出含 zip 时间戳的不同字节——去重断言必须用同一份 buffer
+    const bookBuf = new Uint8Array(await book.xlsx.writeBuffer());
     const form = new FormData();
-    form.append("file", new Blob([new Uint8Array(await book.xlsx.writeBuffer())]), "用途待确认.xlsx");
+    form.append("file", new Blob([bookBuf]), "用途待确认.xlsx");
     const uploaded = await fetch(`${base}/api/projects/${id}/files`, { method: "POST", body: form }).then(r => r.json());
     assert(uploaded.runId);
     let run;
@@ -82,7 +84,7 @@ async function main() {
     const items = await request(`/api/projects/${id}/boq`); assert.equal(items.filter((i: { isHeader: boolean }) => !i.isHeader).length, 2);
     // 同内容文件再传一次 → contentHash 去重，不起新 run
     const formDup = new FormData();
-    formDup.append("file", new Blob([new Uint8Array(await book.xlsx.writeBuffer())]), "用途待确认-副本.xlsx");
+    formDup.append("file", new Blob([bookBuf]), "用途待确认-副本.xlsx");
     const dup = await fetch(`${base}/api/projects/${id}/files`, { method: "POST", body: formDup }).then(r => r.json());
     assert.equal(dup.duplicate, true); assert.equal(dup.runId, null);
     const item = items.find((i: { isHeader: boolean }) => !i.isHeader);
