@@ -5,18 +5,27 @@
 const UNIT_WORDS = /[a-zA-Z一-龥㎡³]+/g;
 
 export function evalExpr(src: string): number {
-  const cleaned = src
+  const marked = src
     .replace(/,/g, "")
     .replace(/[×✕✖]/g, "*")
+    // 数字间的 x 是乘号记号（造价习惯写法 3x12、4x35）；不转会被当字母剥掉静默拼数
+    .replace(/(\d)\s*[xX](?=\s*\d)/g, "$1*")
+    // 科学计数法 e 占位保护：UNIT_WORDS 会把 e 当字母剥掉（1e10→110、2.5e-3→-2）
+    .replace(/(\d)\s*([eE])\s*([+-]?\d)/g, "$1@$3")
     .replace(/[÷]/g, "/")
     .replace(/[（【]/g, "(")
     .replace(/[）】]/g, ")")
     .replace(/[＋]/g, "+")
     .replace(/[－—–]/g, "-")
-    .replace(UNIT_WORDS, "") // 剥离单位/说明文字（m、层、个、米…）
+    // 单位词剥成哨兵 # 而非空串——「3米2米」「3ab12」剥完剩 3#2，
+    // 数字间夹文字说明源式缺运算符，报错而不是静默拼成 32/312
+    .replace(UNIT_WORDS, "#")
     .replace(/\s/g, "");
-  if (!cleaned) throw new Error("表达式为空");
-  if (!/^[\d+\-*/().%]+$/.test(cleaned)) throw new Error(`无法识别的表达式片段`);
+  if (!marked || marked.replace(/#/g, "") === "") throw new Error("表达式为空");
+  if (/[\d.]#[\d.]/.test(marked))
+    throw new Error("表达式中数字与文字之间缺运算符（如应为 3米×2米 或 3米+2米）");
+  const cleaned = marked.replace(/#/g, "").replace(/@/g, "e");
+  if (!/^[\d+\-*/().%e]+$/.test(cleaned)) throw new Error(`无法识别的表达式片段`);
 
   let i = 0;
   let depth = 0; // 括号嵌套深度上限：超长算式抛明确错误而不是栈溢出
@@ -50,10 +59,10 @@ export function evalExpr(src: string): number {
       eat("("); v = expr(); eat(")"); depth--;
     }
     else {
-      const m = /^[\d.]+/.exec(cleaned.slice(i));
+      const m = /^[\d.]+(?:e[+-]?\d+)?/.exec(cleaned.slice(i));
       if (!m) throw new Error(`位置 ${i} 处期望数字`);
       // 「1.2.3」这类多小数点片段不能静默截成 1.2——造价式里它几乎总是录入错误
-      if ((m[0].match(/\./g) ?? []).length > 1 || !/^\d+(\.\d+)?$/.test(m[0]))
+      if (!/^\d+(\.\d+)?(e[+-]?\d+)?$/.test(m[0]))
         throw new Error(`位置 ${i} 处数字「${m[0]}」格式非法`);
       i += m[0].length;
       v = parseFloat(m[0]);

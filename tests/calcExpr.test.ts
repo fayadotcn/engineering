@@ -30,4 +30,28 @@ describe("evalExpr", () => {
     expect(() => evalExpr("(".repeat(500) + "1" + ")".repeat(500))).toThrow("嵌套过深");
     expect(evalExpr("((2+3)×4)")).toBe(20);
   });
+  it("数字间的 x 视为乘号（3x12=36），不被当字母剥掉拼数", () => {
+    expect(evalExpr("3x12")).toBe(36);
+    expect(evalExpr("4X35")).toBe(140);
+    expect(evalExpr("3 x 12")).toBe(36);
+  });
+  it("科学计数法 e 不被当单位字母剥掉", () => {
+    expect(evalExpr("1e3")).toBe(1000);
+    expect(evalExpr("2.5e3")).toBe(2500);
+    expect(evalExpr("1e-3")).toBe(0.001);
+    expect(evalExpr("2e+2*3")).toBe(600);
+  });
+  it("数字间夹文字缺运算符报错而非静默拼数", () => {
+    expect(() => evalExpr("3米2米")).toThrow("缺运算符");
+    expect(() => evalExpr("12abc34")).toThrow("缺运算符");
+    expect(() => evalExpr("3m2")).toThrow("缺运算符");
+    // 行尾/行首单位词仍是合法用法
+    expect(evalExpr("15米")).toBe(15);
+    expect(evalExpr("（3+5）米×2")).toBe(16);
+  });
+  it("超长与畸形输入快速失败", () => {
+    expect(() => evalExpr("a".repeat(5000))).toThrow();
+    expect(evalExpr("1+".repeat(2000) + "1")).toBe(2001);
+    expect(() => evalExpr(" ".repeat(1000))).toThrow();
+  });
 });

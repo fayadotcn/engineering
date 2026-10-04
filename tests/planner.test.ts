@@ -588,6 +588,11 @@ describe("工程量修改路由", () => {
     expect(p.steps).toEqual([]);
     expect(p.fallbackMessage).toContain("非负");
   });
+  it("「总价调到-100万」→ 负目标总价拦截（负号不落进 \\D 间隙被吞成 +100万）", async () => {
+    const p = await plan("总价调到-1000000");
+    expect(p.steps).toEqual([]);
+    expect(p.fallbackMessage).toContain("不能为负");
+  });
 });
 
 describe("文件查询路由", () => {

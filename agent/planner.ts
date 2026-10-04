@@ -310,8 +310,12 @@ export class RulePlanner implements Planner {
     // 工程量反算: 总价控制到 X（「500万」「1.2亿」要按中文金额单位放大）。
     // 必须在「费用汇总」之前——「含税总价控制到500万」含「含税总价」字样，
     // 但动词+金额决定了它是反算不是汇总。
-    const target = m.match(/(?:控制|调|调整|降|到|为)\D{0,6}([\d,]+(?:\.\d+)?)\s*(亿|万|千)?/);
+    // 负号要显式捕获：「总价调到-100万」的 - 会落进 \D 间隙被吞掉，静默变成 +100 万目标价
+    const target = m.match(/(?:控制|调|调整|降|到|为)\D{0,6}?(-?)([\d,]+(?:\.\d+)?)\s*(亿|万|千)?/);
     const perArea = /单方|每平(?:米|方)|元\s*[/／]\s*(?:㎡|平)/.test(m);
+    // 负号拦截仅限总价语境——「工程量改为-5」的 -5 属改量路由的守卫职责，别在这里截胡
+    if (target && target[1] === "-" && (perArea || /总价|含税|总额|造价/.test(m)))
+      return { steps: [], fallbackMessage: "目标总价不能为负——请检查目标金额（「总价调到500万」为正数）" };
     if (perArea && target) {
       if (/合理|合适|怎么样|如何|高吗|贵吗|便宜/.test(m))
         return { steps: [{ tool: "cost.feeSummary", args: {}, activity: "正在汇总费用与单方造价" }] };
@@ -319,7 +323,7 @@ export class RulePlanner implements Planner {
       const area = parseAreaValue(ctx.facts.find((f) => /面积/.test(f.key))?.value);
       if (!area || area <= 0)
         return { steps: [], fallbackMessage: "按单方造价反算需要建筑面积——请在计价设置填写「建筑面积（㎡）」，或回复「建筑面积设为12000」" };
-      const unit = Number(target[1].replace(/,/g, ""));
+      const unit = Number(target[2].replace(/,/g, ""));
       return {
         steps: [{
           tool: "quantity.adjust",
@@ -329,8 +333,8 @@ export class RulePlanner implements Planner {
       };
     }
     if (/总价|含税|总额|造价/.test(m) && target && !perArea) {
-      const mult = target[2] === "亿" ? 1e8 : target[2] === "万" ? 1e4 : target[2] === "千" ? 1e3 : 1;
-      const targetTotal = D(target[1].replace(/,/g, "")).mul(mult).toNumber();
+      const mult = target[3] === "亿" ? 1e8 : target[3] === "万" ? 1e4 : target[3] === "千" ? 1e3 : 1;
+      const targetTotal = D(target[2].replace(/,/g, "")).mul(mult).toNumber();
       const inclTax = /含税/.test(m);
       const taxFact = ctx.facts.find((f) => f.key === "税率")?.value;
       // 台账值须走 parseRateValue 归一化——「9%」直接 Number() 得 NaN
