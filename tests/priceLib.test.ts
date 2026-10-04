@@ -79,7 +79,7 @@ describe("buildPriceRows", () => {
     expect(r.price).toBe(35.94);
     expect(r.region).toBe("海南省三亚市");
     expect(r.period).toBe("2026-09"); // 文件名兜底
-    expect(r.spec).toContain("3*10"); // 未映射列碎片并入
+    expect(r.spec).toContain("3x10"); // 未映射列碎片并入，分隔符归一为 x
   });
 
   it("综合单价式 BOQ sheet 不进价格库（红线：综合单价≠材料价）", async () => {
@@ -214,6 +214,18 @@ describe("pickBestPriceRow", () => {
     );
     expect(pick!.row.price).toBe(35.94);
     expect(pick!.notes.join()).toContain("名称未直接命中");
+  });
+
+  it("规格分隔符归一：查询 4x35 命中库行 4×35（specExact）", () => {
+    const pick = pickBestPriceRow(
+      [
+        row({ name: "电力电缆", spec: "4×35", price: 120 }),
+        row({ name: "电力电缆", spec: "3x10", price: 30 }),
+      ],
+      { name: "电力电缆", spec: "4x35" }
+    );
+    expect(pick!.row.price).toBe(120);
+    expect(pick!.notes.join()).not.toContain("截面/尺寸档不同");
   });
 
   it("型号词根相同但截面不同：正确选中同截面行", () => {

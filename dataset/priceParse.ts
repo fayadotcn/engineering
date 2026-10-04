@@ -179,7 +179,8 @@ export function buildPriceRows(
       const unit = (c.unit ?? "").trim() || headerUnit;
       rows.push({
         name,
-        spec: spec.replace(/[。；;，,]+$/, ""),
+        // 规格分隔符归一为 x（4×35 ≡ 4x35 ≡ 4*35）——DB contains/词根匹配同口径
+        spec: spec.replace(/[。；;，,]+$/, "").replace(/[×*]/g, "x"),
         unit,
         brand: (c.brand ?? "").trim() || (defaults.brand ?? ""),
         price: Math.round(price * 100) / 100,

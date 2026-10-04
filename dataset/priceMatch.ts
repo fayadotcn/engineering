@@ -30,8 +30,10 @@ export interface PricePrefs {
   priceType?: string;
 }
 
+// 规格归一化：分隔符 ×÷*xX 全部归一为 X（4×35 ≡ 4x35 ≡ 4*35），
+// 全角已在上游 parse 层处理。先归一分隔符再大写——原写法 x→X 被 toUpperCase 抵消。
 const norm = (s: string | null | undefined): string =>
-  String(s ?? "").replace(/\s/g, "").replace(/X/gi, "x").toUpperCase();
+  String(s ?? "").replace(/\s/g, "").toUpperCase().replace(/[×*]/g, "X");
 
 /** 名称/规格命中检查用的弱同义（去品牌前缀差异） */
 const nameHit = (row: string, item: string): boolean => {
@@ -45,7 +47,8 @@ const nameHit = (row: string, item: string): boolean => {
  */
 export const specTokens = (s: string | null | undefined): Set<string> =>
   new Set(
-    (String(s ?? "").toUpperCase().match(/[A-Z]+\d*|\d+[A-Z]+\d*/g) ?? []).filter(
+    // 先归一分隔符再分词——「4×35」与「4x35」产出同一词根 4X35
+    (String(s ?? "").toUpperCase().replace(/[×*]/g, "X").match(/[A-Z]+\d*|\d+[A-Z]+\d*/g) ?? []).filter(
       (t) => t.length >= 2
     )
   );
@@ -134,8 +137,9 @@ export function pickBestPriceRow(
     // 词根命中后的截面/尺寸精排（4*25+1*16 ≠ 3*35+1*16 ≠ 3*10）：
     // 全命中加分，全不命中罚分，部分命中不加不罚
     if (!specExact && !specContain && spec && rs) {
-      const dReq = spec.match(/\d+(?:[*x×]\d+)+/g) ?? [];
-      const dRow = new Set(rs.match(/\d+(?:[*x×]\d+)+/g) ?? []);
+      // spec/rs 已 norm（分隔符统一为 X）——正则只认 X 即可
+      const dReq = spec.match(/\d+(?:X\d+)+/g) ?? [];
+      const dRow = new Set(rs.match(/\d+(?:X\d+)+/g) ?? []);
       if (dReq.length && dReq.every((d) => dRow.has(d))) s += 8;
       else if (dReq.length && !dReq.some((d) => dRow.has(d))) {
         s -= 20;

@@ -740,7 +740,8 @@ const toCandidate = (r: {
 const priceCandidateWhere = (name: string, spec?: string, material?: string) => {
   const key = name.slice(0, 6);
   const or: Record<string, unknown>[] = [{ name: { contains: key } }];
-  const specCompact = String(spec ?? "").replace(/\s/g, "");
+  // 查询侧同步归一（存储侧 ingest 已落 x 分隔符）——「4×35」查询命中「4x35」行
+  const specCompact = String(spec ?? "").replace(/\s/g, "").replace(/[×*]/g, "x");
   if (specCompact) or.push({ spec: { contains: specCompact.slice(0, 20) } });
   for (const t of [...specTokens(spec)].filter((t) => t.length >= 3).slice(0, 4))
     or.push({ spec: { contains: t } });
