@@ -11,7 +11,10 @@ vi.mock("@project/facts", async (importOriginal) => {
   const orig = await importOriginal<typeof import("@project/facts")>();
   return { ...orig, getFacts: mocks.facts, getFact: mocks.fact, loadFeeParams: mocks.fees, setFact: vi.fn() };
 });
+const rateMocks = vi.hoisted(() => ({ rates: vi.fn() }));
+vi.mock("@dataset/service", () => ({ getMeasureFeeRates: rateMocks.rates }));
 import "@agent/tools/costTools";
+import { setFact } from "@project/facts";
 
 const ctx: ToolContext = { projectId: "p1", runId: "r1", userId: "u", emit: vi.fn() };
 type Obs = { indicators?: { label: string; value: string }[]; grandTotal?: string; error?: string };
@@ -65,5 +68,23 @@ describe("cost.feeSummary 单方造价指标", () => {
     mocks.facts.mockResolvedValue([{ key: "建筑面积", value: "1.2万平米", source: "USER_PROVIDED" }]);
     const r = await getTool("cost.feeSummary")!.handler!(ctx, {});
     expect(obs(r).indicators?.[1].value).toBe("1090.00 元/㎡");
+  });
+});
+
+describe("cost.measureFees 台账写回", () => {
+  it("计取为 0 也写台账——清掉上一轮残留，防 feeSummary 虚增", async () => {
+    // 只有「系统调整费」费率且未启用 → total = 0.00
+    rateMocks.rates.mockResolvedValue([{
+      fyid: 1, name: "采暖系统调整费", book: "5H", category: "系统调整费",
+      base: "定额人工费*费率", baseWithMachine: false,
+      tiers: [{ tier: "-", rate: 0.15, laborPct: 25, materialPct: 65, machinePct: 10 }],
+    }]);
+    mocks.fact.mockImplementation(async (_p: string, key: string) =>
+      key === "定额人工费明细" ? { value: JSON.stringify({ "5H": "1000.00" }) } : null);
+    const r = await getTool("cost.measureFees")!.handler!(ctx, {});
+    const calls = vi.mocked(setFact).mock.calls.map((c) => c[1] as { key: string; value: string });
+    expect(calls.find((c) => c.key === "系数措施费")?.value).toBe("0.00");
+    expect(calls.find((c) => c.key === "系数措施费明细")?.value).toBe("[]");
+    expect(r.message).toContain("已清为 0");
   });
 });

@@ -172,17 +172,16 @@ registerTool({
     };
     const r = computeMeasureFees(rates, laborByBook, settings);
 
-    if (D(r.total).gt(0)) {
-      await setFact(ctx.projectId, {
-        factType: "取费基数", key: "系数措施费", value: r.total,
-        source: "INFERRED", confidence: 0.8, createdBy: "agent", agentRunId: ctx.runId,
-      });
-      await setFact(ctx.projectId, {
-        factType: "取费基数", key: "系数措施费明细",
-        value: JSON.stringify(r.lines.map((l) => ({ name: l.name, book: l.book, amount: l.amount }))),
-        source: "INFERRED", confidence: 0.8, createdBy: "agent", agentRunId: ctx.runId,
-      });
-    }
+    // 总是写台账：total=0 也要落，否则上一轮的旧值残留会被 feeSummary 继续叠加
+    await setFact(ctx.projectId, {
+      factType: "取费基数", key: "系数措施费", value: r.total,
+      source: "INFERRED", confidence: 0.8, createdBy: "agent", agentRunId: ctx.runId,
+    });
+    await setFact(ctx.projectId, {
+      factType: "取费基数", key: "系数措施费明细",
+      value: JSON.stringify(r.lines.map((l) => ({ name: l.name, book: l.book, amount: l.amount }))),
+      source: "INFERRED", confidence: 0.8, createdBy: "agent", agentRunId: ctx.runId,
+    });
 
     return {
       observation: {
@@ -194,9 +193,11 @@ registerTool({
         kind: "measureFee", id: `view:mfee:${ctx.runId}`, title: "措施费计取（四川2020系数）",
         rows: r.lines, total: r.total, skipped: r.skipped,
       }],
-      message:
-        `措施费计取：${r.lines.length} 项合计 ${fmtMoney(r.total)} 元（已写入台账「系数措施费」，费用汇总表自动采用）` +
-        (r.skipped.length ? `；${r.skipped.length} 项未计取（檐口/操作高度或系统调整费未设置）` : ""),
+      message: D(r.total).gt(0)
+        ? `措施费计取：${r.lines.length} 项合计 ${fmtMoney(r.total)} 元（已写入台账「系数措施费」，费用汇总表自动采用）` +
+          (r.skipped.length ? `；${r.skipped.length} 项未计取（檐口/操作高度或系统调整费未设置）` : "")
+        : `措施费计取：无可计取项（台账「系数措施费」已清为 0）` +
+          (r.skipped.length ? `；${r.skipped.length} 项未计取（檐口/操作高度或系统调整费未设置）` : ""),
     };
   },
 });
