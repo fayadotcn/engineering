@@ -283,7 +283,22 @@ export async function createBoqItem(
   const src = body.insertAfter ? await db.boqItem.findUnique({ where: { id: body.insertAfter } }) : null;
   if (body.insertAfter && (!src || src.projectId !== projectId)) throw new Error("源行不存在");
   const max = src ? null : await db.boqItem.aggregate({ where: { projectId }, _max: { sortOrder: true } });
-  const plan = body.pricingPlan?.trim().startsWith("[") ? body.pricingPlan : "[]";
+  // 组价方案落库前校验结构：畸形 JSON/非子目对象一律丢弃，不带着坏数据进清单
+  const plan = (() => {
+    const raw = body.pricingPlan?.trim();
+    if (!raw) return "[]";
+    try {
+      const arr = JSON.parse(raw) as unknown;
+      if (!Array.isArray(arr)) return "[]";
+      const lines = arr.filter(
+        (l): l is Record<string, unknown> =>
+          !!l && typeof l === "object" && typeof (l as Record<string, unknown>).quotaCode === "string"
+      );
+      return JSON.stringify(lines);
+    } catch {
+      return "[]";
+    }
+  })();
   const persist = async (t: typeof db) => {
     if (src)
       await t.boqItem.updateMany({ where: { projectId, fileId: src.fileId, sortOrder: { gt: src.sortOrder } }, data: { sortOrder: { increment: 1 } } });

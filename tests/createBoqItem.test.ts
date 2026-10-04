@@ -80,4 +80,15 @@ describe("createBoqItem", () => {
     expect(it.quantity).toBe("41");
     expect(it.totalPrice).toBe("410");
   });
+  it("pricingPlan：畸形 JSON/非子目元素落库前滤净", async () => {
+    mocks.findUnique.mockResolvedValue(null);
+    const good = [{ quotaCode: "5A0001", quotaName: "镀锌钢管", subtotal: "12.3" }];
+    const dirty = [...good, "garbage", 42, null, { noCode: true }];
+    let it = await createBoqItem("p1", { name: "x", pricingPlan: JSON.stringify(dirty) });
+    expect(it.pricingPlan).toEqual(good);
+    it = await createBoqItem("p1", { name: "x", pricingPlan: "{not an array" });
+    expect(it.pricingPlan).toEqual([]);
+    it = await createBoqItem("p1", { name: "x", pricingPlan: "\"[1,2]\"" });
+    expect(it.pricingPlan).toEqual([]);
+  });
 });
