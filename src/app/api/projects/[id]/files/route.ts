@@ -72,18 +72,25 @@ export async function POST(
   const storageKey = await storage.put(buffer, ext);
 
   const { stage, period } = inferFileStage(filename);
-  const record = await prisma.projectFile.create({
-    data: {
-      projectId,
-      filename,
-      mime: file.type || "application/octet-stream",
-      storageKey,
-      sizeBytes: buffer.length,
-      contentHash,
-      stage,
-      period,
-    },
-  });
+  let record;
+  try {
+    record = await prisma.projectFile.create({
+      data: {
+        projectId,
+        filename,
+        mime: file.type || "application/octet-stream",
+        storageKey,
+        sizeBytes: buffer.length,
+        contentHash,
+        stage,
+        period,
+      },
+    });
+  } catch (e) {
+    // 建档失败的存储块是孤儿——不落库的文件拿不到 storageKey 回收点
+    await storage.delete(storageKey);
+    throw e;
+  }
 
   // ingest goes through the agent runtime so it's fully traced
   try {
@@ -94,9 +101,21 @@ export async function POST(
     });
     return NextResponse.json({ file: record, runId });
   } catch (e) {
-    // 检查到建库之间抢到活 run 的窄窗：记录已建，标出文件让前端能补触发
-    if (e instanceof ActiveRunError)
+    if (e instanceof ActiveRunError) {
+      // 并发双上传竞态：同内容兄弟记录已抢到 run——本记录是字节级重复，
+      // 留着会在文件列表出现双份且重导会二次入库同字节清单，删记录+回收存储块
+      const sibling = await prisma.projectFile.findFirst({
+        where: { projectId, contentHash, id: { not: record.id } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (sibling) {
+        await prisma.projectFile.delete({ where: { id: record.id } }).catch(() => {});
+        await storage.delete(storageKey);
+        return NextResponse.json({ file: sibling, runId: e.runId, duplicate: true });
+      }
+      // 活 run 是别的文件：记录已建，标出让前端能补触发
       return NextResponse.json({ file: record, error: "已有任务在执行或等待确认，完成后在文件列表重导", runId: e.runId }, { status: 409 });
+    }
     throw e;
   }
 }
