@@ -94,7 +94,7 @@ const FIXTURE: BoqItemDTO[] = [
   item({ id: "g1", code: "030411003003", name: "支架", unit: "kg", quantity: "2", unitPrice: "-5", totalPrice: "-10.00" }),
 ];
 
-type ToolResult = { observation: { count?: number; groups?: unknown[] }; views?: { kind: string; anomalyType?: string }[]; message?: string };
+type ToolResult = { observation: Record<string, unknown> & { count?: number; groups?: unknown[] }; views?: { kind: string; anomalyType?: string }[]; message?: string };
 const run = (name: string, args: Record<string, unknown> = {}) =>
   getTool(name)!.handler!(ctx as never, args as never) as Promise<ToolResult>;
 

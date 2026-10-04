@@ -17,11 +17,12 @@ export async function PATCH(
   };
   if (!body.sheetName)
     return NextResponse.json({ error: "sheetName required" }, { status: 400 });
+  const sheetName = body.sheetName;
 
   const { file, mapping, isPdf } = await ensureInspection(id);
   if (isPdf || !mapping)
     return NextResponse.json({ error: "PDF 文件没有列映射" }, { status: 400 });
-  const sheet = mapping[body.sheetName];
+  const sheet = mapping[sheetName];
   if (!sheet)
     return NextResponse.json({ error: "sheet 不存在" }, { status: 404 });
 
@@ -31,7 +32,7 @@ export async function PATCH(
     const fresh = await tx.projectFile.findUnique({ where: { id: file.id }, select: { meta: true } });
     const meta = fromJson<Record<string, unknown>>(fresh?.meta ?? "{}", {});
     const latest = meta.mapping as typeof mapping | undefined;
-    const target = latest?.[body.sheetName];
+    const target = latest?.[sheetName];
     if (!target) return null; // 提交间隙 sheet 被重识别改名/删除
     applySheetPatch(target, body);
     meta.mapping = latest;

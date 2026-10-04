@@ -115,6 +115,31 @@ export async function createDataset(
     },
   });
 
+  // 并发同内容上传：前置 dup 检查双方都可能落空 → 建档后复检。
+  // 确定性输家=（createdAt, id）较大的那个，自己删档并回收存储块；
+  // 双键排序防毫秒同刻互删。
+  const twin = await prisma.dataset.findFirst({
+    where: {
+      kind,
+      contentHash,
+      id: { not: ds.id },
+      OR: [
+        { createdAt: { lt: ds.createdAt } },
+        { createdAt: ds.createdAt, id: { lt: ds.id } },
+      ],
+    },
+  });
+  if (twin) {
+    await prisma.dataset.delete({ where: { id: ds.id } });
+    await storage.delete(storageKey).catch(() => {});
+    return {
+      id: twin.id,
+      rowCount: twin.rowCount,
+      status: twin.status,
+      duplicate: true,
+    };
+  }
+
   try {
     if (kind === "MATERIAL_PRICE") {
       const meta: DatasetMetaJson = {};
