@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
-import { ActiveRunError, startRun } from "@agent/runtime";
+import { ActiveRunError, liveRunWhere, startRun } from "@agent/runtime";
 
 // 按当前（可能已被用户修正的）列映射重新导入：走 agent run，全程留痕。
 export async function POST(
@@ -15,9 +15,8 @@ export async function POST(
   const live = await prisma.agentRun.findFirst({
     where: {
       projectId: file.projectId,
-      status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+      ...liveRunWhere(),
       userMessage: { contains: `「${file.filename}」` },
-      createdAt: { gt: new Date(Date.now() - 15 * 60 * 1000) },
     },
     select: { id: true },
   });

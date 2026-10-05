@@ -31,6 +31,20 @@ export class ActiveRunError extends Error {
 export const LIVE_WINDOW_MS = 15 * 60 * 1000;
 
 /**
+ * 活 run 查询条件：RUNNING 按创建窗口判（超窗=僵尸，懒清理）；
+ * AWAITING_CONFIRM 不按窗判——本进程里它必然配对一个活 resolver
+ * （确认门 10 分钟超时即收口），创建超窗只是「跑了很久才到确认门」，
+ * 按 createdAt 判死会放行第二个 run 并发写清单（真实竞态）。
+ */
+export const liveRunWhere = () => ({
+  status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+  OR: [
+    { status: "AWAITING_CONFIRM" },
+    { createdAt: { gt: new Date(Date.now() - LIVE_WINDOW_MS) } },
+  ],
+});
+
+/**
  * 进程启动时清尾：RUNNING/AWAITING_CONFIRM 的执行器与确认门 resolver 只活在
  * 旧进程内存里，重启后这些 run 永远不可能结束——立即判 FAILED，释放
  * 「单项目单活 run」守卫，用户不必等 15 分钟懒清理窗口。
@@ -58,11 +72,7 @@ const markSwept = () => { sweepState.__zombiesSwept = true; };
 
 export function findLiveRun(projectId: string) {
   return prisma.agentRun.findFirst({
-    where: {
-      projectId,
-      status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
-      createdAt: { gt: new Date(Date.now() - LIVE_WINDOW_MS) },
-    },
+    where: { projectId, ...liveRunWhere() },
     select: { id: true },
   });
 }
@@ -80,11 +90,7 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
   // （两个 run 交错 deleteByFile/createMany 或并发写清单是真实风险）
   const run = await prisma.$transaction(async (tx) => {
     const live = await tx.agentRun.findFirst({
-      where: {
-        projectId: input.projectId,
-        status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
-        createdAt: { gt: new Date(Date.now() - LIVE_WINDOW_MS) },
-      },
+      where: { projectId: input.projectId, ...liveRunWhere() },
       select: { id: true },
     });
     if (live) throw new ActiveRunError(live.id);

@@ -10,8 +10,11 @@ const db = vi.hoisted(() => ({
 }));
 vi.mock("@database/client", () => {
   const agentRun = {
-    findFirst: vi.fn(async ({ where }: { where: { status: { in: string[] }; createdAt: { gt: Date } } }) =>
-      db.runs.find((r) => where.status.in.includes(r.status) && r.createdAt > where.createdAt.gt) ?? null),
+    findFirst: vi.fn(async ({ where }: { where: { status: { in: string[] }; OR?: { status?: string; createdAt?: { gt: Date } }[] } }) =>
+      db.runs.find((r) =>
+        where.status.in.includes(r.status) &&
+        (where.OR ?? [{ createdAt: { gt: new Date(0) } }]).some((c) =>
+          c.status ? r.status === c.status : r.createdAt > c.createdAt!.gt)) ?? null),
     create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
       db.created.push(data);
       const row = { id: `run-${db.created.length}`, status: "RUNNING", createdAt: new Date(), ...data };
@@ -54,6 +57,15 @@ describe("startRun 单项目单任务串行", () => {
     const { runId } = await startRun({ projectId: "p", message: "x" });
     expect(db.created.length).toBe(1);
     expect(runId).toBe("run-1");
+  });
+
+  it("创建超窗但仍挂确认门的 run 仍拦截——resolver 活着就不能放行并发写", async () => {
+    // 真实竞态：长 LLM 循环 + 确认门最长挂 10 分钟，按 createdAt 判死会让
+    // 第二个 run 在旧 run 等待确认期间起跑，两边同时写清单
+    db.runs = [{ id: "wait-old", status: "AWAITING_CONFIRM", createdAt: new Date(Date.now() - 20 * 60 * 1000) }];
+    db.created = [];
+    await expect(startRun({ projectId: "p", message: "x" })).rejects.toMatchObject({ runId: "wait-old" });
+    expect(db.created.length).toBe(0);
   });
 
   it("终态 run 不拦截；ingestFileId → planner=import", async () => {

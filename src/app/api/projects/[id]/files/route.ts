@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { storage } from "@file/storage";
 import { inferFileStage } from "@file/classify";
-import { ActiveRunError, findLiveRun, startRun } from "@agent/runtime";
+import { ActiveRunError, findLiveRun, liveRunWhere, startRun } from "@agent/runtime";
 import { createHash } from "node:crypto";
 import path from "path";
 
@@ -44,9 +44,8 @@ export async function POST(
     const live = await prisma.agentRun.findFirst({
       where: {
         projectId,
-        status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+        ...liveRunWhere(),
         userMessage: { contains: `「${dup.filename}」` },
-        createdAt: { gt: new Date(Date.now() - 15 * 60 * 1000) },
       },
     });
     if (live) return NextResponse.json({ file: dup, runId: live.id, duplicate: true });

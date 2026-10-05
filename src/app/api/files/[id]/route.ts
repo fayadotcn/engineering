@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { storage } from "@file/storage";
 import { toJson } from "@shared/json";
+import { liveRunWhere } from "@agent/runtime";
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -12,9 +13,8 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
   const live = await prisma.agentRun.findFirst({
     where: {
       projectId: file.projectId,
-      status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+      ...liveRunWhere(),
       userMessage: { contains: `「${file.filename}」` },
-      createdAt: { gt: new Date(Date.now() - 15 * 60 * 1000) },
     },
     select: { id: true },
   });

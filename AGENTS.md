@@ -39,7 +39,7 @@ MODEL_NAME=deepseek-chat
 - **导入行数预报**：识别结果带 `SheetMeta.itemsToImport`（= 与正式导入同一口径的 `importableRowCount`：BOQ/待报价表、名称非空、非父子去重行）；列映射视图显示「将导入 N 行（表内 M 行）」，0 行红标 + 确认门描述告警；老文件在 `ensureInspection` 里补算一次并落库。人工/机械单价列（laborPrice/machinePrice）导入时升格为 `BoqItem.laborUnitPrice/machineUnitPrice`（rawCells 仍留原文），由 `cost.composition` 人材机成本构成分析直接消费。
 - `file/pdf.ts` PDF 文本层提取（pdfjs-dist，serverExternal）+ BOQ 行识别（编码+单位+量+价正则）；≥5 行自动导入清单，否则按文档展示（document 视图）。
 - `cost-engine/fileCompare.ts` 两版清单对审：编码优先对齐、无编码按语义组键；输出 价差/量差/独有项 + 总额差（fileCompare 视图）。
-- 确认门：带 `confirm` 标记的专业工具经 `agent/pending.ts` 挂起 run（AWAITING_CONFIRM），POST /api/runs/[runId]/confirm 批准后才执行；文件导入的映射确认同走此门。跨请求的导入待确认表和事件订阅必须存 globalThis（Next 每个 route 独立 module graph）。
+- 确认门：带 `confirm` 标记的专业工具经 `agent/pending.ts` 挂起 run（AWAITING_CONFIRM），POST /api/runs/[runId]/confirm 批准后才执行；文件导入的映射确认同走此门。跨请求的导入待确认表和事件订阅必须存 globalThis（Next 每个 route 独立 module graph）。活 run 判定走 `agent/runtime.ts liveRunWhere()`：RUNNING 按创建窗口（15min）判，**AWAITING_CONFIRM 不按窗判**——它在本进程内必配对活 resolver（确认门 10min 超时收口），按 createdAt 判死会让第二个 run 在待确认期间起跑并发写清单。
 - `cost-engine/calcExpr.ts` 工程量计算式求值（递归下降，禁 eval；×÷（）全角与单位词自动处理）。
 - 前端样式：shadcn/ui new-york 体系——`src/ui/styles/` 分文件，`tokens.css` 是**唯一设计变量源**。
   - **分层是硬约束**：`globals.css` 里 `tokens.css` 不入层（`@theme` 必须顶层），其余 6 个样式文件一律 `@import ... layer(components)`。项目 CSS 未分层时会压过 Tailwind 的 `utilities` 层，组件 `variant`/`size` prop 运行时失效、调用点被迫用 `!important` 转义——这是历史坑，别再走回去。**尺寸一律用组件 prop 表达，不要用 CSS 或 className 覆盖**。
