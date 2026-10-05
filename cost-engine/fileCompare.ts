@@ -86,8 +86,15 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
       const name = ia?.name ?? ib?.name ?? "";
       const code = ia?.code ?? ib?.code ?? "";
       if (ia && ib) {
-      const qtyDiff = !D(ia.quantity).eq(D(ib.quantity));
-      const priceDiff = !D(ia.unitPrice).eq(D(ib.unitPrice));
+      // 总额计价行（总价措施/其他项目）量与单价是结构常量（量恒 1/项、价恒 0），
+      // 金额变化只体现在合价——按量价比对永远 SAME，会把真金白银的变动藏进「一致」
+      const lumpPair =
+        (ia.feeType === "总价措施" || ia.feeType === "其他项目") &&
+        (ib.feeType === "总价措施" || ib.feeType === "其他项目");
+      const qtyDiff = lumpPair ? false : !D(ia.quantity).eq(D(ib.quantity));
+      const priceDiff = lumpPair
+        ? !D(ia.totalPrice).eq(D(ib.totalPrice))
+        : !D(ia.unitPrice).eq(D(ib.unitPrice));
       const status = qtyDiff && priceDiff ? "BOTH_DIFF" : qtyDiff ? "QTY_DIFF" : priceDiff ? "PRICE_DIFF" : "SAME";
       // GB50500：量差超基准量 15% 是调价触发线（应重新组价，不能沿用原综合单价）
       const qtyOver15 =
@@ -109,7 +116,9 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
         aPrice: ia.unitPrice, bPrice: ib.unitPrice,
         aTotal: ia.totalPrice, bTotal: ib.totalPrice,
         qtyDelta: qtyDiff ? D(ib.quantity).minus(ia.quantity).toString() : undefined,
-        priceDelta: priceDiff ? D(ib.unitPrice).minus(ia.unitPrice).toString() : undefined,
+        priceDelta: priceDiff
+          ? (lumpPair ? D(ib.totalPrice).minus(ia.totalPrice) : D(ib.unitPrice).minus(ia.unitPrice)).toString()
+          : undefined,
         totalDelta: D(ib.totalPrice).minus(ia.totalPrice).toString(),
         qtyOver15: qtyOver15 || undefined,
         nameMismatch: nameMismatch || undefined,

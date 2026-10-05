@@ -65,6 +65,27 @@ describe("compareBoqSets", () => {
     expect(s.totalDelta).toBe("2350.00");
   });
 
+  it("总额计价行（总价措施/其他项目）按合价判差——量价是结构常量", () => {
+    const lump = (name: string, total: string, fileId: string): BoqItemDTO => ({
+      ...item(name, "", "项", "1", "0", "", fileId),
+      feeType: "总价措施",
+      totalPrice: total,
+    });
+    const a = [lump("安全文明施工费", "5000", "fA"), lump("夜间施工费", "800", "fA")];
+    const b = [lump("安全文明施工费", "6500", "fB"), lump("夜间施工费", "800", "fB")];
+    const rows = compareBoqSets(a, b);
+    const diff = rows.find((r) => r.name === "安全文明施工费")!;
+    const same = rows.find((r) => r.name === "夜间施工费")!;
+    expect(diff.status).toBe("PRICE_DIFF");
+    expect(diff.priceDelta).toBe("1500");
+    expect(diff.totalDelta).toBe("1500");
+    expect(same.status).toBe("SAME");
+    const s = compareSummary(rows);
+    expect(s.priceDiff).toBe(1);
+    expect(s.same).toBe(1);
+    expect(s.totalDelta).toBe("1500.00");
+  });
+
   it("aligns by semantic key when code is missing", () => {
     const a = [item("镀锌钢管", "DN100 沟槽连接", "m", "10", "85")];
     const b = [item("镀锌钢管", "DN100 沟槽连接", "m", "10", "85", "", "fB")];
