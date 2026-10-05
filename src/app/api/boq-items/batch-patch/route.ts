@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { toJson } from "@shared/json";
 import { updateBoqItems, type BoqPatch } from "@boq/service";
+import { findLiveRun } from "@agent/runtime";
 import { D } from "@cost-engine/money";
 import { z } from "zod";
 
@@ -31,6 +32,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "清单行不存在或不属于同一工程" }, { status: 404 });
   if (rows.some((r) => r.isHeader))
     return NextResponse.json({ error: "分部标题不能粘贴数值" }, { status: 400 });
+  if (await findLiveRun(rows[0].projectId))
+    return NextResponse.json({ error: "有任务正在执行，完成或取消后再粘贴" }, { status: 409 });
   const lumpSum = new Set(rows.filter((r) => r.feeType === "总价措施" || r.feeType === "其他项目").map((r) => r.id));
 
   const clean: { id: string; patch: BoqPatch }[] = [];

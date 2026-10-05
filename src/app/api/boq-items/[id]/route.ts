@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { updateBoqItems } from "@boq/service";
 import { toJson } from "@shared/json";
+import { findLiveRun } from "@agent/runtime";
 import { z } from "zod";
 
 const edit = z.object({
@@ -36,6 +37,8 @@ export async function PATCH(
   const body = parsed.data;
   const item = await prisma.boqItem.findUnique({ where: { id } });
   if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (await findLiveRun(item.projectId))
+    return NextResponse.json({ error: "有任务正在执行，完成或取消后再修改" }, { status: 409 });
   if (item.isHeader) return NextResponse.json({ error: "分部标题不能编辑金额或工程量" }, { status: 400 });
   const newFeeType = body.feeType ?? item.feeType;
   if (body.totalPrice !== undefined && newFeeType !== "总价措施" && newFeeType !== "其他项目")
@@ -100,6 +103,8 @@ export async function DELETE(
   const { id } = await params;
   const item = await prisma.boqItem.findUnique({ where: { id } });
   if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (await findLiveRun(item.projectId))
+    return NextResponse.json({ error: "有任务正在执行，完成或取消后再删除" }, { status: 409 });
   const [receipt] = await prisma.$transaction([
     prisma.actionReceipt.create({
       data: {

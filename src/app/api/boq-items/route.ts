@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { toJson } from "@shared/json";
 import { createBoqItem } from "@boq/service";
+import { findLiveRun } from "@agent/runtime";
 import { z } from "zod";
 
 const create = z.object({
@@ -34,6 +35,8 @@ export async function POST(req: Request) {
   const body = parsed.data;
   const project = await prisma.project.findUnique({ where: { id: body.projectId }, select: { id: true } });
   if (!project) return NextResponse.json({ error: "工程不存在" }, { status: 404 });
+  if (await findLiveRun(project.id))
+    return NextResponse.json({ error: "有任务正在执行，完成或取消后再补录" }, { status: 409 });
 
   // 行创建 + 回执同事务——任一步失败不留无审计的孤儿行
   try {

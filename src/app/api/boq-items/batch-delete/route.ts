@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { toJson } from "@shared/json";
+import { findLiveRun } from "@agent/runtime";
 import { z } from "zod";
 
 const body = z.object({ ids: z.array(z.string().min(1)).min(1).max(500) }).strict();
@@ -16,6 +17,8 @@ export async function POST(req: Request) {
   const projectIds = new Set(items.map((i) => i.projectId));
   if (projectIds.size !== 1) return NextResponse.json({ error: "只能删除同一项目内的清单行" }, { status: 400 });
   const projectId = items[0].projectId;
+  if (await findLiveRun(projectId))
+    return NextResponse.json({ error: "有任务正在执行，完成或取消后再删除" }, { status: 409 });
   const [receipt] = await prisma.$transaction([
     prisma.actionReceipt.create({
       data: {

@@ -43,9 +43,15 @@ async function main() {
     await request(`/api/projects/${id}`, "PATCH", { name: "  " }, 400);
     const runTool = async (tool: string, args: Record<string, unknown>) => {
       const run = await prisma.agentRun.create({ data: { projectId: id, userMessage: `验收：${tool}` } });
-      const result = await executeTool({ projectId: id, runId: run.id, userId: "e2e", emit: makeEmitter(run.id) }, tool, args);
-      assert(!(result.observation as { error?: string } | null)?.error, JSON.stringify(result.observation));
-      return result.observation as Record<string, unknown>;
+      try {
+        const result = await executeTool({ projectId: id, runId: run.id, userId: "e2e", emit: makeEmitter(run.id) }, tool, args);
+        assert(!(result.observation as { error?: string } | null)?.error, JSON.stringify(result.observation));
+        return result.observation as Record<string, unknown>;
+      } finally {
+        // 直通 executeTool 不走 runtime，但创建的 run 默认 RUNNING——不收口就是
+        // 僵尸 run，活 run 守卫（findLiveRun）会把后续验收写请求全 409 掉
+        await prisma.agentRun.update({ where: { id: run.id }, data: { status: "DONE", finishedAt: new Date() } });
+      }
     };
     await request(`/api/projects/${id}/settings`, "PUT", { 地区: "四川", 价格期: "2026-09", 品牌: "上上", 管理费率: "0%", 利润率: "0%", 税率: "9%", 暂列金额率: "0.5%" });
     await request(`/api/projects/${id}/settings`, "PUT", { 税率: "101%" }, 400);

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { toJson } from "@shared/json";
 import { updateBoqItems, type BoqPatch } from "@boq/service";
+import { findLiveRun } from "@agent/runtime";
 import { D, round2, round3 } from "@cost-engine/money";
 import { z } from "zod";
 
@@ -42,6 +43,8 @@ export async function POST(req: Request) {
   // 总价措施/其他项目是总额计价行：没有单价×量的结构，按比例调量/调价没有意义
   if (field !== "mainMaterialPrice" && rows.some((r) => r.feeType === "总价措施" || r.feeType === "其他项目"))
     return NextResponse.json({ error: "所选行含总额计价行（总价措施/其他项目），请单独改合价" }, { status: 400 });
+  if (await findLiveRun(rows[0].projectId))
+    return NextResponse.json({ error: "有任务正在执行，完成或取消后再调整" }, { status: 409 });
 
   const patches = rows.map((r) => {
     const cur = D(String(r[field]));

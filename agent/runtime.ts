@@ -70,6 +70,9 @@ const sweepState = (globalThis as typeof globalThis & { __zombiesSwept?: boolean
 const zombiesSwept = () => sweepState.__zombiesSwept === true;
 const markSwept = () => { sweepState.__zombiesSwept = true; };
 
+/** 外部写路由的活 run 守卫：RUNNING/AWAITING_CONFIRM 期间一律 409——run 写盘
+ *  中途插入的用户写会拿入口快照过校验再覆盖 run 的新值（丢失更新）。UI 已拦
+ *  按钮，这是服务端兜底；文件映射 PATCH 不能用——待确认导入本就要求用户改映射。 */
 export function findLiveRun(projectId: string) {
   return prisma.agentRun.findFirst({
     where: { projectId, ...liveRunWhere() },
