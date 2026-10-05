@@ -22,6 +22,10 @@ export interface ToolReceiptDraft {
   before: unknown;
   after: unknown;
   reversible?: boolean;
+  /** 已在 handler 内随业务写同一事务落库的回执 id：executor 不再重复 create，
+   *  只回填 toolCallId 关联并 emit（破坏性操作必须走这条——先删后写回执
+   *  存在「删了但回执没落库」的审计空洞） */
+  persistedId?: string;
 }
 
 export interface ToolResult {

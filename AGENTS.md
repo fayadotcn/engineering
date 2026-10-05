@@ -51,7 +51,7 @@ MODEL_NAME=deepseek-chat
   - **表格原语是 `.xl-table`（table.css），不是 shadcn `<Table>`**：sticky 表头 + 行号槽 + `.xl-pin-last` 冻结末列 + 行态 + 容器查询收缩 + 打印重置，这套能力超出 shadcn Table（后者自带 `overflow-x-auto` 容器，会**让 sticky 表头静默失效**）。数据网格一律用 `xl-table`，`components/ui/table.tsx` 仅用于无冻结需求的普通小表。**没有** `cost-btn`/`chip`/`icon-btn`/`cost-input` 这类旧类。
   - 明暗主题走 `<html data-theme>`：`layout.tsx` 内联脚本首帧前落定（localStorage `cost-theme`=auto|light|dark）；`ui/ThemeToggle.tsx` 三态切换；Radix `TooltipProvider` 挂在 layout，说明性提示走 `<Tooltip>` 而非原生 `title=`。字体为 `next/font` 注入的 Inter（仅 Latin 子集，数字等宽）+ 系统 CJK 栈。打印强制浅色口径并带 `@page`/断页控制。
 - 语义比较：BoqSemanticFeature 分组 → featureCompatible 冲突检查 → 价格比。禁止纯字符串匹配。
-- 每个修改动作产生 ActionReceipt；工作区用户编辑也产生（createdBy=user），Agent 上下文可见。
+- 每个修改动作产生 ActionReceipt；工作区用户编辑也产生（createdBy=user），Agent 上下文可见。**破坏性工具写（删除等）必须把回执钉在同一事务**：handler 内 `$transaction` 先删后 `actionReceipt.create`，返回 `receipts[].persistedId` 让 executor 只回填 toolCallId 不重复 create——先删后写回执存在「删了但回执没落库」的审计空洞（batch-delete 路由同口径）。
 - DB schema 用 SQLite 但保持 Postgres 可移植（Json/枚举→String + shared/json helpers）。
 
 ## 目录

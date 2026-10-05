@@ -7,7 +7,7 @@ const db = vi.hoisted(() => ({
   boqRows: [] as Record<string, unknown>[],
   files: [] as { id: string; filename: string; kind: string; status: string; stage: string; period: string; createdAt: Date }[],
   deleted: [] as string[],
-  receipts: [] as { id: string; projectId: string; summary: string; reversible: boolean }[],
+  receipts: [] as { id: string; projectId: string; summary: string; reversible: boolean; actionType?: string }[],
   revertedIds: [] as string[],
 }));
 
@@ -29,13 +29,18 @@ vi.mock("@boq/service", () => ({
     sectionPath: "", isHeader: false, sortOrder: 99, discipline: "OTHER", features: {},
   })),
 }));
-vi.mock("@database/client", () => ({
-  prisma: {
+vi.mock("@database/client", () => {
+  const prisma: Record<string, unknown> = {
     actionReceipt: {
       findMany: vi.fn(async (w: { where: { projectId: string; reversible?: boolean } }) =>
         db.receipts.filter((r) => r.projectId === w.where.projectId && (w.where.reversible === undefined || r.reversible === w.where.reversible))),
       findFirst: vi.fn(async (w: { where: { id: string; projectId: string } }) =>
         db.receipts.find((r) => r.id === w.where.id && r.projectId === w.where.projectId) ?? null),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const r = { id: `rc${db.receipts.length + 1}`, reversible: true, ...data };
+        db.receipts.push(r as (typeof db.receipts)[number]);
+        return r;
+      }),
     },
     boqItem: {
       findMany: vi.fn(async (w: { where: { id: { in: string[] }; projectId: string } }) =>
@@ -49,8 +54,11 @@ vi.mock("@database/client", () => ({
       findMany: vi.fn(async () => db.files),
     },
     costFact: { findFirst: vi.fn(async () => null) },
-  },
-}));
+  };
+  // 事务回调拿到同一 mock 面（真实 Prisma 的 tx 与 prisma 同形）
+  prisma.$transaction = (fn: (tx: unknown) => Promise<unknown>) => fn(prisma);
+  return { prisma };
+});
 
 import "../agent/tools/boqTools";
 import { getTool } from "../agent/tools/registry";
@@ -92,6 +100,17 @@ describe("boq.deleteItems", () => {
     db.deleted = [];
     const r = await call({ ids: ["a", "a"] });
     expect(r.observation.deleted).toBe(1);
+  });
+
+  it("回执随删除同一事务落库：handler 返回 persistedId，executor 不重复 create", async () => {
+    db.rows = [{ id: "a", projectId: "p1", name: "配电箱" }];
+    db.deleted = [];
+    db.receipts = [];
+    const r = await call({ ids: ["a"] });
+    // 事务内已写库：db.receipts 有行、返回的 receipt 标记 persistedId
+    expect(db.receipts.length).toBe(1);
+    expect(db.receipts[0].actionType).toBe("BOQ_DELETE");
+    expect((r.receipts?.[0] as { persistedId?: string }).persistedId).toBe(db.receipts[0].id);
   });
 });
 

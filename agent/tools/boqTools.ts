@@ -14,6 +14,7 @@ import {
   findUnitInconsistencies,
 } from "@cost-engine/compare";
 import { fmtMoney } from "@cost-engine/money";
+import { toJson } from "@shared/json";
 import type { AnomalyRow, DiffRow, WorkspaceView } from "@shared/types";
 
 const ANOMALY_LABEL: Record<string, string> = {
@@ -557,16 +558,32 @@ registerTool({
     });
     if (items.length !== ids.length)
       return { observation: { error: "部分清单项不存在或不属于当前项目，请刷新后重试" } };
-    await prisma.boqItem.deleteMany({ where: { id: { in: ids } } });
+    // 删除与回执同一事务（batch-delete 路由同口径）：先删后由 executor 写回执
+    // 存在「行已删、回执没落库」的审计空洞，破坏性操作必须把审计钉在写事务里
+    const receipt = await prisma.$transaction(async (tx) => {
+      await tx.boqItem.deleteMany({ where: { id: { in: ids } } });
+      return tx.actionReceipt.create({
+        data: {
+          projectId: ctx.projectId,
+          runId: ctx.runId,
+          actionType: "BOQ_DELETE",
+          summary: `删除 ${items.length} 个清单项${args.reason ? `（${args.reason}）` : ""}：${items.slice(0, 5).map((i) => i.name).join("、")}${items.length > 5 ? " 等" : ""}`,
+          before: toJson(items),
+          after: "[]",
+          createdBy: "agent",
+        },
+      });
+    });
     // before 落原始行（非 DTO）：revert 的 recreate 路径按这些字段原样重建
     return {
       observation: { deleted: items.length },
       views: [{ kind: "boqTable", id: "view:boq", title: "工程量清单" }],
       receipts: [{
         actionType: "BOQ_DELETE",
-        summary: `删除 ${items.length} 个清单项${args.reason ? `（${args.reason}）` : ""}：${items.slice(0, 5).map((i) => i.name).join("、")}${items.length > 5 ? " 等" : ""}`,
+        summary: receipt.summary,
         before: items,
         after: [],
+        persistedId: receipt.id,
       }],
       message: `已删除 ${items.length} 个清单项，可在「操作记录」中撤销`,
     };

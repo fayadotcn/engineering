@@ -41,6 +41,20 @@ export async function executeTool(
     // persist receipts first so diff views can reference receiptId
     let firstReceiptId: string | undefined;
     for (const r of result.receipts ?? []) {
+      // handler 事务内已落库的回执：只回填 toolCallId 关联，不重复 create
+      if (r.persistedId) {
+        await prisma.actionReceipt.update({
+          where: { id: r.persistedId },
+          data: { toolCallId: call.id },
+        }).catch(() => {}); // 关联失败不丢回执本体
+        firstReceiptId ??= r.persistedId;
+        await ctx.emit("receipt", {
+          receiptId: r.persistedId,
+          actionType: r.actionType,
+          summary: r.summary,
+        });
+        continue;
+      }
       const rec = await prisma.actionReceipt.create({
         data: {
           runId: ctx.runId,
