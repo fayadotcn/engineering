@@ -210,7 +210,7 @@ export function unitFamily(u: string): string {
 interface Band { lo?: number; hi?: number }
 function quotaDiaBand(name: string): Band | null {
   const m = name.match(
-    /(?:DN|De|Φ|公称直径|公称口径|公称外径|外径|内径|直径|口径|管外径|套管外径|公称通径)\s*([<≤>≥=])?\s*(\d+(?:\.\d+)?)\s*(?:[-~—～]\s*(\d+(?:\.\d+)?))?\s*(?:mm)?\s*(以内|以下|≤|<|以内者|及以下|以上|≥|>)?/i
+    /(?:DN|De|Φ|ϕ|φ|Ø|ø|∅|￠|公称直径|公称口径|公称外径|外径|内径|直径|口径|管外径|套管外径|公称通径)\s*([<≤>≥=])?\s*(\d+(?:\.\d+)?)\s*(?:[-~—～]\s*(\d+(?:\.\d+)?))?\s*(?:mm)?\s*(以内|以下|≤|<|以内者|及以下|以上|≥|>)?/i
   );
   if (!m) return null;
   const pre = m[1] ?? "", v = Number(m[2]), range2 = m[3] ? Number(m[3]) : undefined, post = m[4] ?? "";
@@ -671,7 +671,7 @@ function suggestSupplementary(
   // （不能裸匹配数字——"混凝土基础400×400"不是 DN400）
   const diaNum = (item.features?.diameter ?? "").replace(/\D/g, "");
   const diaHit = (name: string) =>
-    !!diaNum && new RegExp(`(直径|DN|Φ|DE|de)\\s*${diaNum}(?![\\d])|${diaNum}\\s*mm`, "i").test(name);
+    !!diaNum && new RegExp(`(直径|DN|Φ|ϕ|φ|Ø|ø|∅|￠|DE|de)\\s*${diaNum}(?![\\d])|${diaNum}\\s*mm`, "i").test(name);
   const out: PricingPlanLine[] = [];
   for (const need of SCOPE_NEEDS) {
     if (out.length >= 4) break;

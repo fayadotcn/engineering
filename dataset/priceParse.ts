@@ -114,7 +114,7 @@ const unitFromPriceHeader = (header: string): string => {
 
 /** 未映射列里的规格碎片：「3*10」「DN100」「0.6/1kV」「860*2260」并入 spec，备注类文本不进 */
 const SPECISH = /\d/;
-const SPECISH_SHAPE = /[x×*\/\-]|DN|DE|Φ|mm|kV|KV|V|W|MPa/i;
+const SPECISH_SHAPE = /[x×*\/\-]|DN|DE|Φ|ϕ|φ|Ø|∅|￠|mm|kV|KV|V|W|MPa/i;
 
 /**
  * 由 ParsedSheet[] 构建价格行。只消费 QUOTATION 型 sheet——

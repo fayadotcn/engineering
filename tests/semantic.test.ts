@@ -40,6 +40,14 @@ describe("parseSemanticFeature", () => {
     expect(g.connectionMethod).toBe("焊接");
   });
 
+  it("normalizes diameter-symbol variants ϕ/φ/Ø/∅/￠ to Φ", () => {
+    // ϕ(U+03D5)/φ(U+03C6)/Ø/∅/￠ 都是真实图纸里的直径写法
+    for (const sym of ["ϕ", "φ", "Ø", "∅", "￠"]) {
+      const f = parseSemanticFeature(`钢管 ${sym}108 焊接`);
+      expect(f.diameter, `符号 ${sym}`).toBe("DN108");
+    }
+  });
+
   it("different spec => different group key", () => {
     const a = parseSemanticFeature("镀锌钢管 DN100 沟槽");
     const b = parseSemanticFeature("镀锌钢管 DN150 沟槽");

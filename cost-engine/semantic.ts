@@ -8,7 +8,9 @@ const norm = (s: string) =>
     .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
       String.fromCharCode(c.charCodeAt(0) - 0xfee0)
     )
-    .replace(/Φ/g, "Φ")
+    // 直径符号全归一为 Φ：ϕ(U+03D5)/φ(U+03C6)/Ø/∅/￠(全角分币符) 在图纸与清单里
+    // 都是直径写法——不归一，「ϕ108」这类真实标注就进不了 diameter 特征与定额档位比对
+    .replace(/[ΦϕφØø∅￠]/g, "Φ")
     .toUpperCase();
 
 const SYSTEMS: [RegExp, string][] = [

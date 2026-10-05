@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcQuota, planPrice, quotaLaborTotals } from "../cost-engine/quota";
+import { calcQuota, planPrice, quotaLaborTotals, scoreQuota } from "../cost-engine/quota";
 import type { QuotaEntry } from "../quota/library";
 import type { BoqItemDTO } from "../shared/types";
 
@@ -65,6 +65,18 @@ describe("calcQuota 组价语义", () => {
     });
     expect(r.needsMainPrice).toBe(true);
     expect(r.deviation).toBeNull();
+  });
+
+  it("定额名用 ϕ 直径写法也参与贴档：ϕ100以内 覆盖 DN100、拒绝 DN150", () => {
+    // ϕ(U+03D5) 是图纸常见直径符号——quotaDiaBand 只认 Φ 会丢档，DN150 清单免罚错档
+    const q: QuotaEntry = {
+      code: "T-2", name: "镀锌钢管安装 ϕ100mm以内", unit: "10m", unitScale: 10,
+      labor: 1, material: 1, machine: 0, mainQtyPerUnit: 1,
+      match: { category: "管道", diameter: /DN50/ }, // 贴档路径：直径正则未命中时回退定额名档位
+    };
+    const d100 = item({ features: { category: "管道", diameter: "DN100" } });
+    const d150 = item({ features: { category: "管道", diameter: "DN150" } });
+    expect(scoreQuota(d100, q)).toBeGreaterThan(scoreQuota(d150, q));
   });
 });
 
