@@ -42,6 +42,9 @@ export async function assembleExportSheets(projectId: string) {
           .sort((a, b) => a.sortOrder - b.sortOrder)
           .map((r) => {
             const unpriced = !r.isHeader && isPricableItem(r) && D(r.unitPrice).isZero();
+            // 总额计价行（总价措施/其他项目）单价是结构常量 0——交付件里
+            // 「单价 0 × 量 N = 合价 5000」会被复核误读成坏数据，单价列留白只给合价
+            const lump = r.feeType === "总价措施" || r.feeType === "其他项目";
             return {
               rowIndex: r.rowIndex,
               isHeader: r.isHeader,
@@ -57,7 +60,7 @@ export async function assembleExportSheets(projectId: string) {
                     工程量: r.quantity,
                     工程量计算式: r.quantityExpr ?? "",
                     // 未定价行单价/合价留白——0.00 会被误读成「定价为 0」，与 report.generate 同口径
-                    综合单价: unpriced ? "" : r.unitPrice,
+                    综合单价: unpriced || lump ? "" : r.unitPrice,
                     合价: unpriced ? "" : r.totalPrice,
                     // 表-08 金额栏「其中暂估价」口径：主材暂估价单列便于审价
                     主材暂估价: r.mainMaterialPrice,

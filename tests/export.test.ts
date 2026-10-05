@@ -65,6 +65,7 @@ describe("可追溯的清单导出", () => {
     // J=主材暂估价（表-08「其中暂估价」口径）；K=定价状态：可计价行显式标已定价/未定价，非计价行留白；未定价行整行淡琥珀底色
     expect(wb.worksheets[1].getCell("K3").value).toBe("已定价");
     expect(wb.worksheets[1].getCell("K4").value).toBe("");
+    expect(wb.worksheets[1].getCell("H4").value).toBe(""); // 总额计价行单价是结构 0，交付件留白不误导
     expect(wb.worksheets[1].getCell("L4").value).toBe("总价措施");
     // M=单位工程（无归属留白），N=源文件，O=源工作表
     expect(wb.worksheets[1].getCell("N4").value).toBe("招标清单.xlsx");
