@@ -251,6 +251,9 @@ async function runAnthropicLoop(
         tool_use_id: tu.id,
         content: JSON.stringify(result.observation).slice(0, 8000),
       });
+      // 用户拒绝了确认门——同上：不再执行后续工具，直接收尾
+      if ((result.observation as { cancelled?: boolean } | null)?.cancelled)
+        return "已按你的取消停止执行；如需继续请重新发起任务。";
     }
     messages.push({ role: "user", content: results });
   }
@@ -375,6 +378,10 @@ export async function runLLMLoop(
       const tool = toolNameFromWire(call.function.name);
       const result = await execute(toolCtx, tool, args);
       executed.push({ tool, brief: observationBrief(result.observation) });
+      // 用户拒绝了确认门——run 已置 CANCELLED，继续执行后续工具只会
+      // 连环挂起新的确认卡片（runPlan 的 cancelled break 同口径）
+      if ((result.observation as { cancelled?: boolean } | null)?.cancelled)
+        return "已按你的取消停止执行；如需继续请重新发起任务。";
       messages.push({
         role: "tool",
         tool_call_id: call.id,
