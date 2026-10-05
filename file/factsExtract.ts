@@ -214,6 +214,36 @@ function headerFields(sheet: ParsedSheet): ExtractedFact[] {
   return out;
 }
 
+/** 计价口径散文行：「地区=马来西亚；税率6%；管理费率5%」这类 key=value / 连写口径。
+ *  数值键允许「税率6%」无分隔写法；文本键（地区/品牌/期次）必须带分隔符，防误吸正文。
+ *  值原样留痕——归一化在消费端（parseRateValue/parseCoefficientValue/parseAmountValue/
+ *  normalizePeriod）与写库校验（validatePricingFact）完成。 */
+const PROSE_NUM_RE =
+  /(附加税率|规费费率|管理费率|措施费率|暂列金额率|利润率|人工费调整系数|建筑面积|檐口高度|操作物高度|暂列金额|(?<!增值|消费|营业|印花|关税)税率)\s*[=:：为]?\s*(-?[\d,]+(?:\.\d+)?\s*(?:%|％|倍|亿元|万元|亿|万|元|㎡|m2|平方米)?)/g;
+const PROSE_TXT_RE =
+  /(地区|品牌|价格期|价格日期)\s*[=:：]\s*([^\s，。；;、（）()]{1,30})/g;
+
+/** 散文式口径行取数：扫描 FACTS 表全部单元格的 key=value 写法。have=已抽到的键（结构化取数优先）。 */
+function proseFacts(sheet: ParsedSheet, have: Set<string>): ExtractedFact[] {
+  const out: ExtractedFact[] = [];
+  const seen = new Set<string>();
+  const push = (key: string, value: string) => {
+    const v = value.trim();
+    if (!v || seen.has(key) || have.has(key)) return;
+    seen.add(key);
+    out.push({ key, value: v, factType: "FILE_EXTRACTED", note: `${sheet.sheetName} 口径文字` });
+  };
+  for (const r of sheet.rows) {
+    for (const cell of r.raw ?? []) {
+      const text = (cell ?? "").trim();
+      if (!text) continue;
+      for (const m of text.matchAll(PROSE_NUM_RE)) push(m[1], m[2]);
+      for (const m of text.matchAll(PROSE_TXT_RE)) push(m[1], m[2]);
+    }
+  }
+  return out;
+}
+
 /**
  * 整本工作簿 → 台账事实行。
  * 产出：表-04 派生「税率」（可直消费 loadFeeParams）；
@@ -302,6 +332,15 @@ export function extractFileFacts(sheets: ParsedSheet[], filename: string): Extra
     });
 
   for (const s of factsSheets) facts.push(...headerFields(s));
+
+  // 散文式口径行（「税率6%；管理费率5%」）——编制说明/口径页的费率、
+  // 系数、地区事实从这里进台账；结构化取数已产出的键不再重复写
+  const have = new Set(facts.map((f) => f.key));
+  for (const s of factsSheets) {
+    const fs = proseFacts(s, have);
+    for (const f of fs) have.add(f.key);
+    facts.push(...fs);
+  }
 
   return facts;
 }

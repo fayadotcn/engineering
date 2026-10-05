@@ -407,4 +407,32 @@ describe("通用清单列映射", () => {
     expect(String(out2.unitPrice)).toBe("-5");
     expect(out2.__flags.nonNumericQty).toBeFalsy();
   });
+
+  it("「口径与汇总」式标签-值表 → FACTS（原先落 GENERIC 整表丢事实）", async () => {
+    const buf = await wb(
+      [
+        ["项目", "亿伟三期项目"],
+        ["清单行数", "204"],
+        ["分部分项合价(元)", "404676.52"],
+        ["计价口径", "地区=马来西亚；税率6%；管理费率5%；利润率20%"],
+      ],
+      "口径与汇总"
+    );
+    const s = inspectWorkbook(buf)[0];
+    expect(s.type).toBe("FACTS");
+    expect(s.typeEvidence).toContain("汇总/说明");
+  });
+
+  it("「材料价格汇总」表有材料名+库价列 → 仍 MATERIAL_PRICE，不被表名抢走", async () => {
+    const buf = await wb(
+      [
+        ["材料名称", "规格型号", "单位", "信息价"],
+        ["镀锌钢管", "DN100", "m", 58.5],
+        ["电缆", "YJV-4*25", "m", 40],
+      ],
+      "材料价格汇总"
+    );
+    const s = inspectWorkbook(buf)[0];
+    expect(s.type).toBe("MATERIAL_PRICE");
+  });
 });

@@ -109,4 +109,20 @@ describe("可追溯的清单导出", () => {
     await expect(writeBackPrices(Buffer.from("损坏的文件"), [], {})).rejects.toThrow("无法保留原格式");
     await expect(writeBackPrices(original, [{ sheetName: "安装", rowIndex: 2, totalPrice: "abc" }], { 安装: { totalPrice: 3 } })).rejects.toThrow("写回数值无效");
   });
+
+  it("无源表坐标的行（rowIndex=-1 复制/补录行）跳过而非中止整本写回", async () => {
+    const book = new ExcelJS.Workbook(); const ws = book.addWorksheet("安装");
+    ws.addRow(["项目", "工程量", "综合单价", "合价"]);
+    ws.addRow(["设备", 2, 10, 20]);
+    const original = Buffer.from(await book.xlsx.writeBuffer());
+    // 历史坑：复制行带 fileId 但 rowIndex=-1，getRow(-1) 抛 Invalid Address
+    // 会让整次写回失败——现在跳过它、其余行照常写
+    const wb = await load(await writeBackPrices(original, [
+      { sheetName: "安装", rowIndex: -1, unitPrice: "99", totalPrice: "99" },
+      { sheetName: "安装", rowIndex: 0, unitPrice: "98" },
+      { sheetName: "安装", rowIndex: 2, unitPrice: "12.5", totalPrice: "25" },
+    ], { 安装: { quantity: 1, unitPrice: 2, totalPrice: 3 } }));
+    expect(wb.worksheets[0].getCell("C2").value).toBe(12.5);
+    expect(wb.worksheets[0].getCell("D2").value).toBe(25);
+  });
 });

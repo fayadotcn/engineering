@@ -746,6 +746,12 @@ function detectSheet(rows: string[][], sheetName: string): SheetInspection {
     type = "QUOTATION";
     typeConfidence = 0.7;
     typeEvidence = "有名称/规格与单价列，按询价表处理";
+  } else if (!boqUsable && /汇总|说明|口径|扉页|附注|编制依据|计价依据|取费|费用构成|造价指标/.test(sheetName)) {
+    // 汇总/口径/说明页：标签+金额或散文式「税率6%」口径行——不产清单行，
+    // 但要走 FACTS 管道让 factsExtract 取台账真值（GENERIC 会整表静默丢掉）
+    type = "FACTS";
+    typeConfidence = 0.7;
+    typeEvidence = "汇总/说明类表（按表名识别），不产清单行";
   } else {
     type = boqUsable ? "BOQ" : "GENERIC";
     typeConfidence = boqUsable ? 0.6 : 0.5;
@@ -1145,6 +1151,9 @@ export async function writeBackPrices(
     if (!["unitPrice", "quantity", "totalPrice"].some(role => cols[role] !== undefined) && !ps.some(p => p.priceCol !== undefined || p.qtyCol !== undefined || p.totalCol !== undefined))
       throw new Error(`工作表「${sheetName}」没有已确认的工程量或金额列，请先核对映射并重新导入`);
     for (const p of ps) {
+      // 复制/补录行没有源表坐标（rowIndex=-1）：getRow(负数) 会抛 Invalid Address
+      // 中止整本写回——跳过它，由调用方（excel.write）单独报数
+      if (!Number.isInteger(p.rowIndex) || p.rowIndex < 1) continue;
       const row = ws.getRow(p.rowIndex);
       if (p.unitPrice !== undefined && (p.priceCol ?? cols.unitPrice) !== undefined) {
         write(row.getCell((p.priceCol ?? cols.unitPrice)! + 1), Number(p.unitPrice));

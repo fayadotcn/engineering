@@ -86,7 +86,11 @@ registerTool({
     if (!/\.xlsx$/i.test(file.filename)) throw new Error("保留源格式写回需要 .xlsx 文件；其他格式请使用清单 Excel 导出");
 
     const items = await listBoq(ctx.projectId);
-    const mine = items.filter((i) => i.fileId === file.id && !i.isHeader);
+    const fileRows = items.filter((i) => i.fileId === file.id && !i.isHeader);
+    // 复制行（insertAfter）与补录行 rowIndex=-1：没有源表坐标，writeBackPrices
+    // 的 getRow(-1) 会抛 Invalid Address 中止整本写回——先剔出来单独报数
+    const mine = fileRows.filter((i) => i.rowIndex > 0);
+    const noAnchor = fileRows.length - mine.length;
     // 手工补录/跨文件行没有源表坐标，写回不到该文件——显式报数，别静默丢失
     const outside = items.filter((i) => !i.isHeader && i.fileId !== file.id).length;
     if (!mine.length) throw new Error("该源文件没有已导入的清单项，请先完成导入");
@@ -125,7 +129,7 @@ registerTool({
     const out = await writeBackPrices(original, patches, colMaps);
     const artifact = await saveArtifact(ctx, out, `${file.filename.replace(/\.xlsx?$/i, "")}_已更新.xlsx`);
     return {
-      observation: { artifactId: artifact.id, writtenRows: patches.length, skippedUnpriced },
+      observation: { artifactId: artifact.id, writtenRows: patches.length, skippedUnpriced, skippedNoAnchor: noAnchor },
       views: [
         {
           kind: "exportResult",
@@ -133,7 +137,7 @@ registerTool({
           title: "已写回源文件",
           artifactId: artifact.id,
           filename: artifact.label,
-          summary: `已将 ${patches.length} 行单价/工程量/合价写回「${file.filename}」${outside ? `；另有 ${outside} 行来自其他文件或手工补录，不在该源文件内` : ""}${skippedUnpriced ? `；${skippedUnpriced} 行未定价，价字段留白` : ""}`,
+          summary: `已将 ${patches.length} 行单价/工程量/合价写回「${file.filename}」${outside ? `；另有 ${outside} 行来自其他文件或手工补录，不在该源文件内` : ""}${noAnchor ? `；${noAnchor} 行无源表坐标（复制/补录行）未写回` : ""}${skippedUnpriced ? `；${skippedUnpriced} 行未定价，价字段留白` : ""}`,
         },
       ],
       receipts: [
@@ -147,6 +151,7 @@ registerTool({
       ],
       message: `已把最新价格写回源文件，生成「${artifact.label}」` +
         (outside ? `；另有 ${outside} 行（手工补录/其他源文件）不在该文件内，请用「导出清单」取全量` : "") +
+        (noAnchor ? `；${noAnchor} 行复制/补录行无源表坐标未写回` : "") +
         (skippedUnpriced ? `；${skippedUnpriced} 行未定价，价单元格留白未动` : ""),
     };
   },

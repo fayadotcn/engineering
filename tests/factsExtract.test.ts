@@ -98,3 +98,54 @@ describe("extractFileFacts — 表-13 规费税金计价表取数", () => {
     expect(Number(byKey.get("定额人工费")?.value)).toBeCloseTo(789473.68, 0);
   });
 });
+
+describe("extractFileFacts — 散文式口径行取数", () => {
+  it("「地区=马来西亚；税率6%；管理费率5%；利润率20%；人工费调整系数=300%」全抽出", () => {
+    // 真实回归：亿伟三期「口径与汇总」表——这类口径行原先落 GENERIC 被整表丢掉
+    const sheets = [
+      factsSheet("口径与汇总", [
+        ["项目", "亿伟三期项目"],
+        ["分部分项合价(元)", "404676.52"],
+        ["计价口径", "地区=马来西亚；税率6%；管理费率5%；利润率20%；人工费调整系数=300%（人工费调增至定额人工费的4倍）；定额=四川2020安装"],
+      ]),
+    ];
+    const facts = extractFileFacts(sheets, "yw.xlsx");
+    const byKey = new Map(facts.map((f) => [f.key, f]));
+    expect(byKey.get("税率")?.value).toBe("6%");
+    expect(byKey.get("管理费率")?.value).toBe("5%");
+    expect(byKey.get("利润率")?.value).toBe("20%");
+    expect(byKey.get("人工费调整系数")?.value).toBe("300%");
+    expect(byKey.get("地区")?.value).toBe("马来西亚");
+    for (const f of facts) expect(f.factType).toBe("FILE_EXTRACTED");
+  });
+
+  it("「增值税率13%」不污染「税率」——材料发票税率不是工程税率", () => {
+    const sheets = [
+      factsSheet("编制说明", [
+        ["说明", "本工程税率9%，材料增值税率13%不适用于造价汇总"],
+      ]),
+    ];
+    const byKey = new Map(extractFileFacts(sheets, "t.xlsx").map((f) => [f.key, f]));
+    expect(byKey.get("税率")?.value).toBe("9%");
+  });
+
+  it("散文值原样留痕、消费端归一化；结构化取数优先于散文", () => {
+    const sheets = [
+      factsSheet("1.1 表-13 规费税金计价表", [
+        ["1", "税金", "税前造价", "9", "90000"],
+      ]),
+      factsSheet("编制说明", [["说明", "税率：6%（后调整）"]]),
+    ];
+    const byKey = new Map(extractFileFacts(sheets, "t.xlsx").map((f) => [f.key, f]));
+    expect(byKey.get("税率")?.value).toBe("9.00"); // 表-13 明示赢过散文
+    expect(byKey.get("税率")?.note).toContain("表-13");
+  });
+
+  it("非 FACTS 表不做散文取数——清单行文本里的「税率」字不进台账", () => {
+    const sheets = [
+      { ...factsSheet("分部分项", [["名称", "地砖 税率见说明9%"]]), type: "BOQ" as const },
+    ];
+    const byKey = new Map(extractFileFacts(sheets, "t.xlsx").map((f) => [f.key, f]));
+    expect(byKey.has("税率")).toBe(false);
+  });
+});
