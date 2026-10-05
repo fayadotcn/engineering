@@ -12,6 +12,8 @@ const db = vi.hoisted(() => ({
   }[],
   items: [] as BoqItemDTO[],
   writeBackArgs: null as { patches: unknown[]; colMaps: Record<string, Record<string, number>> } | null,
+  deletedKeys: [] as string[],
+  failArtifactCreate: false,
 }));
 
 vi.mock("@database/client", () => ({
@@ -20,13 +22,22 @@ vi.mock("@database/client", () => ({
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => db.files.find((f) => f.id === where.id) ?? null),
       findFirst: vi.fn(async () => db.files.filter((f) => f.status === "PARSED" && f.filename.endsWith(".xlsx")).at(-1) ?? null),
     },
-    artifact: { create: vi.fn(async ({ data }: { data: { label: string } }) => ({ id: `art-${data.label}`, label: data.label })) },
+    artifact: {
+      create: vi.fn(async ({ data }: { data: { label: string } }) => {
+        if (db.failArtifactCreate) throw new Error("db down");
+        return { id: `art-${data.label}`, label: data.label };
+      }),
+    },
   },
 }));
 vi.mock("@boq/service", () => ({ listBoq: vi.fn(async () => db.items) }));
 vi.mock("@boq/export", () => ({ assembleExportSheets: vi.fn(async () => null) }));
 vi.mock("@file/storage", () => ({
-  storage: { put: vi.fn(async () => "k/x.xlsx"), get: vi.fn(async () => Buffer.from("src")) },
+  storage: {
+    put: vi.fn(async () => "k/x.xlsx"),
+    get: vi.fn(async () => Buffer.from("src")),
+    delete: vi.fn(async (k: string) => { db.deletedKeys.push(k); }),
+  },
 }));
 vi.mock("@file/excel", () => ({
   writeBackPrices: vi.fn(async (_buf: Buffer, patches: unknown[], colMaps: Record<string, Record<string, number>>) => {
@@ -102,5 +113,14 @@ describe("excel.write 写回源文件", () => {
     expect(db.writeBackArgs!.patches.length).toBe(1);
     expect(r.views?.[0].kind).toBe("exportResult");
     expect(r.receipts?.[0]).toMatchObject({ actionType: "EXPORT", reversible: false });
+  });
+  it("artifact 建档失败回收已上传的存储块（不留孤儿块）", async () => {
+    db.files = [file("f1", "a.xlsx", "p1", JSON.stringify({ sheets: [{ name: "s1", columns: ["unitPrice:9"] }] }))];
+    db.items = [boq("f1")];
+    db.failArtifactCreate = true;
+    db.deletedKeys = [];
+    await expect(call("excel.write", { fileId: "f1" })).rejects.toThrow("db down");
+    expect(db.deletedKeys).toEqual(["k/x.xlsx"]);
+    db.failArtifactCreate = false;
   });
 });

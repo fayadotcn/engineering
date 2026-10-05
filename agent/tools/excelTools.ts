@@ -51,16 +51,21 @@ async function saveArtifact(
   label: string
 ) {
   const storageKey = await storage.put(buffer, ".xlsx");
-  const artifact = await prisma.artifact.create({
-    data: {
-      projectId: ctx.projectId,
-      kind: "EXPORT_EXCEL",
-      label,
-      storageKey,
-      createdByRunId: ctx.runId,
-    },
-  });
-  return artifact;
+  try {
+    return await prisma.artifact.create({
+      data: {
+        projectId: ctx.projectId,
+        kind: "EXPORT_EXCEL",
+        label,
+        storageKey,
+        createdByRunId: ctx.runId,
+      },
+    });
+  } catch (e) {
+    // 建档失败的存储块是孤儿——没有库内记录就永远找不到回收点（文件上传/数据集同口径）
+    await storage.delete(storageKey).catch(() => {});
+    throw e;
+  }
 }
 
 registerTool({
