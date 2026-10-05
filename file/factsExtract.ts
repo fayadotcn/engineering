@@ -219,9 +219,15 @@ function headerFields(sheet: ParsedSheet): ExtractedFact[] {
  *  值原样留痕——归一化在消费端（parseRateValue/parseCoefficientValue/parseAmountValue/
  *  normalizePeriod）与写库校验（validatePricingFact）完成。 */
 const PROSE_NUM_RE =
-  /(附加税率|规费费率|管理费率|措施费率|暂列金额率|利润率|人工费调整系数|建筑面积|檐口高度|操作物高度|暂列金额|(?<!增值|消费|营业|印花|关税)税率)\s*[=:：为]?\s*(-?[\d,]+(?:\.\d+)?\s*(?:%|％|倍|亿元|万元|亿|万|元|㎡|m2|平方米)?)/g;
+  /(附加税率|规费费率|管理费率|措施费率|暂列金额率|利润率|人工费调整系数|建筑面积|檐口高度|操作物高度|暂列金额|(?<!材料|土地)增值税征收率|(?<!材料|土地)增值税率|(?<!增值税|营业税|消费税)征收率|(?<!增值|消费|营业|印花|关税|城建税|城建|建设|所得|房产)税率)\s*[=:：为]?\s*(-?[\d,]+(?:\.\d+)?\s*(?:%|％|倍|亿元|万元|亿|万|元|㎡|m2|平方米)?)/g;
 const PROSE_TXT_RE =
   /(地区|品牌|价格期|价格日期)\s*[=:：]\s*([^\s，。；;、（）()]{1,30})/g;
+// 别名归一：增值税率/征收率就是本域「税率」口径（一般计税销项税 / 简易计税征收率）。
+// 「材料增值税率13%」（材料发票税率）与「土地增值税率」（土增税）不是工程税率——
+// 靠 材料/土地 前缀挡掉，「销项增值税率」「本工程增值税率」照常入税率。
+const PROSE_KEY_ALIAS: Record<string, string> = {
+  增值税率: "税率", 增值税征收率: "税率", 征收率: "税率",
+};
 
 /** 散文式口径行取数：扫描 FACTS 表全部单元格的 key=value 写法。have=已抽到的键（结构化取数优先）。 */
 function proseFacts(sheet: ParsedSheet, have: Set<string>): ExtractedFact[] {
@@ -237,7 +243,7 @@ function proseFacts(sheet: ParsedSheet, have: Set<string>): ExtractedFact[] {
     for (const cell of r.raw ?? []) {
       const text = (cell ?? "").trim();
       if (!text) continue;
-      for (const m of text.matchAll(PROSE_NUM_RE)) push(m[1], m[2]);
+      for (const m of text.matchAll(PROSE_NUM_RE)) push(PROSE_KEY_ALIAS[m[1]] ?? m[1], m[2]);
       for (const m of text.matchAll(PROSE_TXT_RE)) push(m[1], m[2]);
     }
   }

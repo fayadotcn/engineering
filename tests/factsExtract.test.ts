@@ -129,6 +129,36 @@ describe("extractFileFacts — 散文式口径行取数", () => {
     expect(byKey.get("税率")?.value).toBe("9%");
   });
 
+  it("「增值税率/销项增值税率/征收率」归一化为税率——工程口径的增值税写法", () => {
+    for (const [text, want] of [
+      ["增值税率9%", "9%"],
+      ["销项增值税率为9%", "9%"],
+      ["本工程增值税率：9%", "9%"],
+      ["征收率3%", "3%"],
+      ["简易计税征收率3%", "3%"],
+    ] as const) {
+      const sheets = [factsSheet("编制说明", [["说明", text]])];
+      const byKey = new Map(extractFileFacts(sheets, "t.xlsx").map((f) => [f.key, f]));
+      expect(byKey.get("税率")?.value, text).toBe(want);
+    }
+  });
+
+  it("材料/土地增值税率与城建/所得税率不入「税率」", () => {
+    for (const text of [
+      "材料增值税率13%",
+      "土地增值税率5%",
+      "城建税率7%",
+      "城市维护建设税率7%",
+      "所得税率25%",
+      "印花税率0.05%",
+      "土地增值税征收率5%",
+    ]) {
+      const sheets = [factsSheet("编制说明", [["说明", text]])];
+      const byKey = new Map(extractFileFacts(sheets, "t.xlsx").map((f) => [f.key, f]));
+      expect(byKey.has("税率"), text).toBe(false);
+    }
+  });
+
   it("散文值原样留痕、消费端归一化；结构化取数优先于散文", () => {
     const sheets = [
       factsSheet("1.1 表-13 规费税金计价表", [
