@@ -24,6 +24,26 @@ describe("detectBoqLines（PDF 清单行识别）", () => {
     expect(rows[1]).toMatchObject({ name: "给水管", unit: "m" });
   });
 
+  it("招标清单无价行：编码+名称+特征+单位+量 行尾结束 → 价落 0（未定价口径）", () => {
+    const rows = detectBoqLines([
+      "分部分项工程量清单",
+      "1 031001001001 镀锌钢管 DN100 沟槽连接 m 120.5",
+      "2 030404017001 配电箱 台 2",
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      code: "031001001001", name: "镀锌钢管", feature: "DN100 沟槽连接",
+      unit: "m", quantity: "120.5", unitPrice: "0", totalPrice: "0",
+    });
+    expect(rows[1]).toMatchObject({ name: "配电箱", unit: "台", quantity: "2", unitPrice: "0" });
+  });
+
+  it("有量有价但缺合价的两数字行不猜：量/价位置歧义行不进库", () => {
+    // 「台 2 8500.00」末尾一个数字无法判断是量还是价——宁可不识别也别错列
+    const rows = detectBoqLines(["2 030404017001 配电箱 台 2 8500.00"]);
+    expect(rows).toHaveLength(0);
+  });
+
   it("千分位金额去逗号", () => {
     const rows = detectBoqLines([
       "2 031001001002 电力电缆 YJV-4x35 米 1,234.56 120.00 148,147.20",
