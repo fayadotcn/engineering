@@ -1,4 +1,5 @@
 import type { BoqItemDTO } from "@shared/types";
+import { isPricableItem } from "@shared/types";
 import { toast } from "../../primitives";
 import { displayFeature } from "../shared";
 
@@ -7,7 +8,10 @@ export const copyRowsToExcel = async (rows: BoqItemDTO[]) => {
   const head = ["项目编码", "项目名称", "项目特征", "单位", "工程量", "综合单价", "合价"];
   const cell = (v: unknown) => String(v ?? "").replace(/[\t\r\n]+/g, " ").trim();
   const lines = rows.map((it) => [
-    it.code, it.name, displayFeature(it.rawFeature ?? "", it.name), it.unit, it.quantity, it.unitPrice, it.totalPrice,
+    it.code, it.name, displayFeature(it.rawFeature ?? "", it.name), it.unit, it.quantity,
+    // 与导出件同口径：总额计价行的结构性 0 与未定价 0 都不是价，粘出去留白不误读
+    isPricableItem(it) && Number(it.unitPrice) !== 0 ? it.unitPrice : "",
+    it.totalPrice,
   ].map(cell).join("\t"));
   try {
     await navigator.clipboard.writeText([head.join("\t"), ...lines].join("\n"));

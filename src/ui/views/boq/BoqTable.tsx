@@ -445,8 +445,10 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
     for (let k = 0; k < n; k++) {
       const it = pool[k], cells = lines[k];
       const patch: { quantity?: string; unitPrice?: string; mainMaterialPrice?: string } = {};
+      // 总额计价行（总价措施/其他项目）无量价语义：服务端会 400 整批失败，这里提前跳过对应字段
+      const lump = it.feeType === "总价措施" || it.feeType === "其他项目";
       for (const [ci, f] of [[qi, "quantity"], [pi, "unitPrice"], [mi, "mainMaterialPrice"]] as const) {
-        if (ci < 0) continue;
+        if (ci < 0 || (lump && f !== "mainMaterialPrice")) continue;
         const v = (cells[ci] ?? "").replace(/,/g, "").trim();
         if (v !== "" && Number.isFinite(Number(v)) && Number(v) >= 0) patch[f] = v;
       }
