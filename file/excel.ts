@@ -247,31 +247,31 @@ function profileColumns(rows: string[][]): ColumnMap {
     if (Object.values(map).includes(c)) continue;
     if (stat(c).embedded >= 3) { map.feature = c; break; }
   }
-  // 量/价定位以 unit 列为锚：先右扫（广联达式 单位|量|价|合价），
-  // 右侧无数值列时回退左扫（抗震支吊架式 名|量|单位|价|合价）——
-  // 单价/合价取 unit 右侧依次出现的数值列，算术锁定再做最终裁决
+  // 量/价定位以 unit 列为锚。右侧 ≥2 个数值列时按广联达式右扫（单位|量|价|合价），
+  // 量×价=合价的算术锁定再兜底裁决（错位布局「名|量|单位|价|合价」靠它回正）；
+  // 右侧只有 1 个数值列时它是价不是量，工程量只能来自 unit 左侧紧邻的数值列
+  // （「名|量|空|单位|价」——左扫被文本列挡住就停，再往左常是序号/规格列）。
   if (map.unit !== undefined) {
     const rightNums: number[] = [];
     for (let c = map.unit + 1; c < Math.min(map.unit + 5, width); c++) {
       if (stat(c).nums >= 3) rightNums.push(c);
     }
-    if (rightNums.length) {
+    let leftQty = -1;
+    for (let c = map.unit - 1; c >= Math.max(0, map.unit - 3); c--) {
+      if (Object.values(map).includes(c)) continue;
+      const s = stat(c);
+      if (s.nums >= 3) { leftQty = c; break; }
+      if (s.text > 0) break;
+    }
+    if (rightNums.length === 1 && leftQty >= 0) {
+      map.quantity = leftQty;
+      map.unitPrice = rightNums[0];
+    } else if (rightNums.length) {
       map.quantity = rightNums[0];
       if (rightNums[1] !== undefined) map.unitPrice = rightNums[1];
       if (rightNums[2] !== undefined) map.totalPrice = rightNums[2];
-    } else {
-      for (let c = map.unit - 1; c >= Math.max(0, map.unit - 3); c--) {
-        if (Object.values(map).includes(c)) continue;
-        if (stat(c).nums >= 3) { map.quantity = c; break; }
-      }
-      if (map.quantity !== undefined) {
-        const right: number[] = [];
-        for (let c = map.unit + 1; c < Math.min(map.unit + 5, width); c++) {
-          if (stat(c).nums >= 3) right.push(c);
-        }
-        if (right[0] !== undefined) map.unitPrice = right[0];
-        if (right[1] !== undefined) map.totalPrice = right[1];
-      }
+    } else if (leftQty >= 0) {
+      map.quantity = leftQty;
     }
   }
   // name：汉字文本列。型号后缀的长名（「配电箱 F/B1-6AEPZ」）不该因超 12 字被丢掉，

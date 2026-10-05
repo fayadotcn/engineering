@@ -192,6 +192,49 @@ describe("通用清单列映射", () => {
     expect(insp.minConfidence).toBeLessThanOrEqual(0.7);
   });
 
+  it("无表头错位布局「名|量|空|单位|价」：左侧数值列认工程量，单价不抢量位", async () => {
+    // 真实缺陷样本（抗震支吊架 Sheet3）：unit 右一列是单价，右扫会把单价错钉成 quantity
+    const buf = await wb([
+      ["抗震支吊架 DN65", 12, "", "套", 450],
+      ["抗震支吊架 DN80", 8, "", "套", 520],
+      ["抗震支吊架 DN100", 15, "", "套", 610],
+      ["抗震支吊架 DN150", 6, "", "套", 890],
+    ]);
+    const insp = inspectWorkbook(buf)[0];
+    expect(insp.columns.quantity).toBe(1);
+    expect(insp.columns.unitPrice).toBe(4);
+    const s = firstSheet(parseWorkbook(buf));
+    const items = s.rows.filter((r) => r.isItem);
+    expect(items.map((r) => r.cells.quantity)).toEqual(["12", "8", "15", "6"]);
+    expect(items.map((r) => r.cells.unitPrice)).toEqual(["450", "520", "610", "890"]);
+  });
+
+  it("无表头错位布局「序号|名称|量|单位|价|合价」：量左价右，序号不抢量位", async () => {
+    const buf = await wb([
+      [1, "电缆 YJV-4*35", 120, "m", 85, 10200],
+      [2, "电缆 YJV-4*50", 80, "m", 110, 8800],
+      [3, "电缆 YJV-4*70", 60, "m", 150, 9000],
+      [4, "电缆 YJV-4*95", 45, "m", 195, 8775],
+    ]);
+    const insp = inspectWorkbook(buf)[0];
+    expect(insp.columns.quantity).toBe(2);
+    expect(insp.columns.unitPrice).toBe(4);
+    expect(insp.columns.totalPrice).toBe(5);
+  });
+
+  it("无表头「名|数字规格|单位|量|价」：规格列是纯数字也不抢量位", async () => {
+    // 右侧有 ≥2 数值列时仍走右扫——左邻数字列是规格（304/316 材质号）不是量
+    const buf = await wb([
+      ["钢板", 304, "t", 3, 12000],
+      ["钢板", 316, "t", 2, 18500],
+      ["钢管", 304, "t", 5, 9800],
+      ["钢管", 316, "t", 4, 15200],
+    ]);
+    const insp = inspectWorkbook(buf)[0];
+    expect(insp.columns.quantity).toBe(3);
+    expect(insp.columns.unitPrice).toBe(4);
+  });
+
   it("非乘积三数值列（单价×(1+税率)=含税价）不触发算术锁定", async () => {
     const buf = await wb([
       ["名称", "单位", "数量", "单价", "税率", "金额合计"],
