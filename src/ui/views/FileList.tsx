@@ -6,7 +6,7 @@ import { FileSpreadsheet, FileText } from "lucide-react";
 import { ConfirmDialog, EmptyState, toast } from "../primitives";
 import { Button } from "@/components/ui/button";
 import { readResponse } from "../api";
-import { cn } from "./shared";
+import { cn, Tip, TipEl } from "./shared";
 
 const FILE_STATUS: Record<string, { label: string; cls: BadgeVariant }> = {
   UPLOADED: { label: "待解析", cls: "secondary" },
@@ -79,18 +79,22 @@ export function FileList() {
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="cost-file-hint !mb-0">上传后系统会整理文件；需要你检查的表格会显示“待核对”。</p>
+        <p className="cost-file-hint mb-0">上传后系统会整理文件；需要你检查的表格会显示“待核对”。</p>
         {cmpPair && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            disabled={blocked}
-            title={`对审「${cmpPair[0].filename}」与「${cmpPair[1].filename}」——价差/量差/独有项与申报口径对比`}
-            onClick={() => void send(`对审「${cmpPair[0].filename}」与「${cmpPair[1].filename}」两版清单`)}
+          <TipEl
+            tip={`对审「${cmpPair[0].filename}」与「${cmpPair[1].filename}」——价差/量差/独有项与申报口径对比`}
+            focusable
           >
-            两版对审
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={blocked}
+              onClick={() => void send(`对审「${cmpPair[0].filename}」与「${cmpPair[1].filename}」两版清单`)}
+            >
+              两版对审
+            </Button>
+          </TipEl>
         )}
       </div>
       <div className="xl-sheet overflow-auto rounded-lg">
@@ -115,12 +119,12 @@ export function FileList() {
                       : <FileSpreadsheet size={13} className="shrink-0 text-muted-foreground" />}
                     <div className="min-w-0">
                       <div className="flex max-w-96 items-center gap-1.5">
-                        <span className="truncate" title={f.filename}>{f.filename}</span>
-                        {f.stage && <Badge variant="info" className="!py-px !text-[10px] shrink-0" >{f.stage}</Badge>}
-                        {f.period && <Badge variant="secondary" className="!py-px !text-[10px] shrink-0" >{f.period}</Badge>}
+                        <span className="truncate"><Tip tip={f.filename}>{f.filename}</Tip></span>
+                        {f.stage && <Badge size="xs" variant="info" className="shrink-0">{f.stage}</Badge>}
+                        {f.period && <Badge size="xs" variant="secondary" className="shrink-0">{f.period}</Badge>}
                       </div>
                       {(f.sizeBytes || f.createdAt) && (
-                        <div className="text-[10.5px] text-muted-foreground">
+                        <div className="text-2xs text-muted-foreground">
                           {[fmtBytes(f.sizeBytes), f.createdAt && new Date(f.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })].filter(Boolean).join(" · ")}
                         </div>
                       )}
@@ -140,7 +144,9 @@ export function FileList() {
                     </button>
                   )}
                   {(view || closedId) && <button className="cost-file-action" onClick={() => void openFile(view?.id ?? closedId!)}>{view?.kind === "columnMapping" || closedId?.startsWith("view:mapping:") ? "核对表格" : "查看文档"}</button>}
-                  <a className="cost-file-action" href={`/api/files/${f.id}/download`} download title="下载上传的原文件">下载</a>
+                  <TipEl tip="下载上传的原文件">
+                    <a className="cost-file-action" href={`/api/files/${f.id}/download`} download>下载</a>
+                  </TipEl>
                   <button
                     onClick={() => setPendingDel({ id: f.id, name: f.filename })}
                     disabled={blocked}

@@ -6,7 +6,7 @@ import { AlertTriangle } from "lucide-react";
 import { EmptyState } from "../primitives";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { cn, fmtMoney, displayFeature } from "./shared";
+import { cn, fmtMoney, displayFeature, Tip, TipEl } from "./shared";
 
 /* ---------------- 异常表 ---------------- */
 
@@ -60,7 +60,7 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                             价差 {fmtMoney(g.spread)}
                           </Badge>
                         )}
-                        <span className="ml-auto truncate pr-1 text-[11px] font-normal text-muted-foreground" title={g.reason}>{g.reason}</span>
+                        <span className="ml-auto truncate pr-1 text-2xs font-normal text-muted-foreground"><Tip tip={g.reason}>{g.reason}</Tip></span>
                       </div>
                     </td>
                   </tr>
@@ -71,12 +71,12 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                     return (
                       <tr key={it.id} className="group">
                         <td className="xl-rn">{rn}</td>
-                        <td className="mono truncate text-muted-foreground" title={it.code ?? ""}>{it.code || "—"}</td>
+                        <td className="mono truncate text-muted-foreground"><Tip tip={it.code}>{it.code || "—"}</Tip></td>
                         <td className="overflow-hidden">
-                          <div className="truncate" title={it.name}>{it.name}</div>
-                          {feature && <div className="truncate text-[11px] text-muted-foreground" title={feature}>{feature}</div>}
+                          <div className="truncate"><Tip tip={it.name}>{it.name}</Tip></div>
+                          {feature && <div className="truncate text-2xs text-muted-foreground"><Tip tip={feature}>{feature}</Tip></div>}
                         </td>
-                        <td className="truncate text-muted-foreground" title={it.unit}>{it.unit}</td>
+                        <td className="truncate text-muted-foreground"><Tip tip={it.unit}>{it.unit}</Tip></td>
                         <td className="mono text-right">{it.quantity}</td>
                         <td
                           className={cn(
@@ -88,14 +88,15 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
                           {fmtMoney(it.unitPrice)}
                         </td>
                         <td className="w-12 text-center">
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            onClick={() => gotoBoqItem(it.code || it.name)}
-                            title="在清单中定位"
-                          >
-                            定位
-                          </Button>
+                          <TipEl tip="在清单中定位">
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => gotoBoqItem(it.code || it.name)}
+                            >
+                              定位
+                            </Button>
+                          </TipEl>
                         </td>
                       </tr>
                     );

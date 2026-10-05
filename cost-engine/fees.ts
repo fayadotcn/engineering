@@ -162,10 +162,12 @@ export function feeSummary(items: BoqItemDTO[], params: FeeParams): FeeSummary {
     },
     ...(params.laborAdjustRate.gt(0)
       ? [{
-          seq: "四·附", name: "人工费调整", basis: "定额人工费 × 调整系数",
+          seq: "四·附", name: "人工费调整",
+          // 系数是「调增倍数」：3 = 人工费调增至 4 倍。行内写清倍数，避免再被读成 3%
+          basis: `定额人工费 × ${params.laborAdjustRate.toString()}（调增至 ${params.laborAdjustRate.plus(1).toString()} 倍）`,
           rate: pct(params.laborAdjustRate), amount: laborAdjust.toFixed(2), level: "leaf" as const,
           note: laborBase !== null && laborBase.gt(0)
-            ? "人工费调差（定额人工费为基数），计税计入税前造价"
+            ? `人工费调差（基数=定额人工费，调增至 ${params.laborAdjustRate.plus(1).toString()} 倍），计税计入税前造价`
             : "定额人工费基数缺失——先运行「定额测算」产生基数后自动计取",
         }]
       : []),

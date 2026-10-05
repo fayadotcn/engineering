@@ -88,11 +88,13 @@ registerTool({
 
 registerTool({
   name: "project.setFact",
-  description: "写入项目事实台账（税率/地区/品牌/价格日期/管理费费率等），来源标记为用户提供",
+  description:
+    "写入项目事实台账（税率/地区/品牌/价格日期/管理费费率等），来源标记为用户提供。" +
+    "「人工费调整系数」是调增倍数不是费率：用户说「人工费×4」写 3（调增 300%），说「调增15%」写 15% 或 0.15",
   implemented: true,
   schema: z.object({
     key: z.string().describe("事实名，如 税率 / 电缆品牌 / 管理费率"),
-    value: z.string().describe("事实值，如 9% / 上上"),
+    value: z.string().describe("事实值，如 9% / 上上；人工费调整系数写调增倍数（人工费×4 → 写 3）"),
     factType: z.string().optional(),
   }),
   handler: async (ctx, args: { key: string; value: string; factType?: string }) => {

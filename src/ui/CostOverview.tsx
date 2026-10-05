@@ -1,6 +1,8 @@
 "use client";
 import { ArrowRight, Check, FolderOpen, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { useStore } from "./store";
 import { DISCIPLINE_COLOR } from "./colors";
 import { DisciplineDonut, ProgressRing } from "./dashboard";
@@ -66,46 +68,52 @@ export function CostOverview({ onUpload }: { onUpload?: () => void }) {
     <div className="dash-hero">
       <div className="cost-next-step"><div><small>现在做这一步</small><h3>{next.title}</h3><p>{next.text}</p></div><Button disabled={busy} onClick={next.click}>{next.icon}{next.action}<ArrowRight size={14} /></Button></div>
       {hasBoq && <div className="dash-kpis">
-        <div className="dash-kpi">
-          <span>当前总价（暂计）</span>
-          <strong>{wanNum(r!.fees.grandTotal)}<small>元</small></strong>
-          <p>{missing.includes("税率") ? "未填税率，暂不计税" : `${r!.itemCount} 项清单 · ${s.files.length} 份文件`}</p>
-        </div>
-        {pricable > 0 && <div className="dash-kpi">
-          <span>定价进度</span>
+        <Card className="min-w-0 gap-1 rounded-xl border-border px-4 py-3.5 shadow-xs">
+          <span className="text-2xs text-muted-foreground">当前总价（暂计）</span>
+          <strong className="text-[clamp(var(--text-xl),2.6vw,var(--text-2xl))] font-semibold tracking-[-.03em] tabular-nums [overflow-wrap:anywhere]">{wanNum(r!.fees.grandTotal)}<small className="ml-1 text-2xs font-normal text-muted-foreground">元</small></strong>
+          <p className="mt-auto text-2xs text-muted-foreground">{missing.includes("税率") ? "未填税率，暂不计税" : `${r!.itemCount} 项清单 · ${s.files.length} 份文件`}</p>
+        </Card>
+        {pricable > 0 && <Card className="min-w-0 gap-1 rounded-xl border-border px-4 py-3.5 shadow-xs">
+          <span className="text-2xs text-muted-foreground">定价进度</span>
           <div className="dash-kpi-ring"><ProgressRing pct={coverage} done={coverage >= 100} /></div>
-          <p>{priced} / {pricable} 项已报价</p>
-        </div>}
-        <button className={`dash-kpi ${unpriced ? "warn" : ""}`} disabled={!unpriced} onClick={() => { useStore.setState({ boqOnlyUnpriced: true }); s.setActiveView("view:boq"); }}>
-          <span>还没报单价</span>
-          <strong>{unpriced}<small>项</small></strong>
-          <p>{unpriced ? "点击查看这些项目 →" : "当前没有未报价项"}</p>
-        </button>
+          <p className="mt-auto text-2xs text-muted-foreground">{priced} / {pricable} 项已报价</p>
+        </Card>}
+        {/* 整块可点 → Card asChild 承载 button，保住按钮语义与键盘可达 */}
+        <Card asChild className={cn("min-w-0 gap-1 rounded-xl border-border px-4 py-3.5 text-left shadow-xs",
+          unpriced
+            ? "cursor-pointer transition-[border-color,box-shadow,transform] duration-[var(--dur-base)] hover:enabled:-translate-y-px hover:enabled:border-ring hover:enabled:shadow-sm active:enabled:translate-y-0"
+            : "disabled:cursor-default")}>
+          <button disabled={!unpriced} onClick={() => { useStore.setState({ boqOnlyUnpriced: true }); s.setActiveView("view:boq"); }}>
+            <span className="text-2xs text-muted-foreground">还没报单价</span>
+            <strong className={cn("text-[clamp(var(--text-xl),2.6vw,var(--text-2xl))] font-semibold tracking-[-.03em] tabular-nums [overflow-wrap:anywhere]", unpriced && "text-warning-soft-fg")}>{unpriced}<small className="ml-1 text-2xs font-normal text-muted-foreground">项</small></strong>
+            <p className={cn("mt-auto text-2xs text-muted-foreground", unpriced && "text-warning-soft-fg")}>{unpriced ? "点击查看这些项目 →" : "当前没有未报价项"}</p>
+          </button>
+        </Card>
       </div>}
     </div>
     {hasBoq && <p className="cost-conclusion">这个工程目前合计约 <strong>{wan(r!.fees.grandTotal)}</strong>{missing.includes("税率") ? "（税金还没算进去）" : ""}，{unpriced ? <>还有 <strong>{unpriced}</strong> 项没填单价。</> : "清单里的项目都填了价。"}</p>}
 
     {hasBoq && (mix.length > 0 || Number(r!.fees.grandTotal) > 0) && <div className="dash-charts">
-      {mix.length > 0 && <section className="dash-card">
+      {mix.length > 0 && <Card className="min-w-0 gap-0 rounded-xl border-border p-4 shadow-xs">
         <div className="dash-card-head"><span>钱都花在哪</span><small>按专业分 · 点图下钻清单</small></div>
         <div className="dash-card-body donut-wrap">
           <DisciplineDonut slices={mix} center={wanNum(r!.fees.grandTotal)} sub="含税总价" onSelect={drillDiscipline} />
           <ul className="cost-mix-legend">{mix.map(d => { const pct = d.share > 0 && d.share < 0.005 ? "<1%" : `${Math.round(d.share * 100)}%`; return <li key={d.key}><button onClick={() => drillDiscipline(d.key)} title={`只看${d.label}的清单`}><i style={{ background: DISCIPLINE_COLOR[d.key] ?? DISCIPLINE_COLOR.OTHER }} />{d.label}<em>{wan(d.amount)} · {pct}</em></button></li>; })}</ul>
         </div>
-      </section>}
-      {Number(r!.fees.grandTotal) > 0 && <section className="dash-card">
+      </Card>}
+      {Number(r!.fees.grandTotal) > 0 && <Card className="min-w-0 gap-0 rounded-xl border-border p-4 shadow-xs">
         <div className="dash-card-head"><span>费用怎么加出来的</span><small>分部分项 → 措施 → 规费 → 税金</small></div>
         <div className="dash-card-body">
           <FeeWaterfall rows={r!.fees.rows} grandTotal={r!.fees.grandTotal}
             onFix={missing.length ? () => s.setActiveView("view:facts") : undefined} />
         </div>
-      </section>}
+      </Card>}
     </div>}
 
     {!!driftFiles.length ? null : (r?.declaredChecked ?? 0) > 0 && (
       <p className="cost-file-hint" style={{ color: "var(--success-soft-fg)" }}>✓ 已与 {r!.declaredChecked} 份源表的申报汇总口径核对，无差异。</p>
     )}
-    {!!driftFiles.length && <details className="cost-fact-details cost-drift"><summary>⚠ 与源表申报口径有 {driftCount} 处差异，最大 {wan(String(Math.abs(driftMax.diff)))}（{driftMax.label}）</summary><div className="xl-sheet">{driftFiles.map(d => <div key={d.file}>{driftFiles.length > 1 && <p className="cost-file-hint cost-drift-file">按「{d.file}」口径</p>}<table className="xl-table"><thead><tr><th>口径</th><th className="text-right">源表申报（元）</th><th className="text-right">本次计算（元）</th><th className="text-right">差异</th></tr></thead><tbody>{d.checks.map(c => <tr key={c.label}><td>{c.label}</td><td className="mono text-right">{money(String(c.declared))}</td><td className="mono text-right">{money(String(c.computed))}</td><td className={`mono text-right ${Math.abs(c.pct) > 0.05 ? "warn" : ""}`} title={c.note}>{c.diff > 0 ? "+" : ""}{money(String(c.diff))}（{(c.pct * 100).toFixed(1)}%）{c.note && <small className="block text-[10px] text-muted-foreground">{c.note}</small>}</td></tr>)}</tbody></table></div>)}<p className="cost-file-hint">源表申报来自上传文件里的单位工程汇总表；差异常见于规费未取费、暂列金额口径或合价四舍五入。可在台账补录「规费费率」等设置后重新汇总。</p></div></details>}
+    {!!driftFiles.length && <details className="cost-fact-details cost-drift"><summary>⚠ 与源表申报口径有 {driftCount} 处差异，最大 {wan(String(Math.abs(driftMax.diff)))}（{driftMax.label}）</summary><div className="xl-sheet">{driftFiles.map(d => <div key={d.file}>{driftFiles.length > 1 && <p className="cost-file-hint cost-drift-file">按「{d.file}」口径</p>}<table className="xl-table"><thead><tr><th>口径</th><th className="text-right">源表申报（元）</th><th className="text-right">本次计算（元）</th><th className="text-right">差异</th></tr></thead><tbody>{d.checks.map(c => <tr key={c.label}><td>{c.label}</td><td className="mono text-right">{money(String(c.declared))}</td><td className="mono text-right">{money(String(c.computed))}</td><td className={`mono text-right ${Math.abs(c.pct) > 0.05 ? "warn" : ""}`} title={c.note}>{c.diff > 0 ? "+" : ""}{money(String(c.diff))}（{(c.pct * 100).toFixed(1)}%）{c.note && <small className="block text-2xs text-muted-foreground">{c.note}</small>}</td></tr>)}</tbody></table></div>)}<p className="cost-file-hint">源表申报来自上传文件里的单位工程汇总表；差异常见于规费未取费、暂列金额口径或合价四舍五入。可在台账补录「规费费率」等设置后重新汇总。</p></div></details>}
     <details className="cost-fact-details"><summary>查看费用明细</summary><div className="xl-sheet"><table className="xl-table"><thead><tr><th>专业</th><th className="text-right">金额（元）</th></tr></thead><tbody>{r?.disciplines.map(d => <tr key={d.key}><td>{d.label}</td><td className="mono text-right">{money(d.amount)}</td></tr>)}</tbody></table>{!r?.disciplines.length && <p className="cost-file-hint">上传清单后显示费用明细。</p>}</div><p className="cost-file-hint">税前金额：{money(r?.fees.preTax ?? "0")} 元</p></details>
     <details className="cost-fact-details"><summary>查看操作记录</summary>{s.receipts.slice(0, 5).map(receipt => <div className="cost-recent-row" key={receipt.id}><div><p>{receipt.summary}</p><small>{new Date(receipt.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}</small></div></div>)}{!s.receipts.length && <p className="cost-file-hint">还没有操作记录。</p>}<Button variant="outline" size="sm" onClick={() => s.setActiveView("view:receipts")}>全部记录</Button></details>
   </div>;

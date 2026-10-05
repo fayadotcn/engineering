@@ -13,7 +13,7 @@ tr.boq-flash > td {
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
-  font-size: 12.5px;
+  font-size: var(--text-xs);
 }
 .xl-table th, .xl-table td {
   border-right: 1px solid var(--border);
@@ -23,7 +23,7 @@ tr.boq-flash > td {
 }
 /* 行高亮用轻微淡入淡出，hover 扫过不闪 */
 .xl-table tbody td {
-  transition: background-color .12s ease;
+  transition: background-color var(--dur-fast) ease;
 }
 .xl-table thead th {
   position: sticky;
@@ -33,7 +33,7 @@ tr.boq-flash > td {
   border-bottom-color: var(--input);
   color: var(--muted-foreground);
   font-weight: 500;
-  font-size: 11.5px;
+  font-size: var(--text-2xs);
   text-align: left;
 }
 /* 行号槽（Excel 行头）：muted 底、居中、不可选、横向滚动时吸附左缘 */
@@ -47,7 +47,7 @@ tr.boq-flash > td {
   background: var(--muted);
   color: var(--muted-foreground);
   font-family: ui-monospace, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: var(--text-2xs);
   text-align: center !important;
   user-select: none;
 }
@@ -154,7 +154,7 @@ tr.boq-flash > td {
 .xl-table th.text-center { text-align: center; }
 .mapping-table thead { position: sticky; top: 0; z-index: 10; }
 .mapping-table thead th { position: static; }
-.cost-recent-row p, .dash-kpi strong, fieldset > .xl-sheet > div:first-child > span:first-child { overflow-wrap: anywhere; }
+.cost-recent-row p, fieldset > .xl-sheet > div:first-child > span:first-child { overflow-wrap: anywhere; }
 fieldset > .xl-sheet > div:first-child > span:first-child { max-width: 100%; }
 @container (max-width: 620px) {
   .xl-scroll .xl-name {
@@ -168,7 +168,7 @@ fieldset > .xl-sheet > div:first-child > span:first-child { max-width: 100%; }
 }
 @media print {
   .xl-sheet { overflow: visible !important; border: 0; }
-  .xl-table { font-size: 11px; }
+  .xl-table { font-size: var(--text-2xs); }
   .xl-table thead th { position: static; }
   .xl-table.xl-pin-last td:last-child, .xl-table.xl-pin-last thead th:last-child { position: static; box-shadow: none; }
   .xl-table td, .xl-table th { white-space: normal; }

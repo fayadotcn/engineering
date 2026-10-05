@@ -271,6 +271,21 @@ describe("人工费调整（定额人工费×调差系数）", () => {
     const issues = feeCompliance([item("10000")], p);
     expect(issues.map((x) => x.label)).toContain("人工费调整未计取");
   });
+
+  // 倍数口径（人工费×4 → 系数 3）：行内必须写明「调增至 4 倍」，否则 300% 会被读成调增 300 元
+  it("系数 3（=人工费调增至 4 倍）→ 调差 = 基数×3，行内标注倍数", () => {
+    const r = feeSummary(
+      [item("10000")],
+      params({ taxRate: D(0.09), laborBase: D(5000), laborAdjustRate: D(3) })
+    );
+    const row = r.rows.find((x) => x.name === "人工费调整");
+    expect(row?.amount).toBe("15000.00");
+    expect(row?.rate).toBe("300%");
+    expect(row?.basis).toContain("调增至 4 倍");
+    expect(row?.note).toContain("调增至 4 倍");
+    expect(r.rows.find((x) => x.seq === "五")?.amount).toBe("25000.00");
+    expect(r.grandTotal).toBe("27250.00");
+  });
 });
 
 describe("compareDeclared 申报核对", () => {

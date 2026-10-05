@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useStore } from "../store";
 
 export type ProjectEntry = { id: string; name: string };
@@ -42,23 +43,25 @@ export function ProjectSwitch({ projects }: { projects: ProjectEntry[] }) {
   return (
     <span className="wb-switch">
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            className="wb-switch-trigger"
-            aria-haspopup="menu"
-            title="切换工程 / 更多操作"
-          >
-            <span className="wb-avatar" aria-hidden="true">{initialOf(s.projectName)}</span>
-            <span className="wb-switch-name">{s.projectName || "工程"}</span>
-            <ChevronDown size={13} className="wb-switch-caret" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-54 max-w-[min(320px,calc(100vw-24px))] text-[12.5px]">
+        {/* 提示挂在菜单触发器外层：禁用/展开态都不影响菜单自身的 aria-expanded */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button className="wb-switch-trigger" aria-haspopup="menu">
+                <span className="wb-avatar" aria-hidden="true">{initialOf(s.projectName)}</span>
+                <span className="wb-switch-name">{s.projectName || "工程"}</span>
+                <ChevronDown size={13} className="wb-switch-caret" aria-hidden="true" />
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>切换工程 / 更多操作</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start" className="min-w-54 max-w-[min(320px,calc(100vw-24px))] text-xs">
           <DropdownMenuItem onSelect={() => setEditing(s.projectName)}>
             <Pencil />重命名工程
           </DropdownMenuItem>
           {projects.length > 0 && <DropdownMenuSeparator />}
-          {projects.length > 0 && <DropdownMenuLabel className="text-[10.5px] font-normal text-muted-foreground">切换工程</DropdownMenuLabel>}
+          {projects.length > 0 && <DropdownMenuLabel className="text-2xs font-normal text-muted-foreground">切换工程</DropdownMenuLabel>}
           <div className="max-h-63 overflow-y-auto">
             {projects.map((p) => {
               const current = p.id === s.projectId;
@@ -74,7 +77,7 @@ export function ProjectSwitch({ projects }: { projects: ProjectEntry[] }) {
               );
             })}
             {projects.length === 1 && (
-              <div className="px-2 pt-1 pb-2 text-[11.5px] text-muted-foreground">只有这一个工程</div>
+              <div className="px-2 pt-1 pb-2 text-2xs text-muted-foreground">只有这一个工程</div>
             )}
           </div>
           <DropdownMenuSeparator />

@@ -31,7 +31,7 @@ export function SiteHeader() {
             <Plus size={13} />新建工程
           </a>
         </Button>
-        <ThemeToggle className="wb-theme" />
+        <ThemeToggle />
       </div>
     </header>
   );

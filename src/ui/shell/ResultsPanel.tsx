@@ -2,6 +2,8 @@
 import { BarChart3, Download, RefreshCw, X } from "lucide-react";
 import type { WorkspaceView } from "@shared/types";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EmptyState } from "../primitives";
 import { useStore } from "../store";
 import { isBusy, isDirty } from "../busy";
 import { resultKey, sectionOf } from "../sections";
@@ -62,12 +64,15 @@ export function ResultsPanel({ projectId, onUpload }: { projectId: string; onUpl
     for (const x of all) if (resultKey(x) === resultKey(v)) s.closeView(x.id, next?.id ?? "empty:results");
   };
 
-  if (!list.length) return <div className="cost-empty">
-    <BarChart3 size={30} />
-    <h3>还没有成果</h3>
-    <p>{s.items.length ? "在左侧对话里提出测算、检查或汇总任务，结果会出现在这里。也可以直接生成：" : "先上传工程清单，再生成成果。"}</p>
-    {s.items.length > 0 ? <div className="cost-actions">{QUICK_RESULTS.map((q) => <Button key={q.label} variant="outline" size="sm" disabled={blocked} onClick={() => void s.send(q.task)}>{q.label}</Button>)}</div>
-      : <Button onClick={onUpload}>上传清单</Button>}
+  if (!list.length) return <div className="flex flex-1 items-center justify-center">
+    <EmptyState
+      icon={<BarChart3 size={22} />}
+      title="还没有成果"
+      hint={s.items.length ? "在左侧对话里提出测算、检查或汇总任务，结果会出现在这里。也可以直接生成：" : "先上传工程清单，再生成成果。"}
+      action={s.items.length > 0
+        ? <div className="cost-actions justify-center">{QUICK_RESULTS.map((q) => <Button key={q.label} variant="outline" size="sm" disabled={blocked} onClick={() => void s.send(q.task)}>{q.label}</Button>)}</div>
+        : <Button onClick={onUpload}>上传清单</Button>}
+    />
   </div>;
 
   const regen = active && regenTask(active);
@@ -76,11 +81,21 @@ export function ResultsPanel({ projectId, onUpload }: { projectId: string; onUpl
       {list.map((v) => {
         const current = active && resultKey(active) === resultKey(v);
         return <div key={v.id} className={current ? "active" : ""}>
-          <button onClick={() => s.setActiveView(v.id)} aria-current={current ? "page" : undefined} title={v.title}>
-            <small>{KIND_LABEL[v.kind] ?? "成果"}</small>
-            <span>{v.title}</span>
-          </button>
-          <button className="results-close" aria-label={`移除${v.title}`} title="移除此成果" onClick={() => remove(v)}><X size={12} /></button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={() => s.setActiveView(v.id)} aria-current={current ? "page" : undefined}>
+                <small>{KIND_LABEL[v.kind] ?? "成果"}</small>
+                <span>{v.title}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{v.title}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="results-close" aria-label={`移除${v.title}`} onClick={() => remove(v)}><X size={12} /></button>
+            </TooltipTrigger>
+            <TooltipContent side="right">移除此成果</TooltipContent>
+          </Tooltip>
         </div>;
       })}
     </nav>
@@ -88,7 +103,15 @@ export function ResultsPanel({ projectId, onUpload }: { projectId: string; onUpl
       <header className="results-head">
         <div><small>{KIND_LABEL[active.kind] ?? "成果"}</small><h3>{active.title}</h3></div>
         <div className="cost-actions">
-          {regen && <Button variant="outline" size="sm" disabled={blocked} onClick={() => void s.send(regen)} title="成果是生成时的快照；清单或计价设置变化后可重新生成"><RefreshCw size={13} />重新生成</Button>}
+          {regen && <Tooltip>
+            {/* 按钮禁用时自身收不到指针事件，触发层放在外层 span 上，提示才不至于消失 */}
+            <TooltipTrigger asChild>
+              <div className="inline-flex">
+                <Button variant="outline" size="sm" disabled={blocked} onClick={() => void s.send(regen)}><RefreshCw size={13} />重新生成</Button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>成果是生成时的快照；清单或计价设置变化后可重新生成</TooltipContent>
+          </Tooltip>}
           {active.kind === "fileCompare" && active.fileAId && active.fileBId
             ? <Button size="sm" asChild><a href={`/api/projects/${projectId}/export-compare?a=${active.fileAId}&b=${active.fileBId}`} download><Download size={13} />导出对审报告</a></Button>
             : s.items.length > 0 && <Button variant="outline" size="sm" asChild><a href={`/api/projects/${projectId}/export`} download><Download size={13} />导出清单 Excel</a></Button>}

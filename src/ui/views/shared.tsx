@@ -1,6 +1,12 @@
 "use client";
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, Funnel } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn as cx } from "@/lib/utils";
 
 export const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
 
@@ -29,6 +35,68 @@ export const SOURCE_LABEL: Record<string, string> = {
   INFERRED: "推断",
   MARKET_REFERENCE: "市场参考",
 };
+
+/* ---------------- 提示：原生 title → Radix Tooltip ----------------
+   原生 title 只能鼠标悬停、样式不可控、长文本还会被系统截断；说明性提示统一走 Tooltip
+   （Provider 挂在 src/app/layout.tsx）。两种形态：
+   · <Tip>   包一层可截断 span 作 trigger —— 表格单元格里的长文本；
+   · <TipEl> 直接把传入元素当 trigger —— Badge / Button / tr，不给 DOM 加壳；
+             被禁用的按钮不吃指针事件，传 focusable 包一层可聚焦 span（Radix 官方范式），
+             顺带让键盘 Tab 也能读到提示（原生 title 做不到）。
+   纯装饰性的提示已直接删除，不再保留 title。 */
+
+type TipSide = "top" | "right" | "bottom" | "left";
+const noTip = (tip: ReactNode) => tip === undefined || tip === null || tip === false || tip === "";
+
+export function Tip({
+  tip,
+  children,
+  className,
+  side = "top",
+}: {
+  tip?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  side?: TipSide;
+}) {
+  if (noTip(tip)) return <>{children}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={cx("inline-block max-w-full truncate", className)}>{children}</span>
+      </TooltipTrigger>
+      <TooltipContent side={side}>{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function TipEl({
+  tip,
+  children,
+  side = "top",
+  focusable,
+}: {
+  tip?: ReactNode;
+  children: ReactElement;
+  side?: TipSide;
+  focusable?: boolean;
+}) {
+  if (noTip(tip)) return <>{children}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {focusable ? (
+          <span tabIndex={0} className="inline-flex">
+            {children}
+          </span>
+        ) : (
+          children
+        )}
+      </TooltipTrigger>
+      <TooltipContent side={side}>{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 /* ---------------- Excel 列头：排序 + 筛选下拉 ---------------- */
 
@@ -99,22 +167,23 @@ export function ExcelHead({
       <div className={cn("flex items-center gap-1", numeric && "flex-row-reverse")}>
         <span className="truncate">{label}</span>
         {hasMenu && (
-          <button
-            ref={btnRef}
-            onClick={toggle}
-            className={cn(
-              "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors",
-              filtered || sortDir
-                ? "border-transparent bg-[var(--secondary)] text-[var(--foreground)]"
-                : "border-input/70 text-muted-foreground hover:border-input hover:bg-[var(--accent)] hover:text-foreground",
-              open && "border-[var(--foreground)] bg-[var(--secondary)] text-[var(--foreground)]"
-            )}
-            title="排序与筛选"
-            aria-label={`${label}排序与筛选`}
-            aria-expanded={open}
-          >
-            <Icon size={11} strokeWidth={2.2} />
-          </button>
+          <TipEl tip="排序与筛选">
+            <button
+              ref={btnRef}
+              onClick={toggle}
+              className={cn(
+                "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+                filtered || sortDir
+                  ? "border-transparent bg-[var(--secondary)] text-[var(--foreground)]"
+                  : "border-input/70 text-muted-foreground hover:border-input hover:bg-[var(--accent)] hover:text-foreground",
+                open && "border-[var(--foreground)] bg-[var(--secondary)] text-[var(--foreground)]"
+              )}
+              aria-label={`${label}排序与筛选`}
+              aria-expanded={open}
+            >
+              <Icon size={11} strokeWidth={2.2} />
+            </button>
+          </TipEl>
         )}
       </div>
       {open && pos && (
@@ -135,55 +204,52 @@ export function ExcelHead({
                     onClick={() => { onSort(sortDir === d ? null : d); setOpen(false); btnRef.current?.focus(); }}
                     aria-pressed={sortDir === d}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--accent)]",
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-[var(--accent)]",
                       sortDir === d && "font-medium text-[var(--foreground)]"
                     )}
                   >
                     <Icon size={12} /> {l}
-                    {sortDir === d && <span className="ml-auto text-[10px]">✓</span>}
+                    {sortDir === d && <span className="ml-auto text-2xs">✓</span>}
                   </button>
                 ))}
-                <div className="my-1 h-px bg-muted" />
+                <Separator className="my-1 bg-muted" />
               </>
             )}
             {onText && (
               <div className="px-1.5 py-1">
-                <input
+                <Input
                   aria-label={`筛选${label}`}
                   autoFocus={!options}
                   value={text ?? ""}
                   onChange={(e) => onText(e.target.value)}
                   placeholder="包含文本…"
-                  className="cost-input w-full !h-7"
                 />
               </div>
             )}
             {options && (
               <>
-                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] hover:bg-[var(--accent)]">
-                  <input
-                    type="checkbox"
+                {/* 勾选行整行（含文字）都是 Label 的点击范围，与原先 label 包 input 一致；
+                    Radix Checkbox 是 button，Label 的标签关联照旧把点击转发过去。 */}
+                <Label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-[var(--accent)]">
+                  <Checkbox
                     checked={!selected || selected.size === options.length}
-                    onChange={onAll}
-                    className="accent-[var(--primary)]"
+                    onCheckedChange={() => onAll?.()}
                   />
                   <span className="text-muted-foreground">（全选）</span>
-                </label>
+                </Label>
                 <div className="max-h-48 overflow-auto">
                   {options.map((o) => (
-                    <label
+                    <Label
                       key={o.v}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-[var(--accent)]"
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-[var(--accent)]"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={!selected || selected.has(o.v)}
-                        onChange={() => onToggle?.(o.v)}
-                        className="accent-[var(--primary)]"
+                        onCheckedChange={() => onToggle?.(o.v)}
                       />
                       <span className="min-w-0 flex-1 truncate">{o.v || "（空白）"}</span>
-                      <span className="text-[10.5px] text-muted-foreground">{o.n}</span>
-                    </label>
+                      <span className="text-2xs text-muted-foreground">{o.n}</span>
+                    </Label>
                   ))}
                 </div>
               </>

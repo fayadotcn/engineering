@@ -1,14 +1,13 @@
 /* ── 造价助手对话 ── */
 .conv { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .conv-head { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 12px 0 18px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
-.conv-title { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--foreground); }
+.conv-title { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-sm); font-weight: 600; color: var(--foreground); }
 .conv-title svg { color: var(--foreground); }
-.conv-hint { margin-left: auto; font-size: 11px; color: var(--muted-foreground); }
+.conv-hint { margin-left: auto; font-size: var(--text-2xs); color: var(--muted-foreground); }
 .conv-hint:not(:empty) { display: inline-flex; align-items: center; gap: 5px; color: var(--foreground); }
 .conv-hint:not(:empty)::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--foreground); animation: pulse-soft 1.2s ease-in-out infinite; }
-.conv-head [data-slot="button"] { width: 30px; height: 30px; }
 /* 模型降级横幅：不挡操作、一句话说清现状，details 在 title 提示里 */
-.conv-banner { display: flex; align-items: flex-start; gap: 7px; flex-shrink: 0; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--warning-soft); color: var(--warning-soft-fg); font-size: 11.5px; line-height: 1.55; }
+.conv-banner { display: flex; align-items: flex-start; gap: 7px; flex-shrink: 0; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--warning-soft); color: var(--warning-soft-fg); font-size: var(--text-2xs); line-height: 1.55; }
 .conv-banner svg { flex-shrink: 0; margin-top: 2px; color: var(--warning-soft-fg); }
 
 .conv-list-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -16,14 +15,14 @@
 /* 新消息块入场：只有新挂载的节点会播，已有块不重复动 */
 .conv-list > * { animation: rise .26s var(--ease-out) backwards; }
 /* 上翻查看历史时有新内容 → 悬浮提示回到底部 */
-.conv-jump { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); box-shadow: var(--shadow-md); font-size: 11.5px; font-weight: 500; color: var(--foreground); cursor: pointer; transition: border-color .15s, color .15s; }
+.conv-jump { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); box-shadow: var(--shadow-md); font-size: var(--text-2xs); font-weight: 500; color: var(--foreground); cursor: pointer; transition: border-color var(--dur-base), color var(--dur-base); }
 .conv-jump:hover { border-color: var(--ring); }
-.conv-welcome { color: var(--muted-foreground); font-size: 13px; line-height: 1.8; padding: 4px 2px; }
+.conv-welcome { color: var(--muted-foreground); font-size: var(--text-sm); line-height: 1.8; padding: 4px 2px; }
 /* 单色实心砖：开场先立住产品气质 */
 .conv-welcome-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-bottom: 14px; border-radius: var(--radius-xl); background: var(--primary); color: var(--primary-foreground); }
-.conv-welcome h3 { margin: 0 0 2px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: var(--foreground); }
+.conv-welcome h3 { margin: 0 0 2px; font-size: var(--text-base); font-weight: 600; letter-spacing: -.01em; color: var(--foreground); }
 .conv-quick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.conv-quick button { font-size: 12px; color: var(--foreground); border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; background: var(--card); cursor: pointer; transition: border-color .18s, color .18s, box-shadow .18s, transform .18s; animation: rise .3s var(--ease-out) backwards; }
+.conv-quick button { font-size: var(--text-xs); color: var(--foreground); border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px; background: var(--card); cursor: pointer; transition: border-color var(--dur-base), color var(--dur-base), box-shadow var(--dur-base), transform var(--dur-base); animation: rise .3s var(--ease-out) backwards; }
 /* 快捷指令错峰入场，开场有一点节奏感 */
 .conv-quick button:nth-child(2) { animation-delay: .05s; }
 .conv-quick button:nth-child(3) { animation-delay: .1s; }
@@ -36,8 +35,8 @@
 
 .conv-user { align-self: flex-end; max-width: 86%; }
 /* 素灰气泡：用户消息不抢戏，让助手内容当主角 */
-.conv-user p { background: var(--muted); color: var(--foreground); border-radius: 15px 15px 5px 15px; padding: 8px 13px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
-.conv-upload { align-self: flex-end; display: flex; align-items: center; gap: 8px; max-width: 86%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); font-size: 12px; color: var(--foreground); }
+.conv-user p { background: var(--muted); color: var(--foreground); border-radius: 15px 15px 5px 15px; padding: 8px 13px; font-size: var(--text-sm); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conv-upload { align-self: flex-end; display: flex; align-items: center; gap: 8px; max-width: 86%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); font-size: var(--text-xs); color: var(--foreground); }
 .conv-upload svg:first-child { color: var(--success); flex-shrink: 0; }
 .conv-upload span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 一轮对话：一个头像带一整列助手侧内容（过程卡/回复/确认/成果/报错） */
@@ -45,7 +44,7 @@
 .conv-turn-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
 /* 头像：muted 底小方块，安静但有身份 */
 .conv-avatar { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-top: 2px; border-radius: var(--radius-md); background: var(--muted); color: var(--foreground); }
-.conv-text { min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.8; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.conv-text { min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); line-height: 1.8; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .conv-text strong { font-weight: 600; }
 /* 事实行：一行一个子句 + 语义图标，回复可扫读 */
 .conv-fact { display: flex; gap: 8px; align-items: flex-start; }
@@ -70,22 +69,22 @@ ol.conv-md-list { list-style: decimal; }
 .conv-md-list li::marker { color: var(--muted-foreground); }
 /* GFM 表格：回复里的费用/材料对照直接排成表 */
 .conv-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); }
-.conv-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.6; }
+.conv-table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); line-height: 1.6; }
 .conv-table th, .conv-table td { padding: 6px 12px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; overflow-wrap: normal; }
-.conv-table thead th { background: var(--muted); font-weight: 600; font-size: 11.5px; color: var(--foreground); }
+.conv-table thead th { background: var(--muted); font-weight: 600; font-size: var(--text-2xs); color: var(--foreground); }
 .conv-table tbody tr:last-child td { border-bottom: 0; }
 .conv-table tbody tr:hover td { background: var(--accent); }
 /* 行内代码 / 代码块 */
-.conv-code { padding: 1px 5px; border-radius: var(--radius-sm); background: var(--muted); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
-.conv-pre { margin: 0; padding: 10px 12px; border-radius: var(--radius-md); background: var(--muted); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; line-height: 1.65; overflow-x: auto; white-space: pre; }
+.conv-code { padding: 1px 5px; border-radius: var(--radius-sm); background: var(--muted); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: var(--text-xs); }
+.conv-pre { margin: 0; padding: 10px 12px; border-radius: var(--radius-md); background: var(--muted); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: var(--text-xs); line-height: 1.65; overflow-x: auto; white-space: pre; }
 /* 引用 / 分隔线 / 链接 */
 .conv-md-quote { margin: 0; padding: 1px 0 1px 10px; border-left: 3px solid var(--border); color: var(--muted-foreground); }
 .conv-md-hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
 .conv-link { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
 /* 长回复折叠：一行安静的展开器，不是按钮 */
-.conv-more > summary { width: fit-content; padding: 2px 8px 2px 0; font-size: 11.5px; color: var(--muted-foreground); cursor: pointer; list-style: none; }
+.conv-more > summary { width: fit-content; padding: 2px 8px 2px 0; font-size: var(--text-2xs); color: var(--muted-foreground); cursor: pointer; list-style: none; }
 .conv-more > summary::-webkit-details-marker { display: none; }
-.conv-more > summary::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 6px 1px 4px; border-right: 1.3px solid currentColor; border-bottom: 1.3px solid currentColor; transform: rotate(-45deg); transition: transform .15s; }
+.conv-more > summary::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 6px 1px 4px; border-right: 1.3px solid currentColor; border-bottom: 1.3px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-base); }
 .conv-more[open] > summary::before { transform: rotate(45deg); }
 .conv-more > summary:hover { color: var(--foreground); }
 .conv-more[open] { display: flex; flex-direction: column; gap: 4px; }
@@ -93,24 +92,24 @@ ol.conv-md-list { list-style: decimal; }
 .conv-waiting .conv-text { color: var(--muted-foreground); }
 /* 等待首个过程事件时的三点呼吸指示 */
 .conv-typing { display: inline-flex; align-items: center; gap: 3px; margin-right: 2px; }
-.conv-typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--foreground); animation: pulse-soft 1.1s ease-in-out infinite; }
+.conv-typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--foreground); animation: pulse-soft 1.2s ease-in-out infinite; }
 .conv-typing i:nth-child(2) { animation-delay: .18s; }
 .conv-typing i:nth-child(3) { animation-delay: .36s; }
 
 /* 一次运行的过程：安静软块——无边框灰底，
    进行中只有当前步骤是亮的，结束后折叠成一行可展开摘要 */
 .conv-run { border-radius: var(--radius-lg); background: var(--muted); overflow: hidden; }
-.conv-run-head { display: flex; align-items: center; gap: 7px; padding: 9px 13px 7px; font-size: 11.5px; font-weight: 500; color: var(--foreground); }
-.conv-run > summary { display: flex; align-items: center; gap: 7px; padding: 9px 13px; font-size: 11.5px; color: var(--muted-foreground); cursor: pointer; list-style: none; transition: background .15s, color .15s; }
+.conv-run-head { display: flex; align-items: center; gap: 7px; padding: 9px 13px 7px; font-size: var(--text-2xs); font-weight: 500; color: var(--foreground); }
+.conv-run > summary { display: flex; align-items: center; gap: 7px; padding: 9px 13px; font-size: var(--text-2xs); color: var(--muted-foreground); cursor: pointer; list-style: none; transition: background var(--dur-base), color var(--dur-base); }
 .conv-run > summary::-webkit-details-marker { display: none; }
 /* 折叠箭头收到最右缘，和卡片摘要行对齐 */
-.conv-run > summary::after { content: ""; width: 5px; height: 5px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: rotate(-45deg); margin-left: auto; transition: transform .15s; }
+.conv-run > summary::after { content: ""; width: 5px; height: 5px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: rotate(-45deg); margin-left: auto; transition: transform var(--dur-base); }
 .conv-run[open] > summary::after { transform: rotate(45deg); }
 .conv-run > summary:hover { color: var(--foreground); }
 .conv-run > summary svg { flex-shrink: 0; color: var(--success); }
 .conv-run > summary svg.err { color: var(--destructive); }
 .conv-steps { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 4px 13px 11px; list-style: none; }
-.conv-steps li { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 1.65; color: var(--muted-foreground); }
+.conv-steps li { display: flex; align-items: flex-start; gap: 7px; font-size: var(--text-xs); line-height: 1.65; color: var(--muted-foreground); }
 /* 已完成的步骤勾弱化：进行中那一步才是视觉焦点 */
 .conv-steps li > svg { flex-shrink: 0; margin-top: 4px; color: var(--muted-foreground); }
 .conv-steps li.live { color: var(--foreground); }
@@ -121,45 +120,36 @@ ol.conv-md-list { list-style: decimal; }
 /* 思考过程：斜体弱文，不占结构 */
 .conv-steps li.thought { padding-left: 20px; color: var(--muted-foreground); font-style: italic; white-space: pre-wrap; overflow-wrap: anywhere; }
 .conv-steps li.thought.live { color: var(--muted-foreground); }
-.conv-steps li em { margin-left: auto; font-style: normal; font-size: 10.5px; color: var(--muted-foreground); }
+.conv-steps li em { margin-left: auto; font-style: normal; font-size: var(--text-2xs); color: var(--muted-foreground); }
 .conv-steps li span { min-width: 0; overflow-wrap: anywhere; }
 /* 过程卡里的"产出视图"行：比普通步骤略醒目、可点击跳工作区 */
 .conv-steps li.view-step { padding: 0; }
-.conv-steps li.view-step button { display: flex; align-items: center; gap: 7px; width: 100%; margin: 2px 0; padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); font: inherit; font-size: 12px; color: var(--foreground); text-align: left; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+.conv-steps li.view-step button { display: flex; align-items: center; gap: 7px; width: 100%; margin: 2px 0; padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); font: inherit; font-size: var(--text-xs); color: var(--foreground); text-align: left; cursor: pointer; transition: border-color var(--dur-base), color var(--dur-base), background var(--dur-base); }
 .conv-steps li.view-step button svg { flex-shrink: 0; color: var(--muted-foreground); }
 .conv-steps li.view-step button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conv-steps li.view-step button:enabled:hover { border-color: var(--ring); color: var(--foreground); }
 .conv-steps li.view-step button:enabled:hover svg:last-child { color: var(--foreground); }
 .conv-steps li.view-step button:disabled { color: var(--muted-foreground); cursor: default; }
 
-.conv-view { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); font-size: 12.5px; color: var(--foreground); text-align: left; cursor: pointer; transition: border-color .18s, box-shadow .18s, transform .18s; }
-.conv-view-lead { flex-shrink: 0; color: var(--muted-foreground); }
-.conv-view span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.conv-view > svg:last-child { flex-shrink: 0; color: var(--foreground); transition: transform .18s var(--ease-out); }
-.conv-view:enabled:hover { border-color: var(--ring); box-shadow: var(--shadow-md); transform: translateY(-1px); }
-.conv-view:enabled:hover > svg:last-child { transform: translate(2px, -2px); }
-.conv-view:disabled { color: var(--muted-foreground); cursor: default; }
 
 /* 确认卡：安静的白卡 + 一条警示边，不整面琥珀 */
-.conv-confirm { border: 1px solid var(--border); border-left: 3px solid var(--warning-soft-fg); background: var(--card); border-radius: var(--radius-lg); padding: 12px 14px; font-size: 12.5px; }
-.conv-confirm strong { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--foreground); }
-.conv-confirm:not(.approved):not(.rejected) strong::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); animation: pulse-soft 1.4s ease-in-out infinite; }
+.conv-confirm { border: 1px solid var(--border); border-left: 3px solid var(--warning-soft-fg); background: var(--card); border-radius: var(--radius-lg); padding: 12px 14px; font-size: var(--text-xs); }
+.conv-confirm strong { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--foreground); }
+.conv-confirm:not(.approved):not(.rejected) strong::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); animation: pulse-soft 1.2s ease-in-out infinite; }
 .conv-confirm p { color: var(--muted-foreground); margin-top: 5px; line-height: 1.7; overflow-wrap: anywhere; }
 .conv-confirm.approved, .conv-confirm.rejected { opacity: .55; border-left-color: var(--border); }
 .conv-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; justify-content: flex-end; }
-.conv-error { font-size: 12px; color: var(--destructive-soft-fg); background: var(--destructive-soft); border-radius: var(--radius-lg); padding: 9px 12px; line-height: 1.65; overflow-wrap: anywhere; }
 
-.conv-compose { flex-shrink: 0; margin: 0 12px 12px; border: 1px solid var(--input); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--shadow-xs); transition: border-color .18s, box-shadow .18s; }
+.conv-compose { flex-shrink: 0; margin: 0 12px 12px; border: 1px solid var(--input); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--shadow-xs); transition: border-color var(--dur-base), box-shadow var(--dur-base); }
 .conv-compose:focus-within { border-color: var(--ring); box-shadow: var(--shadow-xs), 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent); }
 /* 有未保存修改时：输入框可用但发送被挡，边框换警示色提示 */
 .conv-compose.blocked { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
-.conv-compose textarea { display: block; width: 100%; resize: none; border: 0; padding: 12px 14px 4px; font: inherit; font-size: 13px; line-height: 1.6; background: transparent; color: var(--foreground); outline: none; max-height: 140px; }
+.conv-compose textarea { display: block; width: 100%; resize: none; border: 0; padding: 12px 14px 4px; font: inherit; font-size: var(--text-sm); line-height: 1.6; background: transparent; color: var(--foreground); outline: none; max-height: 140px; }
 .conv-compose textarea:focus-visible { outline: none; }
 .conv-compose textarea:disabled { opacity: .55; }
 .conv-compose-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
-.conv-compose-bar [data-slot="button"] { width: 30px; height: 30px; }
-.conv-compose-bar > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; color: var(--muted-foreground); overflow: hidden; white-space: nowrap; }
-.conv-send { margin-left: auto; flex-shrink: 0; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); cursor: pointer; transition: background .15s, transform .1s; }
+.conv-compose-bar > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: var(--text-2xs); color: var(--muted-foreground); overflow: hidden; white-space: nowrap; }
+.conv-send { margin-left: auto; flex-shrink: 0; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); cursor: pointer; transition: background var(--dur-base), transform var(--dur-fast); }
 .conv-send:enabled:hover { background: color-mix(in srgb, var(--primary) 90%, var(--primary-foreground)); }
 .conv-send:enabled:active { transform: scale(.94); }
 .conv-send:disabled { opacity: .35; cursor: default; }

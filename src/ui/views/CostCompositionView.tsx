@@ -2,7 +2,7 @@
 import type { CostCompositionRow, WorkspaceView } from "@shared/types";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { EmptyState } from "../primitives";
-import { fmtMoney, PALETTE } from "./shared";
+import { fmtMoney, PALETTE, Tip, TipEl } from "./shared";
 
 /* ---------------- 人材机成本构成 ---------------- */
 
@@ -31,9 +31,11 @@ export function CostCompositionView({ view }: { view: Extract<WorkspaceView, { k
         {c.imported > 0 && <Badge variant="secondary" >源表分解列 {c.imported} 项</Badge>}
         {c.partial > 0 && <Badge variant="secondary" >仅主材价 {c.partial} 项</Badge>}
         {c.none > 0 && (
-          <Badge variant="warning"  title="这些项没有定额组价也没有分解列，合价全部计入「管利及未分解」">
-            {c.none} 项无成本数据
-          </Badge>
+          <TipEl tip="这些项没有定额组价也没有分解列，合价全部计入「管利及未分解」">
+            <Badge variant="warning">
+              {c.none} 项无成本数据
+            </Badge>
+          </TipEl>
         )}
         {c.inverted > 0 && <Badge variant="danger" >{c.inverted} 项成本倒挂（人材机高于合价）</Badge>}
       </div>
@@ -44,7 +46,7 @@ export function CostCompositionView({ view }: { view: Extract<WorkspaceView, { k
             <div key={b.label} style={{ width: `${(Number(b.amount) / rev) * 100}%`, background: b.color }} />
           ))}
         </div>
-        <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-[12px]">
+        <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs">
           {buckets.map((b) => (
             <span key={b.label} className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-sm" style={{ background: b.color }} />
@@ -84,7 +86,7 @@ export function CostCompositionView({ view }: { view: Extract<WorkspaceView, { k
               <tr key={r.itemId} style={r.inverted ? { background: "var(--destructive-soft)" } : undefined}>
                 <td className="xl-rn">{i + 1}</td>
                 <td className="mono text-muted-foreground">{r.code || "—"}</td>
-                <td className="max-w-56 truncate" title={r.name}>{r.name}</td>
+                <td className="max-w-56 truncate"><Tip tip={r.name}>{r.name}</Tip></td>
                 <td className="mono text-right">{r.quantity}<span className="text-muted-foreground"> {r.unit}</span></td>
                 <td className="mono text-right">{fmtMoney(r.revenue)}</td>
                 <td className="mono text-right">{r.labor === null ? <span className="text-muted-foreground">—</span> : fmtMoney(r.labor)}</td>

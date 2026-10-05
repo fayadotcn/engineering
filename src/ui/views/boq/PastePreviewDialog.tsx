@@ -15,7 +15,7 @@ export function PastePreviewDialog({ pastePlan, saving, onClose, onSubmit }: {
       <div className="dlg-title">粘贴更新 {pastePlan?.length ?? 0} 行清单</div>
       <p className="dlg-desc">按选中顺序把剪贴板里的工程量/综合单价写回对应行，名称与编码不受影响；一次粘贴记一条操作记录，可整体撤销。</p>
       <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-border">
-        <table className="w-full text-[12px]">
+        <table className="w-full text-xs">
           <thead>
             <tr className="bg-[var(--muted)] text-left text-muted-foreground">
               <th className="px-2.5 py-1.5 font-medium">项目</th>

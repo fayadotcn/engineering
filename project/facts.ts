@@ -78,7 +78,13 @@ export function pricingFactType(key: string): string | null {
 /** Applied at each fact write boundary; consumers only read normalized values. */
 export function validatePricingFact(key: string, value: string): void {
   if (!value.trim()) return;
-  if (/费率|利润率|税率|暂列金额率|调整系数/.test(key)) {
+  // 调整系数是「调增倍数」不是费率：3 = 调增 300%（人工费为定额人工费的 4 倍），
+  // 不能按 0–1 费率卡（历史坑：4 被当 4% 计取）
+  if (/调整系数/.test(key)) {
+    const coef = parseCoefficientValue(value);
+    if (coef === null || coef < 0 || coef > 10)
+      throw new Error(`${key}应为 0–10 的调增倍数：3 = 调增 300%（人工费为定额人工费的 4 倍），也可写 300%`);
+  } else if (/费率|利润率|税率|暂列金额率/.test(key)) {
     const rate = parseRateValue(value);
     if (rate === null || rate < 0 || rate > 1) throw new Error(`${key}应为 0%–100% 的有效费率`);
   } else if (key === "暂列金额") {
@@ -118,6 +124,22 @@ export function parseRateValue(raw: string | null | undefined): number | null {
   return /[%％]/.test(text) || Math.abs(v) > 1 ? v / 100 : v;
 }
 
+/**
+ * 调整系数（调增倍数）事实归一化：「3」/「3倍」/「×3」/「300%」→ 3（调增 300%）。
+ *
+ * 与 parseRateValue 的唯一差别：**裸数字 >1 不折成百分数**。
+ * 「人工费调整系数=4」的业务含义是人工费调增至 5 倍，不是 4%——历史上按费率解析，
+ * 626,369 元的调差被算成 8,351 元（差 75 倍），是真实踩过的坑。
+ * ≤1 仍按小数率（0.15 = 调增 15%），带 % 一律按百分数（「15%」= 0.15、「300%」= 3）。
+ */
+export function parseCoefficientValue(raw: string | null | undefined): number | null {
+  if (!raw?.trim()) return null;
+  const text = raw.trim();
+  const v = Number(text.replace(/[%％倍xX×*\s]/g, ""));
+  if (!Number.isFinite(v)) return null;
+  return /[%％]/.test(text) ? v / 100 : v;
+}
+
 /** 金额事实归一化：「50万」→ 500000，「1.2亿」→ 120000000，「5000元」→ 5000。 */
 export function parseAmountValue(raw: string | null | undefined): number | null {
   if (!raw?.trim()) return null;
@@ -144,10 +166,16 @@ export async function loadFeeParams(projectId: string): Promise<import("@cost-en
     const v = parseRateValue(f?.value);
     return { v: D(v ?? 0), set: v !== null };
   };
+  // 调整系数走倍数口径（「4」= 调增 400%，不是 4%）——与费率解析必须分开
+  const coef = async (key: string) => {
+    const f = await getFact(projectId, key);
+    const v = parseCoefficientValue(f?.value);
+    return { v: D(v ?? 0), set: v !== null };
+  };
   const [measure, regulation, provRate, provFact, taxF, addonF, laborFact, coeffFact, laborAdj] = await Promise.all([
     rate("措施费率"), rate("规费费率"), rate("暂列金额率"),
     getFact(projectId, "暂列金额"), getFact(projectId, "税率"), getFact(projectId, "附加税率"),
-    getFact(projectId, "定额人工费"), getFact(projectId, "系数措施费"), rate("人工费调整系数"),
+    getFact(projectId, "定额人工费"), getFact(projectId, "系数措施费"), coef("人工费调整系数"),
   ]);
   const provAmt = parseAmountValue(provFact?.value);
   const tax = parseRateValue(taxF?.value);

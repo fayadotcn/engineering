@@ -6,31 +6,25 @@ import { COLUMN_ROLE_LABEL, COLUMN_ROLES, type WorkspaceView } from "@shared/typ
 import { reconcilePriceRole } from "@shared/mapping";
 import { ConfirmDialog, toast } from "../primitives";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { readResponse } from "../api";
+import { FILE_TYPE_LABEL, FILE_TYPE_OPTIONS } from "../terms";
 import { FileSpreadsheet, Save, RefreshCw } from "lucide-react";
+import { Tip, TipEl } from "./shared";
 
 type MappingView = Extract<WorkspaceView, { kind: "columnMapping" }>;
 type Sheet = MappingView["sheets"][number];
 
 const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
-const TYPE_LABEL: Record<Sheet["type"], string> = {
-  BOQ: "清单",
-  QUOTATION: "询价表",
-  GENERIC: "忽略",
-  COMPARE: "对比表",
-  APPROVAL: "报审资料",
-  PENDING_QUOTE: "待报价清单",
-  FACTS: "汇总/说明表",
-  MATERIAL_PRICE: "材料价格表",
-};
 /** 会往清单/价格库里导行的类型：这些表的 itemsToImport=0 必须红标，
  *  COMPARE/APPROVAL/FACTS/GENERIC 本来就不导行，标了反而吓人 */
 const IMPORTABLE_TYPES = new Set<Sheet["type"]>(["BOQ", "PENDING_QUOTE", "QUOTATION", "MATERIAL_PRICE"]);
-
-const TYPE_OPTIONS: Sheet["type"][] = [
-  "BOQ", "PENDING_QUOTE", "QUOTATION", "MATERIAL_PRICE",
-  "COMPARE", "APPROVAL", "FACTS", "GENERIC",
-];
 
 const colLetter = (i: number): string => {
   let s = "";
@@ -38,6 +32,9 @@ const colLetter = (i: number): string => {
     s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
   return s;
 };
+
+/** Radix Select 的空值即 placeholder 语义（不能当选项值），「忽略该列」用哨兵值再映射回空串。 */
+const ROLE_NONE = "__none__";
 
 interface Draft {
   type: Sheet["type"];
@@ -174,8 +171,8 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
     <div className="h-full overflow-auto p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2 break-words">
         <FileSpreadsheet size={15} className="text-muted-foreground" />
-        <span className="text-[13px] font-medium">{view.filename}</span>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-sm font-medium">{view.filename}</span>
+        <span className="text-2xs text-muted-foreground">
           {store.blocks.some(b => b.type === "confirm" && !b.decided) ? "检查表格类型和各列名称；有错误就改一下，再保存。" : "修改后保存修改，再重新导入更新已有数据。"}
         </span>
       </div>
@@ -185,39 +182,48 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         return (
           <div key={s.sheetName} className="xl-sheet mb-4 overflow-hidden rounded-lg">
             <div className="flex flex-wrap items-center gap-2 border-b border-border bg-[var(--muted)] px-3 py-2">
-              <span className="text-[12.5px] font-medium">{s.sheetName}</span>
-              <select
-                value={d.type}
-                title={s.typeEvidence}
-                aria-label={`${s.sheetName}的表格类型`}
-                onChange={(e) => setType(s.sheetName, e.target.value as Sheet["type"])}
-                className="cost-input !h-6 !px-1 !text-[11px] w-fit"
-                style={
-                  s.typeConfidence < 0.9
-                    ? {
-                        borderColor: "var(--warning-soft-fg)",
-                        background: "var(--warning-soft)",
-                      }
-                    : undefined
-                }
-              >
-                {TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {TYPE_LABEL[t]}
-                  </option>
-                ))}
-              </select>
+              <span className="text-xs font-medium">{s.sheetName}</span>
+              {/* 表格类型是页面级控件（非单元格内联编辑）→ shadcn <Select>，高度 32px 与 <Input> 一致；
+                  自动判定没把握时保持琥珀底，理由走 Tooltip */}
+              <Tip tip={s.typeEvidence} className="shrink-0">
+                <Select
+                  value={d.type}
+                  onValueChange={(v) => setType(s.sheetName, v as Sheet["type"])}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    aria-label={`${s.sheetName}的表格类型`}
+                    className="w-fit text-2xs"
+                    style={
+                      s.typeConfidence < 0.9
+                        ? {
+                            borderColor: "var(--warning-soft-fg)",
+                            background: "var(--warning-soft)",
+                          }
+                        : undefined
+                    }
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FILE_TYPE_OPTIONS.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {FILE_TYPE_LABEL[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Tip>
               {s.templateHit && <Badge variant="success" >已识别</Badge>}
               {s.userEdited && <Badge variant="warning" >已修改</Badge>}
               {IMPORTABLE_TYPES.has(s.type) && s.itemsToImport === 0 && (
-                <Badge
-                  variant="danger"
-                  title="表里有数据，但按当前映射认不出任何清单行（名称列为空最常见）——请指认名称列，必要时指认工程量/单价列，再保存并确认导入"
-                >
-                  将导入 0 行
-                </Badge>
+                <TipEl tip="表里有数据，但按当前映射认不出任何清单行（名称列为空最常见）——请指认名称列，必要时指认工程量/单价列，再保存并确认导入">
+                  <Badge variant="danger">
+                    将导入 0 行
+                  </Badge>
+                </TipEl>
               )}
-              <span className="ml-auto text-[11px] text-muted-foreground">
+              <span className="ml-auto text-2xs text-muted-foreground">
                 {s.minConfidence < 0.9 ? "需要核对" : "已识别"}
                 {s.typeConfidence < 0.9 && " · 请核对表格类型"}
                 {" · "}
@@ -241,22 +247,35 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                     <th className="xl-rn"></th>
                     {Array.from({ length: s.colCount }, (_, i) => (
                       <th key={i} className="p-0.5">
-                        <select
-                          aria-label={`${s.sheetName}的${colLetter(i)}列角色`}
-                          value={d.byCol[i] ?? ""}
-                          onChange={(e) => setRole(s.sheetName, i, e.target.value)}
-                          className={cn(
-                            "cost-input w-full min-w-16 !h-[22px] !px-0.5 !text-[10.5px]",
-                            d.byCol[i] && "border-[var(--input)] font-medium"
-                          )}
+                        {/* 每列一个角色下拉：网格内联编辑走 xs 档（28px，尺寸由 size prop 表达）——
+                            全站统一的 32px 会把表头撑胖，手搓的原生 select 又和组件不同族。
+                            面板整体在 <fieldset disabled> 里，Radix 的 button 不继承 fieldset 禁用，
+                            所以 disabled 必须显式传 blocked。 */}
+                        <Select
+                          value={d.byCol[i] ?? ROLE_NONE}
+                          onValueChange={(v) => setRole(s.sheetName, i, v === ROLE_NONE ? "" : v)}
+                          disabled={blocked}
                         >
-                          <option value="">— 忽略 —</option>
-                          {COLUMN_ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {COLUMN_ROLE_LABEL[r]}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger
+                            size="xs"
+                            aria-label={`${s.sheetName}的${colLetter(i)}列角色`}
+                            className={cn("w-full min-w-16", d.byCol[i] && "font-medium")}
+                          >
+                            <SelectValue>
+                              {d.byCol[i]
+                                ? (COLUMN_ROLE_LABEL as Record<string, string>)[d.byCol[i]] ?? d.byCol[i]
+                                : "— 忽略 —"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ROLE_NONE}>— 忽略 —</SelectItem>
+                            {COLUMN_ROLES.map((r) => (
+                              <SelectItem key={r} value={r}>
+                                {COLUMN_ROLE_LABEL[r]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </th>
                     ))}
                   </tr>
@@ -269,15 +288,14 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                       return (
                         <th
                           key={i}
-                          title={ev}
-                          className="max-w-40 truncate text-[10.5px] font-normal"
+                          className="max-w-40 truncate text-2xs font-normal"
                           style={
                             role && conf < 0.9
                               ? { background: "var(--warning-soft)" }
                               : undefined
                           }
                         >
-                          {s.headerCells[i] ?? ""}
+                          <Tip tip={ev}>{s.headerCells[i] ?? ""}</Tip>
                         </th>
                       );
                     })}
@@ -288,9 +306,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                     <tr key={ri}>
                       <td className="xl-rn">{ri + 1}</td>
                       {Array.from({ length: s.colCount }, (_, i) => (
-                        <td key={i} className="max-w-48 truncate text-muted-foreground" title={r[i]}>
-                          {r[i]}
-                        </td>
+                        <td key={i} className="max-w-48 truncate text-muted-foreground"><Tip tip={r[i]}>{r[i]}</Tip></td>
                       ))}
                     </tr>
                   ))}
@@ -308,17 +324,18 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
         >
           <Save size={13} /> 保存修改
         </Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            if (view.fileStatus === "PARSED") setConfirmReingest(true);
-            else void reingest();
-          }}
-          disabled={blocked || dirty || store.blocks.some(b => b.type === "confirm" && !b.decided)}
-          title={dirty ? "请先保存修改" : undefined}
-        >
-          <RefreshCw size={13} /> 重新导入
-        </Button>
+        <TipEl tip={dirty ? "请先保存修改" : undefined} focusable>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (view.fileStatus === "PARSED") setConfirmReingest(true);
+              else void reingest();
+            }}
+            disabled={blocked || dirty || store.blocks.some(b => b.type === "confirm" && !b.decided)}
+          >
+            <RefreshCw size={13} /> 重新导入
+          </Button>
+        </TipEl>
         <Button variant="outline" disabled={!dirty || blocked} onClick={() => setDrafts(Object.fromEntries(baseline.sheets.map(s => [s.sheetName, toDraft(s)])))}>取消修改</Button>
       </div>
 

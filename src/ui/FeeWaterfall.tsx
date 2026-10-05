@@ -78,9 +78,9 @@ export function FeeWaterfall({
       <div className="mt-1 flex gap-1.5 border-t border-border pt-1.5">
         {steps.map((s, i) => (
           <div key={i} className="min-w-0 flex-1 text-center leading-tight">
-            <div className={cn("truncate text-[11px]", s.solid ? "font-medium text-foreground" : "text-muted-foreground")}>{s.name}</div>
-            <div className={cn("mono truncate text-[11px]", s.solid ? "text-foreground" : "text-muted-foreground")}>{fmtCompact(s.amount)}</div>
-            <div className="text-[10px] text-muted-foreground">
+            <div className={cn("truncate text-2xs", s.solid ? "font-medium text-foreground" : "text-muted-foreground")}>{s.name}</div>
+            <div className={cn("mono truncate text-2xs", s.solid ? "text-foreground" : "text-muted-foreground")}>{fmtCompact(s.amount)}</div>
+            <div className="text-2xs text-muted-foreground">
               {s.solid ? "\u00a0" : s.amount > 0 && grand > 0
                 ? `${((s.amount / grand) * 100).toFixed(1)}%`
                 : <span style={{ color: "var(--warning-soft-fg)" }}>未计</span>}
@@ -89,7 +89,7 @@ export function FeeWaterfall({
         ))}
       </div>
       {missing.length > 0 && (
-        <div className="mt-2 flex items-center justify-between gap-3 border-t border-border pt-2 text-[11.5px]">
+        <div className="mt-2 flex items-center justify-between gap-3 border-t border-border pt-2 text-2xs">
           <span className="text-muted-foreground">{missing.join("、")}还没计取，总价不完整。</span>
           {onFix && (
             <button className="shrink-0 text-[var(--foreground)] hover:underline" onClick={onFix}>

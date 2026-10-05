@@ -5,7 +5,9 @@ import { useStore, OPEN_CONV_EVENT } from "./store";
 import { api, type WorkbenchInit } from "./api";
 import { isBusy, isDirty } from "./busy";
 import { Conversation, FOCUS_COMPOSER } from "./Conversation";
-import { ConfirmDialog, Modal, toast } from "./primitives";
+import { ConfirmDialog, EmptyState, Modal, toast } from "./primitives";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { CircleAlert as AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SECTIONS, sectionOf, type SectionId } from "./sections";
 import { ProjectHeader, StatusBar } from "./shell/ProjectHeader";
@@ -38,9 +40,9 @@ function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void })
       <p className="dlg-desc">工作台支持键盘操作，效率操作不必伸手摸鼠标。</p>
       <div className="mt-4 divide-y divide-border">
         {SHORTCUTS.map(([k, d]) => (
-          <div key={k} className="flex items-center justify-between gap-4 py-2 text-[12.5px]">
+          <div key={k} className="flex items-center justify-between gap-4 py-2 text-xs">
             <span className="text-muted-foreground">{d}</span>
-            <kbd className="kbd !h-[19px] !min-w-0 px-1.5">{k}</kbd>
+            <kbd className="kbd h-[19px] min-w-0 px-1.5">{k}</kbd>
           </div>
         ))}
       </div>
@@ -179,10 +181,13 @@ export function Workbench({ projectId, projects = [], initial }: { projectId: st
     if (!s.ready) return <div className="cost-empty"><Loader2 size={22} className="spin" /><p>正在读取项目资料</p></div>;
     if (s.loadingError && !s.projectName) return null;
     if (section === "results") return <ResultsPanel projectId={projectId} onUpload={pickFile} />;
-    if (section === "boq" && !s.items.length) return <div className="cost-empty">
-      <ClipboardList size={30} /><h3>还没有工程清单</h3><p>上传招标清单、投标报价或结算清单（Excel / PDF），系统会自动识别表格结构。</p>
-      <Button disabled={blocked} onClick={pickFile}><Upload size={14} />上传清单</Button>
-    </div>;
+    if (section === "boq" && !s.items.length) return <EmptyState
+      size="lg"
+      icon={<ClipboardList size={22} />}
+      title="还没有工程清单"
+      hint="上传招标清单、投标报价或结算清单（Excel / PDF），系统会自动识别表格结构。"
+      action={<Button disabled={blocked} onClick={pickFile}><Upload size={14} />上传清单</Button>}
+    />;
     const view = active ?? sectionViews[0];
     return view ? <>
       <SubTabs views={sectionViews} active={view} label={`${SECTIONS.find((n) => n.id === section)!.label}视图切换`} />
@@ -228,7 +233,14 @@ export function Workbench({ projectId, projects = [], initial }: { projectId: st
       <ProjectHeader section={section} onOpen={open} onUpload={pickFile} convOpen={convOpen} onOpenConv={() => setConvOpen(true)} projects={projects} />
       <section className={`wb-body ${section === "results" ? "is-results" : ""}`}>
         <PendingImports />
-        {s.loadingError && <div className="cost-error" role="alert">{s.loadingError}<Button variant="outline" size="sm" disabled={isBusy(s)} onClick={() => void s.init(projectId, true)}>重试</Button></div>}
+        {s.loadingError && <Alert variant="destructive" className="mb-4">
+          <AlertCircle />
+          <AlertTitle>读取工程资料失败</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{s.loadingError}</span>
+            <Button variant="outline" size="sm" disabled={isBusy(s)} onClick={() => void s.init(projectId, true)}>重试</Button>
+          </AlertDescription>
+        </Alert>}
         {body}
       </section>
       {s.ready && <StatusBar />}

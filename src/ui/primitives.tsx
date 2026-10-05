@@ -7,6 +7,14 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 
@@ -62,6 +70,12 @@ export function Modal({
   );
 }
 
+/**
+ * 确认门（破坏性/写操作前的二次确认）。
+ * 用 AlertDialog 而不是 Dialog：语义上是「需要用户明确应答」的中断式确认，
+ * Radix 会给 role="alertdialog"、打开时把焦点落在取消动作上、并禁用外部点击关闭
+ * —— 这些是 Dialog 不提供的。对外 props 与视觉保持原样。
+ */
 export function ConfirmDialog({
   open,
   title,
@@ -82,39 +96,45 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <Modal open={open} label={title} onClose={busy ? () => {} : onCancel} width={380}>
-      <div className="flex items-start gap-3">
-        <span
-          className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-          style={
-            danger
-              ? { background: "var(--destructive-soft)", color: "var(--destructive-soft-fg)" }
-              : { background: "var(--warning-soft)", color: "var(--warning-soft-fg)" }
-          }
-        >
-          <AlertTriangle size={15} />
-        </span>
-        <div className="min-w-0 flex-1 break-words">
-          <div className="dlg-title">{title}</div>
-          {description && (
-            <div className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">{description}</div>
-          )}
+    <AlertDialog open={open} onOpenChange={(o) => { if (!o && !busy) onCancel(); }}>
+      <AlertDialogContent className="gap-0 p-6 sm:max-w-[380px]">
+        <AlertDialogHeader className="gap-0 text-left">
+          <div className="flex items-start gap-3">
+            <span
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+              style={
+                danger
+                  ? { background: "var(--destructive-soft)", color: "var(--destructive-soft-fg)" }
+                  : { background: "var(--warning-soft)", color: "var(--warning-soft-fg)" }
+              }
+            >
+              <AlertTriangle size={15} />
+            </span>
+            <div className="min-w-0 flex-1 break-words">
+              <AlertDialogTitle className="text-sm font-semibold">{title}</AlertDialogTitle>
+              {description && (
+                <AlertDialogDescription className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {description}
+                </AlertDialogDescription>
+              )}
+            </div>
+          </div>
+        </AlertDialogHeader>
+        <div className="dlg-actions">
+          <AlertDialogCancel asChild>
+            <Button variant="outline" size="sm" disabled={busy}>取消</Button>
+          </AlertDialogCancel>
+          <Button
+            size="sm"
+            variant={danger ? "destructive" : "default"}
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {busy ? "处理中…" : confirmText}
+          </Button>
         </div>
-      </div>
-      <div className="dlg-actions">
-        <Button variant="outline" size="sm" onClick={onCancel} disabled={busy}>
-          取消
-        </Button>
-        <Button
-          size="sm"
-          variant={danger ? "destructive" : "default"}
-          onClick={onConfirm}
-          disabled={busy}
-        >
-          {busy ? "处理中…" : confirmText}
-        </Button>
-      </div>
-    </Modal>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -125,21 +145,25 @@ export function EmptyState({
   title,
   hint,
   action,
+  size = "default",
 }: {
   icon?: React.ReactNode;
   title: string;
   hint?: string;
   action?: React.ReactNode;
+  /** lg：整页/整分区级别的空态（更高留白与更大图标砖），default：卡片/表格内空态 */
+  size?: "default" | "lg";
 }) {
+  const lg = size === "lg";
   return (
-    <div className="flex h-40 flex-col items-center justify-center gap-2.5 text-center">
+    <div className={cn("flex flex-col items-center justify-center gap-2.5 text-center", lg ? "min-h-[22rem] py-10" : "h-40")}>
       {icon && (
-        <span className="mb-1 flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+        <span className={cn("mb-1 flex items-center justify-center bg-muted text-muted-foreground", lg ? "h-13 w-13 rounded-xl" : "h-11 w-11 rounded-xl")}>
           {icon}
         </span>
       )}
-      <div className="text-[12.5px] font-medium text-foreground">{title}</div>
-      {hint && <div className="max-w-sm px-4 text-[11.5px] leading-relaxed text-muted-foreground">{hint}</div>}
+      <div className={cn("font-medium text-foreground", lg ? "text-base" : "text-xs")}>{title}</div>
+      {hint && <div className={cn("max-w-sm px-4 text-2xs leading-relaxed text-muted-foreground", lg && "text-xs")}>{hint}</div>}
       {action && <div className="mt-2">{action}</div>}
     </div>
   );

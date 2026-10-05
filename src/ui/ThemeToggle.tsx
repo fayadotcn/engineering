@@ -37,7 +37,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   return (
     <Button
       variant="ghost"
-      size="icon"
+      size="icon-sm"
       type="button"
       onClick={toggle}
       aria-label={`主题：${MODE_LABEL[choice]}（当前${resolved === "dark" ? "深色" : "浅色"}），点击切换`}

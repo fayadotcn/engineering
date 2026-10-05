@@ -1,10 +1,16 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
-import { ConfirmDialog, toast } from "../primitives";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { readResponse } from "../api";
+import { cn } from "../views/shared";
+import { PRICE_TYPES, PRICE_TYPE_LABEL, priceTypeLabel } from "../terms";
 
 // 数据集价格行面板：筛选 / 分页浏览 / 行内编辑 / 删除。
 // facets 为全数据集去重值，不随筛选变化（后端契约）。
@@ -34,14 +40,11 @@ interface PriceListDTO {
   facets: { brands: string[]; regions: string[]; periods: string[]; priceTypes: string[] };
 }
 
-const PRICE_TYPE_LABEL: Record<string, string> = {
-  INFO: "信息价",
-  MARKET: "市场价",
-  SUPPLY: "供应商价",
-  LABOR: "人工价",
-};
+// Radix Select 的空值即 placeholder 语义（不能当选项值），「全部」用哨兵值再映射回空串。
+const FACET_ALL = "__all__";
 
-const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
+// 同上：「市场价（默认）」= 空串，行内编辑器里用哨兵值再映射回空串（与 DatasetManager 同款）。
+const PRICE_TYPE_AUTO = "__auto__";
 
 const EDITABLE: { field: EditField; label: string }[] = [
   { field: "name", label: "名称" },
@@ -237,32 +240,36 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   const visibleColumns = EDITABLE.filter(c => details || ["name", "spec", "unit", "price"].includes(c.field));
 
+  // 筛选下拉：Radix Select size="sm"（32px，与同排 <Input> 同高）——工具栏档不降档。
+  // 网格单元格里的行内编辑器另走 xs 档（28px，见 cell() 与新增行），与相邻单元格行高协调。
   const facetSelect = (
     label: string,
     value: string,
     set: (v: string) => void,
     options: string[],
-    labelMap?: Record<string, string>
+    format?: (v: string) => string
   ) => (
-    <select
+    <Select
       key={label}
-      value={value}
-      onChange={(e) => {
-        set(e.target.value);
+      value={value || FACET_ALL}
+      onValueChange={(v) => {
+        set(v === FACET_ALL ? "" : v);
         setPage(1);
       }}
-      className="cost-input max-w-36"
-      title={label}
-      aria-label={`筛选${label}`}
       disabled={dirty || busy}
     >
-      <option value="">{label}：全部</option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {labelMap?.[o] ?? o}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger size="sm" className="max-w-36" title={label} aria-label={`筛选${label}`}>
+        <SelectValue>{value ? (format ? format(value) : value) : `${label}：全部`}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={FACET_ALL}>{label}：全部</SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o} value={o}>
+            {format ? format(o) : o}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 
   const cell = (row: PriceRowDTO, field: EditField, cls?: string) => {
@@ -277,7 +284,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
         title={
           active
             ? undefined
-            : `${field === "priceType" ? (PRICE_TYPE_LABEL[row.priceType] ?? row.priceType ?? "") : String(row[field] ?? "")} — 点击编辑`
+            : `${field === "priceType" ? priceTypeLabel(row.priceType) : String(row[field] ?? "")} — 点击编辑`
         }
         onClick={() => {
           if (!active) startEdit(row, field);
@@ -285,26 +292,30 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
       >
         {active ? (
           field === "priceType" ? (
-            <select
-              autoFocus
-              disabled={busy}
-              aria-label={`编辑${row.name}的价格类型`}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancelEdit(); } if (e.key === "Enter") { e.preventDefault(); void commitEdit(row, field, draft); } }}
-              className="w-full border-0 bg-transparent px-0 py-0 text-[12.5px] outline-none"
-            >
-              {!(draft in PRICE_TYPE_LABEL) && (
-                <option value={draft}>{draft || "（空）"}</option>
-              )}
-              {Object.entries(PRICE_TYPE_LABEL).map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
+            // 网格内联编辑走 xs 档（28px，尺寸由 size prop 表达）：与相邻单元格行高协调，
+            // 不再手搓原生 select。选中只改草稿，仍由「保存修改」/Enter 提交（原交互不变）；
+            // 焦点在触发器上按 Esc 同原生 select 一样放弃编辑。
+            <Select value={draft} onValueChange={setDraft} disabled={busy}>
+              <SelectTrigger
+                size="xs"
+                aria-label={`编辑${row.name}的价格类型`}
+                className="w-full"
+                onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancelEdit(); } }}
+              >
+                {/* 空值走 placeholder（Radix 的 SelectValue 收空值即占位符语义） */}
+                <SelectValue placeholder="（空）">{draft ? priceTypeLabel(draft) : "（空）"}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {PRICE_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {PRICE_TYPE_LABEL[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : (
-            <input
+            <Input
+              size="xs"
               autoFocus
               disabled={busy}
               aria-label={`编辑${row.name}的${EDITABLE.find(c => c.field === field)?.label}`}
@@ -317,11 +328,11 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
                 if (e.key === "Enter") { e.preventDefault(); void commitEdit(row, field, draft); }
                 if (e.key === "Escape") cancelEdit();
               }}
-              className="w-full border-0 bg-transparent px-0 py-0 text-[12.5px] outline-none"
+              className={field === "price" ? "text-right" : undefined}
             />
           )
         ) : field === "priceType" ? (
-          PRICE_TYPE_LABEL[row.priceType] ?? row.priceType ?? "—"
+          priceTypeLabel(row.priceType) || "—"
         ) : field === "spec" && row.spec === row.name ? (
           // 报价单常无独立规格列（名称即型号），规格与名称相同不再重复展示
           <span className="text-muted-foreground">同名称</span>
@@ -354,8 +365,15 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           {facetSelect("品牌", brand, setBrand, data?.facets.brands ?? [])}
           {facetSelect("地区", region, setRegion, data?.facets.regions ?? [])}
           {facetSelect("期次", period, setPeriod, data?.facets.periods ?? [])}
-          {facetSelect("类型", priceType, setPriceType, data?.facets.priceTypes ?? [], PRICE_TYPE_LABEL)}
-          <label><input type="checkbox" checked={details} disabled={dirty || busy} onChange={e => setDetails(e.target.checked)} />显示品牌、地区、日期和价格类型</label>
+          {facetSelect("类型", priceType, setPriceType, data?.facets.priceTypes ?? [], priceTypeLabel)}
+          <Label className="text-xs">
+            <Checkbox
+              checked={details}
+              disabled={dirty || busy}
+              onCheckedChange={(v) => setDetails(v === true)}
+            />
+            显示品牌、地区、日期和价格类型
+          </Label>
         </div></details>
         {filtering && (
           <Button variant="ghost" size="xs" onClick={reset} disabled={dirty || busy}>
@@ -374,11 +392,19 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
         </Button>
       </div>
       {editing && <div className="flex flex-wrap items-center gap-2 px-3 pt-2 text-xs text-muted-foreground"><span>改好后点击保存。</span><Button size="sm" disabled={busy} onPointerDown={e => e.preventDefault()} onClick={() => { const row = data?.rows.find(r => r.id === editing.id); if (row) void commitEdit(row, editing.field, draft); }}>保存修改</Button><Button variant="outline" size="sm" disabled={busy} onPointerDown={e => e.preventDefault()} onClick={cancelEdit}>取消</Button></div>}
-      {error && <div className="cost-error" role="alert">{error}<Button variant="outline" size="sm" onClick={() => void load()} disabled={busy || loading}>重试</Button></div>}
+      {error && (
+        <Alert variant="destructive" className="mx-3 my-2">
+          <AlertTriangle />
+          <AlertTitle className="line-clamp-none">{error}</AlertTitle>
+          <AlertDescription>
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={busy || loading}>重试</Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* 数据表 */}
       <div className="mt-2 max-h-96 overflow-auto border-t border-border">
-        <table className="xl-table text-[12px]">
+        <table className="xl-table text-xs">
           <thead>
             <tr>
               <th className="xl-rn">序号</th>
@@ -393,8 +419,8 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           <tbody>
             {loading && !data && (
               <tr>
-                <td colSpan={visibleColumns.length + 2} className="py-8 text-center text-muted-foreground" role="status">
-                  <Loader2 size={14} className="mr-2 inline spin" />正在读取价格数据
+                <td colSpan={visibleColumns.length + 2} className="p-0" role="status">
+                  <EmptyState icon={<Loader2 size={22} className="spin" />} title="正在读取价格数据" />
                 </td>
               </tr>
             )}
@@ -404,20 +430,25 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
                 {visibleColumns.map((c) => (
                   <td key={c.field} className="xl-edit">
                     {c.field === "priceType" ? (
-                      <select
-                        aria-label={`新增行${c.label}`}
+                      // 同上：新增行的行内编辑器也走 xs 档（28px），与相邻单元格行高协调
+                      <Select
+                        value={newRow.priceType || PRICE_TYPE_AUTO}
+                        onValueChange={(v) => setNewRow((r) => ({ ...r, priceType: v === PRICE_TYPE_AUTO ? "" : v }))}
                         disabled={busy}
-                        value={newRow.priceType}
-                        onChange={(e) => setNewRow((r) => ({ ...r, priceType: e.target.value }))}
-                        className="w-full border-0 bg-transparent px-0 py-0 text-[12.5px] outline-none"
                       >
-                        <option value="">市场价(默认)</option>
-                        {Object.entries(PRICE_TYPE_LABEL).map(([v, l]) => (
-                          <option key={v} value={v}>{l}</option>
-                        ))}
-                      </select>
+                        <SelectTrigger size="xs" aria-label={`新增行${c.label}`} className="w-full">
+                          <SelectValue>{newRow.priceType ? priceTypeLabel(newRow.priceType) : "市场价(默认)"}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={PRICE_TYPE_AUTO}>市场价(默认)</SelectItem>
+                          {PRICE_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>{PRICE_TYPE_LABEL[t]}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     ) : (
-                      <input
+                      <Input
+                        size="xs"
                         aria-label={`新增行${c.label}`}
                         disabled={busy}
                         inputMode={c.field === "price" ? "decimal" : "text"}
@@ -429,7 +460,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
                           if (e.key === "Enter") void addRow();
                           if (e.key === "Escape") cancelAdd();
                         }}
-                        className={cn("w-full border-0 bg-transparent px-0 py-0 text-[12.5px] outline-none", c.field === "price" && "text-right")}
+                        className={c.field === "price" ? "text-right" : undefined}
                       />
                     )}
                   </td>
@@ -475,13 +506,13 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
             ))}
             {data && !data.rows.length && (
               <tr>
-                <td colSpan={visibleColumns.length + 2} className="py-8 text-center text-[12px] text-muted-foreground">
+                <td colSpan={visibleColumns.length + 2} className="p-0">
                   {loading ? (
-                    <Loader2 size={14} className="inline spin" />
+                    <EmptyState icon={<Loader2 size={22} className="spin" />} title="正在读取价格数据" />
                   ) : filtering ? (
-                    "没有符合筛选条件的价格行"
+                    <EmptyState title="没有符合筛选条件的价格行" />
                   ) : (
-                    "暂无价格数据"
+                    <EmptyState title="暂无价格数据" />
                   )}
                 </td>
               </tr>
@@ -489,7 +520,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           </tbody>
         </table>
         {loading && data && data.rows.length > 0 && (
-          <div className="flex items-center justify-center gap-1.5 border-t border-border py-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-center justify-center gap-1.5 border-t border-border py-1.5 text-2xs text-muted-foreground">
             <Loader2 size={11} className="spin" /> 加载中…
           </div>
         )}
@@ -497,7 +528,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
 
       {/* 分页 */}
       <div className="flex items-center gap-2 px-3 py-2">
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-2xs text-muted-foreground">
           {data ? `共 ${data.total} 行` : " "}
         </span>
         <div className="ml-auto flex items-center gap-1">
@@ -511,7 +542,7 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
           >
             <ChevronLeft size={12} />
           </Button>
-          <span className="px-1 text-[11.5px] text-muted-foreground tabular-nums">
+          <span className="px-1 text-2xs text-muted-foreground tabular-nums">
             {page} / {totalPages}
           </span>
           <Button

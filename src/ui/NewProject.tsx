@@ -3,6 +3,8 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "./primitives";
 
 export function NewProject() {
@@ -29,9 +31,11 @@ export function NewProject() {
 
   return (
     <form className="cost-new-project-form" onSubmit={e => { e.preventDefault(); void create(); }}>
-        <label htmlFor="project-name">工程名称</label>
-        <input
+        {/* <Label> 自带 font-medium/leading-none：这里保持 .cost-new-project-form label 的原字重与行高 */}
+        <Label htmlFor="project-name" className="font-normal leading-normal">工程名称</Label>
+        <Input
           id="project-name"
+          size="lg"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="工程名称，如：三亚航院一期安装工程"

@@ -1,6 +1,8 @@
 "use client";
 import type { WorkspaceView } from "@shared/types";
+import { AlertTriangle } from "lucide-react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { fmtMoney } from "./shared";
 
 /* ---------------- 措施费计取（官方系数） ---------------- */
@@ -8,7 +10,7 @@ import { fmtMoney } from "./shared";
 export function MeasureFeeView({ view }: { view: Extract<WorkspaceView, { kind: "measureFee" }> }) {
   return (
     <div className="h-full overflow-auto p-4">
-      <div className="mb-3 text-[12px] text-muted-foreground">
+      <div className="mb-3 text-xs text-muted-foreground">
         基数为定额测算的分册定额人工费；费率档按檐口/操作物高度自动选档。计取结果已写入台账「系数措施费」，费用汇总表自动采用。
       </div>
       <div className="xl-sheet overflow-auto rounded-lg">
@@ -29,11 +31,11 @@ export function MeasureFeeView({ view }: { view: Extract<WorkspaceView, { kind: 
               <tr key={i}>
                 <td>{r.name}</td>
                 <td className="text-center"><Badge variant="secondary" >{r.book}</Badge></td>
-                <td className="text-[11.5px] text-muted-foreground">{r.tier}</td>
-                <td className="text-[11.5px] text-muted-foreground">{r.basis}</td>
+                <td className="text-2xs text-muted-foreground">{r.tier}</td>
+                <td className="text-2xs text-muted-foreground">{r.basis}</td>
                 <td className="mono text-right">{r.rate}</td>
                 <td className="mono text-right font-medium">{fmtMoney(r.amount)}</td>
-                <td className="mono text-right text-[11px] text-muted-foreground">
+                <td className="mono text-right text-2xs text-muted-foreground">
                   {[r.laborPart, r.materialPart, r.machinePart].map((p) => (p ? fmtMoney(p) : "—")).join(" / ")}
                 </td>
               </tr>
@@ -48,10 +50,14 @@ export function MeasureFeeView({ view }: { view: Extract<WorkspaceView, { kind: 
         </table>
       </div>
       {view.skipped.length > 0 && (
-        <div className="cost-info warn !mb-0 mt-3">
-          未计取：{view.skipped.slice(0, 8).map((s) => `${s.name}（${s.reason}）`).join("；")}
-          {view.skipped.length > 8 ? ` 等 ${view.skipped.length} 项` : ""}
-        </div>
+        <Alert variant="warning" className="mt-3">
+          <AlertTriangle />
+          <AlertTitle>未计取 {view.skipped.length} 项</AlertTitle>
+          <AlertDescription>
+            {view.skipped.slice(0, 8).map((s) => `${s.name}（${s.reason}）`).join("；")}
+            {view.skipped.length > 8 ? ` 等 ${view.skipped.length} 项` : ""}
+          </AlertDescription>
+        </Alert>
       )}
     </div>
   );

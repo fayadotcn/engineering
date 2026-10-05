@@ -19,3 +19,6 @@ dev.log
 # stray artifacts
 nul
 .verify-dev.log
+
+# 设计审计脚本与前后对比截图（会被 Tailwind 内容扫描误读，不入库）
+.design-audit/

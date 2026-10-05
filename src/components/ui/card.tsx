@@ -1,10 +1,18 @@
 import * as React from "react";
+import { Slot } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 
-function Card({ className, ...props }: React.ComponentProps<"div">) {
+/* asChild：让 Card 能承载语义元素（如整块可点的 <button>、<a>），
+   与 Button/Badge 的 asChild 口径一致；不传时就是一个普通 div。 */
+function Card({
+  className,
+  asChild = false,
+  ...props
+}: React.ComponentProps<"div"> & { asChild?: boolean }) {
+  const Comp = asChild ? Slot.Root : "div";
   return (
-    <div
+    <Comp
       data-slot="card"
       className={cn(
         "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-xs",

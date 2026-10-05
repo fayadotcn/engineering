@@ -6,8 +6,8 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
-  font-size: 14px;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
   /* 关闭系统合成粗体：避免 Windows 中文字体假粗发虚 */
   font-synthesis: none;
   font-feature-settings: "tnum";
@@ -39,6 +39,8 @@ body {
     transform: none;
   }
 }
+/* 轻量淡入：对话「有新内容」浮标等小元素（此前只有 keyframes 没有规则，动画从未生效） */
+.fadein { animation: fadein .28s var(--ease-out) backwards; }
 /* 补录/撤销/修改落点提示：目标行警示色淡出，帮用户确认数据落回的位置 */
 @keyframes row-flash {
   0% { background-color: var(--warning-soft); }
@@ -92,8 +94,7 @@ body {
 ::selection {
   background: color-mix(in srgb, var(--foreground) 14%, transparent);
 }
-/* 原生 checkbox/radio 统一主色，不用 UA 默认蓝 */
-input[type="checkbox"],
+/* 勾选控件统一走 <Checkbox> 组件（Radix），原生 checkbox/radio 已无调用点 */
 input[type="radio"] {
   accent-color: var(--primary);
 }
@@ -114,7 +115,7 @@ input[type="radio"] {
   background: color-mix(in srgb, var(--muted) 70%, var(--card));
   backdrop-filter: blur(3px);
   color: var(--foreground);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   pointer-events: none;
 }
@@ -131,62 +132,48 @@ input[type="radio"] {
 }
 /* 品牌砖：logo/头像/工程标识共用——单色实心方块 */
 .brand-tile { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); }
-/* 徽章统一走 Badge 组件（src/components/ui/badge.tsx） *//* ── 输入控件统一规格：.cost-input 一行搞定（shadcn input 口径） ── */
-.cost-input { height: 32px; min-width: 0; border: 1px solid var(--input); border-radius: var(--radius-md); background: var(--card); padding: 0 9px; font-size: 12px; color: var(--foreground); outline: none; transition: border-color .15s, box-shadow .15s; }
-.cost-input::placeholder { color: var(--muted-foreground); }
-.cost-input:hover:not(:disabled):not(:focus) { border-color: color-mix(in srgb, var(--input) 55%, var(--muted-foreground)); }
-.cost-input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent); }
-.cost-input:disabled { opacity: .55; cursor: not-allowed; }
-.cost-input.lg { height: 36px; padding: 0 10px; font-size: 13px; }
-select.cost-input { padding-right: 24px; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2371717a' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
-:root[data-theme="dark"] select.cost-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a1a1aa' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
-:root[data-theme="dark"] .cost-input { background-color: color-mix(in srgb, var(--input) 30%, transparent); }
+/* 徽章统一走 Badge 组件（src/components/ui/badge.tsx）。
+   输入控件已全部改用 <Input> / <Select> 组件（尺寸走 size prop：xs 28 / default 32 / lg 36），
+   此处原 .cost-input 皮肤（含 select 的下拉箭头 data-URI）已删除——不要再加回来。 */
 
 /* ── 对话框规范：标题/说明/动作区 ── */
-.dlg-title { font-size: 14px; font-weight: 600; color: var(--foreground); }
-.dlg-desc { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--muted-foreground); }
+.dlg-title { font-size: var(--text-sm); font-weight: 600; color: var(--foreground); }
+.dlg-desc { margin-top: 4px; font-size: var(--text-xs); line-height: 1.7; color: var(--muted-foreground); }
 .dlg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
 /* ── 键盘快捷键提示 ── */
-.kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius-sm); background: var(--muted); color: var(--muted-foreground); font-family: var(--font-sans); font-size: 10px; font-weight: 500; line-height: 1; }
+.kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius-sm); background: var(--muted); color: var(--muted-foreground); font-family: var(--font-sans); font-size: var(--text-2xs); font-weight: 500; line-height: 1; }
 
-/* ── 骨架屏 ── */
+/* ── 骨架屏：只由 components/ui/skeleton.tsx 消费，业务代码用 <Skeleton> ── */
 .skl { border-radius: var(--radius-sm); background: linear-gradient(90deg, var(--muted) 25%, color-mix(in srgb, var(--muted) 55%, var(--card)) 50%, var(--muted) 75%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
 
 /* 按钮统一走 Button 组件（src/components/ui/button.tsx） */
 /* 表单项 label 容器：对话框里复用 */
-.cost-field > span { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted-foreground); }
-.cost-empty, .cost-section-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 52px 20px; color: var(--muted-foreground); font-size: 12px; }
-.cost-empty > svg:first-child, .cost-empty-icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: var(--radius-xl); background: var(--muted); color: var(--muted-foreground); box-sizing: border-box; padding: 13px; }
+.cost-field > span { display: block; margin-bottom: 4px; font-size: var(--text-xs); color: var(--muted-foreground); }
+.cost-empty, .cost-section-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 52px 20px; color: var(--muted-foreground); font-size: var(--text-xs); }
+.cost-empty > svg:first-child{ display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: var(--radius-xl); background: var(--muted); color: var(--muted-foreground); box-sizing: border-box; padding: 13px; }
 .cost-empty { min-height: 360px; }
-.cost-empty h3 { font-size: 16px; font-weight: 600; letter-spacing: -.01em; color: var(--foreground); }
+.cost-empty h3 { font-size: var(--text-base); font-weight: 600; letter-spacing: -.01em; color: var(--foreground); }
 .cost-empty p { text-align: center; line-height: 1.8; max-width: 420px; }
-.cost-error, .import-confirm, .cost-info { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--radius-lg); margin-bottom: 18px; font-size: 12px; line-height: 1.8; }
+.import-confirm, .cost-info{ display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--radius-lg); margin-bottom: 18px; font-size: var(--text-xs); line-height: 1.8; }
 .cost-info { background: var(--muted); color: var(--foreground); }
 .cost-info.warn { background: var(--warning-soft); color: var(--warning-soft-fg); }
 .cost-info.error { background: var(--destructive-soft); color: var(--destructive-soft-fg); }
-.cost-error { color: var(--destructive-soft-fg); background: var(--destructive-soft); justify-content: space-between; flex-wrap: wrap; overflow-wrap: anywhere; }
 .import-confirm { background: var(--warning-soft); color: var(--warning-soft-fg); border: 1px solid color-mix(in srgb, var(--warning-soft-fg) 20%, var(--card)); border-left: 3px solid var(--warning-soft-fg); }
 .import-confirm > div:first-child { flex: 1; }
-.import-confirm p { font-size: 11px; margin-top: 3px; }
+.import-confirm p { font-size: var(--text-2xs); margin-top: 3px; }
 .cost-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.cost-modal { margin: auto; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; overflow-wrap: anywhere; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--card); color: var(--card-foreground); padding: 24px; box-shadow: var(--shadow-lg); animation: modal-in .24s var(--ease-out) backwards; }
-.cost-modal::backdrop { background: rgb(0 0 0 / .5); }
-.cost-toaster { max-width: calc(100vw - 32px); overflow-wrap: anywhere; }
-@keyframes toast-in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
-.toast-in { animation: toast-in .32s var(--ease-out) backwards; }
 /* 右键/下拉菜单入场：从触发点轻微放大，原生菜单手感 */
 @keyframes menu-in { from { opacity: 0; transform: scale(.96) translateY(-2px); } to { opacity: 1; transform: none; } }
 .menu-in { animation: menu-in .16s var(--ease-out) backwards; transform-origin: top left; }
 /* 对话框入场：上浮 + 缩放，expo 缓出收尾利落 */
 @keyframes modal-in { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
-.cost-back { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); flex-shrink: 0; }
 .cost-info > svg { flex-shrink: 0; }
 .cost-info, .import-confirm { overflow-wrap: anywhere; }
 input::placeholder, textarea::placeholder { color: var(--muted-foreground); opacity: 1; }
 button:disabled { cursor: default; }
 summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px; }
-.cost-empty .cost-empty-hint { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted-foreground); }
+.cost-empty .cost-empty-hint { display: flex; align-items: center; gap: 10px; font-size: var(--text-xs); color: var(--muted-foreground); }
 .cost-link { display: inline; padding: 0; border: 0; background: none; color: var(--foreground); font-size: inherit; font-weight: 500; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--muted-foreground); }
 .cost-link:enabled:hover { text-decoration-color: var(--foreground); }
 .cost-link:disabled { color: var(--muted-foreground); cursor: default; }
@@ -201,9 +188,21 @@ summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; bor
   .import-confirm { flex-wrap: wrap; }
 }
 @media (max-width: 520px) {
-  .cost-toaster { right: 16px; bottom: 16px; }
 }
 @media print {
   body { background: #fff; }
+  /* 分页控制：以前只有"隐藏 chrome"，没有任何断页规则，报告会从行/卡片中间切断 */
+  tr, [data-slot="card"], .cost-next-step, .xl-sheet { break-inside: avoid; }
+  thead { display: table-header-group; }   /* 跨页重复表头 */
+  tfoot { display: table-footer-group; }
+  h1, h2, h3, .section-heading { break-after: avoid; }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: var(--text-2xs); color: #555; }
 }
-a[data-slot="button"] { text-decoration: none; }
+/* 页面盒：A4 + 可读页边距；放在顶层，@page 不接受嵌套媒体查询之外的上下文 */
+@page {
+  size: A4;
+  margin: 12mm 10mm;
+}
+/* 锚点按钮去下划线。注意 Radix 的 asChild 会把 data-slot 覆写成 tooltip-trigger，
+   所以被 Tooltip 包住的锚点按钮必须一并命中，否则下划线会回来。 */
+a[data-slot="button"], a[data-slot="tooltip-trigger"] { text-decoration: none; }

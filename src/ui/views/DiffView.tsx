@@ -2,7 +2,7 @@
 import type { WorkspaceView } from "@shared/types";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { EmptyState } from "../primitives";
-import { FIELD_LABEL } from "./shared";
+import { FIELD_LABEL, Tip } from "./shared";
 
 /* ---------------- Diff ---------------- */
 
@@ -26,7 +26,7 @@ export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff"
               <tr key={i}>
                 <td className="xl-rn">{i + 1}</td>
                 <td className="mono text-muted-foreground">{r.code || "—"}</td>
-                <td className="max-w-56 truncate" title={r.name}>{r.name}</td>
+                <td className="max-w-56 truncate"><Tip tip={r.name}>{r.name}</Tip></td>
                 <td className="text-muted-foreground">{FIELD_LABEL[r.field] ?? r.field}</td>
                 <td className="mono text-right">
                   <Badge variant="danger" className="line-through" >{r.before}</Badge>

@@ -2,6 +2,7 @@ import type { RunContext } from "./context";
 import type { ToolContext, ToolResult } from "./tools/registry";
 import { toolSchemasForLLM, toolNameFromWire } from "./tools/registry";
 import { fmtMoney } from "@cost-engine/money";
+import { WRAP_UP_PROMPT, capFallbackSummary, observationBrief, type ExecutedStep } from "./wrapUp";
 
 // Model layer: provider-agnostic. openai-compatible covers OpenAI, DeepSeek,
 // Moonshot, and most relay gateways; anthropic covers Claude endpoints.
@@ -53,8 +54,10 @@ async function callOpenAI(
     body: JSON.stringify({
       model: cfg.model,
       messages,
-      tools: tools.map((t) => ({ type: "function", function: t })),
-      tool_choice: "auto",
+      // 收尾轮传空数组：不发 tools 字段——部分网关对 tools:[] 直接 400
+      ...(tools.length
+        ? { tools: tools.map((t) => ({ type: "function", function: t })), tool_choice: "auto" }
+        : {}),
       temperature: 0.2,
     }),
     signal: AbortSignal.timeout(90_000),
@@ -84,8 +87,9 @@ async function callOpenAIStream(
     body: JSON.stringify({
       model: cfg.model,
       messages,
-      tools: tools.map((t) => ({ type: "function", function: t })),
-      tool_choice: "auto",
+      ...(tools.length
+        ? { tools: tools.map((t) => ({ type: "function", function: t })), tool_choice: "auto" }
+        : {}),
       temperature: 0.2,
       stream: true,
     }),
@@ -188,11 +192,15 @@ async function callAnthropic(
       max_tokens: 4096,
       system,
       messages,
-      tools: tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.parameters,
-      })),
+      ...(tools.length
+        ? {
+            tools: tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              input_schema: t.parameters,
+            })),
+          }
+        : {}),
     }),
     signal: AbortSignal.timeout(90_000),
   });
@@ -218,6 +226,7 @@ async function runAnthropicLoop(
     { role: "user", content: userMessage },
   ];
   const tools = toolSchemasForLLM();
+  const executed: ExecutedStep[] = [];
   for (let round = 0; round < maxRounds; round++) {
     const res = await callAnthropic(cfg, system, messages, tools);
     messages.push({ role: "assistant", content: res.content });
@@ -234,7 +243,9 @@ async function runAnthropicLoop(
     }
     const results = [];
     for (const tu of toolUses) {
-      const result = await execute(toolCtx, toolNameFromWire(tu.name!), tu.input ?? {});
+      const tool = toolNameFromWire(tu.name!);
+      const result = await execute(toolCtx, tool, tu.input ?? {});
+      executed.push({ tool, brief: observationBrief(result.observation) });
       results.push({
         type: "tool_result",
         tool_use_id: tu.id,
@@ -243,7 +254,28 @@ async function runAnthropicLoop(
     }
     messages.push({ role: "user", content: results });
   }
-  return "已达到最大推理轮数，当前进度请查看工作区。";
+  return wrapUpAnthropic(cfg, system, messages, executed, maxRounds, toolCtx);
+}
+
+/** 轮数用尽：先让模型做一次无工具收尾总结（阶段成果+卡点+下一步），
+ *  模型不可用/空回复时退确定性摘要——绝不再用一句占位文案结束 run。 */
+async function wrapUpAnthropic(
+  cfg: ModelConfig,
+  system: string,
+  messages: unknown[],
+  executed: ExecutedStep[],
+  maxRounds: number,
+  toolCtx: ToolContext
+): Promise<string> {
+  await toolCtx.emit("activity", { text: "已达工具调用轮数上限，正在汇总本轮进度" });
+  try {
+    const res = await callAnthropic(cfg, system, [...messages, { role: "user", content: WRAP_UP_PROMPT }], []);
+    const text = res.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+    if (text) return text;
+  } catch {
+    /* 收尾调用失败 → 走确定性摘要，不吞掉本轮成果 */
+  }
+  return capFallbackSummary(executed, maxRounds);
 }
 
 /** 一次性问答（不走工具/流式/对话轮次）：工具层的「模型知识兜底」出口，
@@ -305,6 +337,7 @@ export async function runLLMLoop(
     return runAnthropicLoop(cfg, ctx, userMessage, toolCtx, execute, contextBlock, maxRounds);
   }
 
+  const executed: ExecutedStep[] = [];
   for (let round = 0; round < maxRounds; round++) {
     const streamId = `r${round}`;
     let msg: LLMMsg;
@@ -339,7 +372,9 @@ export async function runLLMLoop(
       } catch {
         args = {};
       }
-      const result = await execute(toolCtx, toolNameFromWire(call.function.name), args);
+      const tool = toolNameFromWire(call.function.name);
+      const result = await execute(toolCtx, tool, args);
+      executed.push({ tool, brief: observationBrief(result.observation) });
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -347,5 +382,24 @@ export async function runLLMLoop(
       });
     }
   }
-  return "已达到最大推理轮数，当前进度请查看工作区。";
+  return wrapUpOpenAI(cfg, messages, executed, maxRounds, toolCtx);
+}
+
+/** 轮数用尽：无工具收尾总结优先，失败退确定性摘要（openai-compatible 侧）。 */
+async function wrapUpOpenAI(
+  cfg: ModelConfig,
+  messages: LLMMsg[],
+  executed: ExecutedStep[],
+  maxRounds: number,
+  toolCtx: ToolContext
+): Promise<string> {
+  await toolCtx.emit("activity", { text: "已达工具调用轮数上限，正在汇总本轮进度" });
+  try {
+    const msg = await callOpenAI(cfg, [...messages, { role: "user", content: WRAP_UP_PROMPT }], []);
+    const text = (msg.content ?? "").trim();
+    if (text) return text;
+  } catch {
+    /* 收尾调用失败 → 走确定性摘要，不吞掉本轮成果 */
+  }
+  return capFallbackSummary(executed, maxRounds);
 }

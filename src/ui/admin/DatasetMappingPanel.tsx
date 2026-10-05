@@ -1,23 +1,23 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { COLUMN_ROLE_LABEL, COLUMN_ROLES } from "@shared/types";
 import { reconcilePriceRole } from "@shared/mapping";
-import { ConfirmDialog, toast } from "../primitives";
+import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { cn } from "../views/shared";
+import { FILE_TYPE_LABEL, FILE_TYPE_OPTIONS, type FileType } from "../terms";
 import { readResponse } from "../api";
-import { FileSpreadsheet, Loader2, RefreshCw, Save, X } from "lucide-react";
+import { AlertTriangle, FileSpreadsheet, Loader2, RefreshCw, Save, X } from "lucide-react";
 
 // 数据集列映射面板：展示后端自动识别结果（含置信度/证据），管理员可改列角色
 // 与 sheet 类型，保存后确认导入价格库。交互照搬 ColumnMappingView。
 
-type SheetType =
-  | "BOQ" | "QUOTATION" | "GENERIC"
-  | "COMPARE" | "APPROVAL" | "PENDING_QUOTE" | "FACTS" | "MATERIAL_PRICE";
-
 interface MappingSheetDTO {
   sheetName: string;
-  type: SheetType;
+  type: FileType;
   headerRow: number;
   merged: boolean;
   headerCells: string[];
@@ -45,22 +45,8 @@ interface DatasetMappingDTO {
   sheets: MappingSheetDTO[];
 }
 
-const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
-
-const TYPE_LABEL: Record<SheetType, string> = {
-  BOQ: "清单",
-  QUOTATION: "询价表",
-  GENERIC: "忽略",
-  COMPARE: "对比表",
-  APPROVAL: "报审资料",
-  PENDING_QUOTE: "待报价清单",
-  FACTS: "汇总/说明表",
-  MATERIAL_PRICE: "材料价格表",
-};
-const TYPE_OPTIONS: SheetType[] = [
-  "BOQ", "PENDING_QUOTE", "QUOTATION", "MATERIAL_PRICE",
-  "COMPARE", "APPROVAL", "FACTS", "GENERIC",
-];
+/** Radix Select 的空值即 placeholder 语义（不能当选项值），「忽略该列」用哨兵值再映射回空串。 */
+const ROLE_NONE = "__none__";
 
 const colLetter = (i: number): string => {
   let s = "";
@@ -70,7 +56,7 @@ const colLetter = (i: number): string => {
 };
 
 interface Draft {
-  type: SheetType;
+  type: FileType;
   /** col index → role */
   byCol: Record<number, string>;
 }
@@ -168,7 +154,7 @@ export function DatasetMappingPanel({
     });
   };
 
-  const setType = (sheetName: string, type: SheetType) => {
+  const setType = (sheetName: string, type: FileType) => {
     const s = mapping?.sheets.find((x) => x.sheetName === sheetName);
     if (!s) return;
     setDrafts((prev) => {
@@ -236,10 +222,13 @@ export function DatasetMappingPanel({
 
   if (failed)
     return (
-      <div className="border-t border-border px-4 py-6 text-center text-[12px] text-muted-foreground">
-        映射信息加载失败
-        <Button variant="outline" size="xs" onClick={() => setReload(n => n + 1)} className="ml-2">重试</Button>
-      </div>
+      <Alert variant="destructive" className="m-4">
+        <AlertTriangle />
+        <AlertTitle className="line-clamp-none">映射信息加载失败</AlertTitle>
+        <AlertDescription>
+          <Button variant="outline" size="sm" onClick={() => setReload(n => n + 1)}>重试</Button>
+        </AlertDescription>
+      </Alert>
     );
 
   if (!mapping)
@@ -253,8 +242,8 @@ export function DatasetMappingPanel({
     <div className="border-t border-border px-4 py-3">
       <div className="mb-3 flex flex-wrap items-center gap-2 break-words">
         <FileSpreadsheet size={15} className="text-muted-foreground" />
-        <span className="text-[13px] font-medium">{mapping.filename || filename}</span>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-sm font-medium">{mapping.filename || filename}</span>
+        <span className="text-2xs text-muted-foreground">
           检查每列是否识别正确；有错误就改一下，再保存。
         </span>
         <Button
@@ -271,9 +260,7 @@ export function DatasetMappingPanel({
       </div>
 
       {!mapping.sheets.length && (
-        <div className="rounded-lg border border-dashed border-input px-4 py-6 text-center text-[12px] text-muted-foreground">
-          未识别到工作表
-        </div>
+        <EmptyState icon={<FileSpreadsheet size={22} />} title="未识别到工作表" />
       )}
 
       <fieldset disabled={busy} className="min-w-0" aria-busy={busy}>{mapping.sheets.map((s) => {
@@ -281,46 +268,54 @@ export function DatasetMappingPanel({
         return (
           <div key={s.sheetName} className="xl-sheet mb-3 overflow-hidden rounded-lg">
             <div className="flex flex-wrap items-center gap-2 border-b border-border bg-[var(--muted)] px-3 py-2">
-              <span className="text-[12.5px] font-medium">{s.sheetName}</span>
+              <span className="text-xs font-medium">{s.sheetName}</span>
               <div className="flex flex-col gap-0.5">
-                <select
+                {/* 控件高度走 size="sm"（32px，组件 prop 表达）；类型拿不准时用琥珀软色提示。
+                    面板整体在 <fieldset disabled> 里，Radix 的 button 不继承 fieldset 禁用，
+                    所以 disabled 必须显式传。 */}
+                <Select
                   value={d.type}
-                  title={s.typeEvidence}
-                  aria-label={`${s.sheetName}的表格类型`}
-                  onChange={(e) => setType(s.sheetName, e.target.value as SheetType)}
-                  className="cost-input !h-6 w-fit !px-1 !text-[11px]"
-                  style={
-                    s.typeConfidence < 0.9
-                      ? {
-                          borderColor: "var(--warning-soft-fg)",
-                          background: "var(--warning-soft)",
-                        }
-                      : undefined
-                  }
+                  onValueChange={(v) => setType(s.sheetName, v as FileType)}
+                  disabled={busy}
                 >
-                  {TYPE_OPTIONS.map((t) => (
-                    <option key={t} value={t}>
-                      {TYPE_LABEL[t]}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger
+                    size="sm"
+                    title={s.typeEvidence}
+                    aria-label={`${s.sheetName}的表格类型`}
+                    className={cn(
+                      "w-fit",
+                      s.typeConfidence < 0.9 && "border-warning-soft-fg bg-warning-soft text-warning-soft-fg"
+                    )}
+                  >
+                    <SelectValue>{FILE_TYPE_LABEL[d.type]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FILE_TYPE_OPTIONS.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {FILE_TYPE_LABEL[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {kind === "MATERIAL_PRICE" && (
-                  <span className="text-[10px] leading-tight text-muted-foreground">
+                  <span className="text-2xs leading-tight text-muted-foreground">
                     只有「询价表/材料价格表」类型的工作表会导入价格库
                   </span>
                 )}
               </div>
-              {s.templateHit && <Badge variant="success" >已识别</Badge>}
-              {s.userEdited && <Badge variant="warning" >已修改</Badge>}
-              <span className="ml-auto text-[11px] text-muted-foreground">
-                {s.minConfidence < 0.9 ? "需要核对" : "已识别"}
-                {s.typeConfidence < 0.9 && " · 请核对表格类型"}
-                {" · "}
+              {/* 状态一律走 <Badge>：模板/人工改动是来源，识别结果单列一档。
+                  模板命中原先也叫「已识别」，与识别结果同词不同义，这里改成「模板命中」。 */}
+              {s.templateHit && <Badge variant="success">模板命中</Badge>}
+              {s.userEdited && <Badge variant="warning">已修改</Badge>}
+              <Badge variant={s.minConfidence < 0.9 || s.typeConfidence < 0.9 ? "warning" : "secondary"}>
+                {s.minConfidence < 0.9 ? "需要核对" : s.typeConfidence < 0.9 ? "类型待核对" : "已识别"}
+              </Badge>
+              <span className="ml-auto text-2xs text-muted-foreground">
                 {s.rowCount} 行
               </span>
             </div>
             {kind === "MATERIAL_PRICE" && mapping.status === "PARSED" && d.type === "BOQ" && (
-              <div className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+              <div className="border-b border-border px-3 py-1.5 text-2xs text-muted-foreground">
                 该表按清单识别，未导入价格库
               </div>
             )}
@@ -339,22 +334,33 @@ export function DatasetMappingPanel({
                     <th className="xl-rn"></th>
                     {Array.from({ length: s.colCount }, (_, i) => (
                       <th key={i} className="p-0.5">
-                        <select
-                          aria-label={`${s.sheetName}的${colLetter(i)}列角色`}
-                          value={d.byCol[i] ?? ""}
-                          onChange={(e) => setRole(s.sheetName, i, e.target.value)}
-                          className={cn(
-                            "cost-input w-full min-w-16 !h-[22px] !px-0.5 !text-[10.5px]",
-                            d.byCol[i] && "border-[var(--input)] font-medium"
-                          )}
+                        {/* 每列一个角色下拉：网格内联编辑走 xs 档（28px，尺寸由 size prop 表达）——
+                            全站统一的 32px 会把表头撑胖。fieldset 禁用不覆盖 button，故显式 disabled。 */}
+                        <Select
+                          value={d.byCol[i] ?? ROLE_NONE}
+                          onValueChange={(v) => setRole(s.sheetName, i, v === ROLE_NONE ? "" : v)}
+                          disabled={busy}
                         >
-                          <option value="">— 忽略 —</option>
-                          {COLUMN_ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {COLUMN_ROLE_LABEL[r]}
-                            </option>
-                          ))}
-                        </select>
+                          <SelectTrigger
+                            size="xs"
+                            aria-label={`${s.sheetName}的${colLetter(i)}列角色`}
+                            className={cn("w-full min-w-16", d.byCol[i] && "font-medium")}
+                          >
+                            <SelectValue>
+                              {d.byCol[i]
+                                ? (COLUMN_ROLE_LABEL as Record<string, string>)[d.byCol[i]] ?? d.byCol[i]
+                                : "— 忽略 —"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ROLE_NONE}>— 忽略 —</SelectItem>
+                            {COLUMN_ROLES.map((r) => (
+                              <SelectItem key={r} value={r}>
+                                {COLUMN_ROLE_LABEL[r]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </th>
                     ))}
                   </tr>
@@ -368,7 +374,7 @@ export function DatasetMappingPanel({
                         <th
                           key={i}
                           title={ev}
-                          className="max-w-40 truncate text-[10.5px] font-normal"
+                          className="max-w-40 truncate text-2xs font-normal"
                           style={
                             role && conf < 0.9
                               ? { background: "var(--warning-soft)" }

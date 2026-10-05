@@ -6,7 +6,10 @@ import {
 } from "lucide-react";
 import { useStore } from "./store";
 import { isBusy, isDirty } from "./busy";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "./primitives";
 import type { ConvBlock } from "./runEvents";
 
@@ -73,8 +76,8 @@ const TOOL_LABEL: Record<string, string> = {
 const toolLabel = (t: string) => TOOL_LABEL[t] ?? t;
 
 /** 快捷指令：autopilot 走服务端确定性管线（绕开 LLM，步骤固定可控） */
-const QUICK: { label: string; auto?: boolean }[] = [
-  { label: "一键智能报价", auto: true },
+const QUICK: { label: string; auto?: boolean; hint?: string }[] = [
+  { label: "一键智能报价", auto: true, hint: "按固定步骤跑完「匹配材料价 → 定额组价 → 费用汇总」，绕开模型；写回前仍会请你确认" },
   { label: "汇总项目费用" },
   { label: "查缺价项并补价" },
   { label: "检查相同项不同单价" },
@@ -241,9 +244,17 @@ function Step({ b }: { b: ProcessBlock }) {
     case "view": {
       const exists = s.views.some((v) => v.id === b.viewId);
       return <li className="view-step">
-        <button disabled={!exists} title={exists ? "在工作区查看" : "该结果已关闭"} onClick={() => s.setActiveView(b.viewId)}>
-          <BarChart3 size={12} /><span>{b.title}</span>{exists && <ArrowUpRight size={11} />}
-        </button>
+        <Tooltip>
+          {/* 结果已关闭时按钮是禁用的、指针事件收不到：触发层挪到外面，提示照常出现 */}
+          <TooltipTrigger asChild>
+            <span className="inline-flex w-full">
+              <button disabled={!exists} onClick={() => s.setActiveView(b.viewId)}>
+                <BarChart3 size={12} /><span>{b.title}</span>{exists && <ArrowUpRight size={11} />}
+              </button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{exists ? "在工作区查看" : "该结果已关闭"}</TooltipContent>
+        </Tooltip>
       </li>;
     }
     case "tool":
@@ -302,7 +313,12 @@ function Blocks() {
     if (item.kind === "user")
       return <div key={item.i} className="conv-user"><p>{item.b.type === "user" ? item.b.text : ""}</p></div>;
     if (item.kind === "upload" && item.b.type === "upload")
-      return <div key={item.i} className="conv-upload"><FileSpreadsheet size={14} /><span title={item.b.filename}>{item.b.filename}</span>{item.b.uploading ? <Loader2 size={12} className="spin" /> : <Check size={12} />}</div>;
+      return <div key={item.i} className="conv-upload"><FileSpreadsheet size={14} />
+        <Tooltip>
+          <TooltipTrigger asChild><span>{item.b.filename}</span></TooltipTrigger>
+          <TooltipContent>{item.b.filename}</TooltipContent>
+        </Tooltip>
+        {item.b.uploading ? <Loader2 size={12} className="spin" /> : <Check size={12} />}</div>;
     if (item.kind !== "turn") return null;
 
     const lastTurn = idx === items.length - 1;
@@ -343,7 +359,10 @@ function Blocks() {
           break;
         }
         case "error":
-          body.push(<div key={i} className="conv-error" role="alert">{b.text}</div>);
+          body.push(<Alert key={i} variant="destructive">
+            <AlertTriangle size={14} />
+            <AlertDescription>{b.text}</AlertDescription>
+          </Alert>);
           break;
       }
     }
@@ -402,16 +421,26 @@ export function Conversation({ onCollapse }: { onCollapse?: () => void }) {
       <div className="conv-head">
         <span className="conv-title"><Sparkles size={14} />造价助手</span>
         <span className="conv-hint">{s.agentRunning ? "处理中…" : s.importRunning ? "导入中…" : ""}</span>
-        {onCollapse && <Button variant="ghost" size="icon-xs" onClick={onCollapse} title="收起对话" aria-label="收起对话"><PanelLeftClose size={15} /></Button>}
+        {onCollapse && <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={onCollapse} aria-label="收起对话"><PanelLeftClose size={15} /></Button>
+          </TooltipTrigger>
+          <TooltipContent>收起对话</TooltipContent>
+        </Tooltip>}
       </div>
       {s.modelDown && (
-        <div className="conv-banner" role="status" title={s.modelDown}>
+        <div className="conv-banner" role="status">
           <AlertTriangle size={12} />
-          <span>模型暂不可用，当前为固定任务模式。检查 .env 模型配置或账户额度后自动恢复。</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>模型暂不可用，当前为固定任务模式。检查 .env 模型配置或账户额度后自动恢复。</span>
+            </TooltipTrigger>
+            <TooltipContent>{s.modelDown}</TooltipContent>
+          </Tooltip>
         </div>
       )}
       <div className="conv-list-wrap">
-      <div ref={listRef} className="conv-list" onScroll={(e) => {
+      <div ref={listRef} className="conv-list" aria-live="polite" onScroll={(e) => {
         const el = e.currentTarget;
         nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         if (nearBottom.current) setJump(false);
@@ -421,27 +450,45 @@ export function Conversation({ onCollapse }: { onCollapse?: () => void }) {
             <span className="conv-welcome-icon"><Sparkles size={18} /></span>
             <h3>造价助手</h3>
             <p>把清单、询价表拖进来，或直接说想做的事。修改数据前我会先请你确认，每一步都留痕、可撤销。</p>
-            <div className="conv-quick">{QUICK.map((q) => <button key={q.label} className={q.auto ? "primary" : ""} disabled={busy || dirty} onClick={() => send(q.label, q.auto)}>{q.label}</button>)}</div>
+            <div className="conv-quick">{QUICK.map((q) => {
+              const btn = <button className={q.auto ? "primary" : ""} disabled={busy || dirty} onClick={() => send(q.label, q.auto)}>{q.label}</button>;
+              return q.hint
+                ? <Tooltip key={q.label}>
+                  <TooltipTrigger asChild>{btn}</TooltipTrigger>
+                  <TooltipContent>{q.hint}</TooltipContent>
+                </Tooltip>
+                : <Fragment key={q.label}>{btn}</Fragment>;
+            })}</div>
           </div>
         )}
         <Blocks />
       </div>
       {jump && (
-        <button className="conv-jump fadein" onClick={() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" }); setJump(false); }}>
-          <ArrowDown size={12} /> 有新内容
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button className="conv-jump fadein" onClick={() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" }); setJump(false); }}>
+              <ArrowDown size={12} /> 有新内容
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>跳到最新消息</TooltipContent>
+        </Tooltip>
       )}
       </div>
       <div className={`conv-compose${dirty ? " blocked" : ""}`}>
         <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv,.pdf" multiple hidden
           onChange={(e) => { const fs = [...(e.target.files ?? [])]; e.target.value = ""; void (async () => { for (const f of fs) await useStore.getState().upload(f); })(); }} />
-        <textarea
+        {/* 无边框自增高输入框：外层 .conv-compose 给边框与焦点环，这里用 className 抹掉
+            <Textarea> 自带的 border/bg/shadow/min-h/focus ring（cn = twMerge 会把冲突类去掉），
+            padding/字号/行高按 .conv-compose textarea 的原值给回，避免双层框与尺寸漂移。
+            field-sizing-fixed 保留原生 rows+scrollHeight 量高，自增高逻辑不变。 */}
+        <Textarea
           ref={inputRef}
           value={text}
           rows={1}
           placeholder={dirty ? "先保存或取消当前编辑" : "说想做的事，如：把电缆按上上牌报价"}
           disabled={busy}
           aria-label="给造价助手发消息"
+          className="block field-sizing-fixed min-h-0 resize-none border-0 bg-transparent px-3.5 pt-3 pb-1 text-sm shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
           onChange={(e) => {
             setText(e.target.value);
             const el = e.currentTarget;
@@ -455,9 +502,25 @@ export function Conversation({ onCollapse }: { onCollapse?: () => void }) {
           }}
         />
         <div className="conv-compose-bar">
-          <Button variant="ghost" size="icon-xs" title="上传清单 / 询价表 / 资料" aria-label="上传文件" disabled={busy || dirty} onClick={() => fileRef.current?.click()}><Paperclip size={15} /></Button>
+          <Tooltip>
+            {/* 忙碌/有未保存改动时按钮是禁用的、指针事件收不到：触发层放外层，提示才不至于消失 */}
+            <TooltipTrigger asChild>
+              <div className="inline-flex">
+                <Button variant="ghost" size="icon-sm" aria-label="上传文件" disabled={busy || dirty} onClick={() => fileRef.current?.click()}><Paperclip size={15} /></Button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>上传清单 / 询价表 / 资料</TooltipContent>
+          </Tooltip>
           <span>{dirty ? <><PencilLine size={11} />有未保存的修改</> : busy && s.ready ? <><Loader2 size={11} className="spin" />{s.saving ? "正在保存" : "正在处理"}</> : "Enter 发送 · Shift+Enter 换行"}</span>
-          <button className="conv-send" title="发送" aria-label="发送" disabled={busy || dirty || !text.trim()} onClick={() => send(text)}><SendHorizonal size={14} /></button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* ml-auto 由按钮挪到外壳：发送键仍然贴右 */}
+              <div className="ml-auto inline-flex">
+                <button className="conv-send" aria-label="发送" disabled={busy || dirty || !text.trim()} onClick={() => send(text)}><SendHorizonal size={14} /></button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>发送</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>

@@ -18,11 +18,11 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
   const line = (l: PricingPlanLine, i: number, dim = false) => (
     <tr key={i} className={cn(dim && "opacity-55")}>
       <td className="max-w-72 py-1 pr-3 align-top">
-        <span className="mono mr-1.5 text-[10.5px] text-muted-foreground">{l.quotaCode}</span>
+        <span className="mono mr-1.5 text-2xs text-muted-foreground">{l.quotaCode}</span>
         <span className="text-foreground">{l.quotaName}</span>
-        {l.manual && <Badge variant="secondary" className="ml-1 !py-0 !text-[10px]" >指定</Badge>}
-        {dim && <Badge variant="secondary" className="ml-1 !py-0 !text-[10px]" >建议</Badge>}
-        {l.scope && <div className="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">{l.scope}</div>}
+        {l.manual && <Badge size="xs" variant="secondary" className="ml-1">指定</Badge>}
+        {dim && <Badge size="xs" variant="secondary" className="ml-1">建议</Badge>}
+        {l.scope && <div className="mt-0.5 text-2xs leading-snug text-muted-foreground">{l.scope}</div>}
       </td>
       <td className="mono py-1 align-top text-right">{money(l.labor)}</td>
       <td className="mono py-1 align-top text-right">{money(l.materialAux)}</td>
@@ -52,13 +52,13 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
   return (
     <div className="border-l-2 px-4 py-2.5" style={{ borderColor: "var(--foreground)", background: "color-mix(in srgb, var(--secondary) 16%, var(--card))" }}>
       <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-[11.5px] font-medium text-foreground">综合单价构成</span>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-2xs font-medium text-foreground">综合单价构成</span>
+        <span className="text-2xs text-muted-foreground">
           {item.name} · <b className="mono font-medium text-muted-foreground">{fmtMoney(item.unitPrice)}</b> 元/{unit} · 由 {lines.length} 条定额子目组成
         </span>
         <button
           type="button"
-          className="ml-auto shrink-0 text-[11px] text-[var(--foreground)] hover:underline"
+          className="ml-auto shrink-0 text-2xs text-[var(--foreground)] hover:underline"
           onClick={(e) => {
             e.stopPropagation();
             void send?.(`帮我核对清单项「${item.name}」的综合单价构成：定额子目是否齐全、人材机与主材价取费是否合理`);
@@ -67,9 +67,9 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
           让助手核对组价 →
         </button>
       </div>
-      <table className="w-full text-[11.5px]">
+      <table className="w-full text-2xs">
         <thead>
-          <tr className="text-left text-[10.5px] text-muted-foreground">
+          <tr className="text-left text-2xs text-muted-foreground">
             <th className="pb-1 font-normal">定额子目</th>
             <th className="pb-1 text-right font-normal">人工费</th>
             <th className="pb-1 text-right font-normal">辅材</th>
@@ -83,7 +83,7 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
           {lines.map((l, i) => line(l, i))}
           {suggested.length > 0 && (
             <tr>
-              <td colSpan={7} className="pt-1.5 text-[10.5px] text-muted-foreground">
+              <td colSpan={7} className="pt-1.5 text-2xs text-muted-foreground">
                 — 建议增列的子目（未计入单价，可由助手确认后追加） —
               </td>
             </tr>
@@ -91,7 +91,7 @@ export function PriceComposition({ item }: { item: BoqItemDTO }) {
           {suggested.map((l, i) => line(l, i, true))}
         </tbody>
       </table>
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/70 pt-1.5 text-[11px] text-muted-foreground">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/70 pt-1.5 text-2xs text-muted-foreground">
         <span>
           子目小计合计 <b className="mono">{fmtMoney(sumSub)}</b> 元/{unit}
         </span>

@@ -4,8 +4,13 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("../src/ui/primitives", () => ({ toast: { error: vi.fn(), info: vi.fn(), success: vi.fn() }, ConfirmDialog: vi.fn(), EmptyState: vi.fn(), Modal: vi.fn(() => null) }));
 const store = vi.hoisted(() => ({ items: [] as BoqItemDTO[], boqQuery: "", patchItem: vi.fn(), setBoqQuery: vi.fn(), running: false, agentRunning: false, importRunning: false }));
 vi.mock("../src/ui/store", () => ({ useStore: () => store }));
+import { TooltipProvider } from "../src/components/ui/tooltip";
 import { BoqTable } from "../src/ui/views";
 import type { BoqItemDTO } from "@shared/types";
+
+/** 复刻 layout.tsx 的根环境：应用里所有视图都在 TooltipProvider 之内。 */
+const render = (el: React.ReactElement) => renderToStaticMarkup(React.createElement(TooltipProvider, null, el));
+
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 it("按计价口径开放编辑：普通项的量价、总额项的合价，零工程量的总额项保持可见", () => {
@@ -16,7 +21,7 @@ it("按计价口径开放编辑：普通项的量价、总额项的合价，零�
     feeType: "总价措施", sectionPath: "", isHeader: false, sortOrder: 0, discipline: "OTHER", features: {},
   };
   store.items = [item, { ...item, id: "pipe", feeType: "分部分项", name: "管道", quantity: "10", unitPrice: "50", totalPrice: "500" }];
-  const html = renderToStaticMarkup(React.createElement(BoqTable));
+  const html = render(React.createElement(BoqTable));
   const rows = html.match(/<tbody>([\s\S]*?)<\/tbody>/)![1].match(/<tr[\s\S]*?<\/tr>/g)!;
   expect(rows[0]).not.toContain("opacity-45");
   expect(rows[0].match(/tabindex="0"/g)).toHaveLength(1);

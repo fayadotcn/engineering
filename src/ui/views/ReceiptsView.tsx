@@ -5,7 +5,7 @@ import { useStore } from "../store";
 import { FileSpreadsheet } from "lucide-react";
 import { EmptyState, toast } from "../primitives";
 import { Button } from "@/components/ui/button";
-import { cn } from "./shared";
+import { cn, Tip, TipEl } from "./shared";
 
 /* ---------------- 变更记录 ----------------
    回执聚合面板：每一次数据修改可追溯、可撤销 */
@@ -48,14 +48,13 @@ export function ReceiptsView() {
             {receipts.map((r, i) => {
               const jumpable = !!r.affectedIds?.length;
               return (
+              <TipEl key={r.id} tip={jumpable ? "点击定位到清单中的相关行" : undefined}>
               <tr
-                key={r.id}
                 className={cn("group", jumpable && "cursor-pointer")}
-                title={jumpable ? "点击定位到清单中的相关行" : undefined}
                 onClick={jumpable ? () => focusBoqRows?.(r.affectedIds!) : undefined}
               >
                 <td className="xl-rn">{i + 1}</td>
-                <td className="mono text-[11px] text-muted-foreground">
+                <td className="mono text-2xs text-muted-foreground">
                     {new Date(r.createdAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}
                 </td>
                 <td>
@@ -63,11 +62,11 @@ export function ReceiptsView() {
                     {ACTION_LABEL[r.actionType] ?? r.actionType}
                   </Badge>
                 </td>
-                <td className={`max-w-96 truncate ${r.reverted ? "text-muted-foreground line-through decoration-border" : "text-muted-foreground"} ${jumpable ? "group-hover:text-foreground group-hover:underline decoration-border underline-offset-2" : ""}`} title={r.summary}>{r.summary}</td>
-                <td className="text-[11px] text-muted-foreground">{r.createdBy === "user" ? "手动" : "Agent"}</td>
+                <td className={`max-w-96 truncate ${r.reverted ? "text-muted-foreground line-through decoration-border" : "text-muted-foreground"} ${jumpable ? "group-hover:text-foreground group-hover:underline decoration-border underline-offset-2" : ""}`}><Tip tip={r.summary}>{r.summary}</Tip></td>
+                <td className="text-2xs text-muted-foreground">{r.createdBy === "user" ? "手动" : "Agent"}</td>
                 <td className="text-center" onClick={(e) => e.stopPropagation()}>
                   {r.actionType === "REVERT" ? null : r.reverted ? (
-                    <span className="text-[10.5px] text-muted-foreground">已撤销</span>
+                    <span className="text-2xs text-muted-foreground">已撤销</span>
                   ) : r.reversible ? (
                     <Button
                       variant="ghost"
@@ -78,10 +77,11 @@ export function ReceiptsView() {
                       {busy === r.id ? "…" : "撤销"}
                     </Button>
                   ) : (
-                    <span className="text-[10.5px] text-muted-foreground">不可撤销</span>
+                    <span className="text-2xs text-muted-foreground">不可撤销</span>
                   )}
                 </td>
               </tr>
+              </TipEl>
               );
             })}
           </tbody>

@@ -14,9 +14,9 @@ export function BoqStatusBar({ sumShown, filtering, unpriced, selCount, selTotal
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3 border-t border-border bg-[var(--muted)] px-3 py-1.5">
-      <span className="text-[11.5px] text-muted-foreground">
+      <span className="text-2xs text-muted-foreground">
         合价合计
-        <b className="mono ml-1.5 text-[12.5px] font-medium text-foreground">
+        <b className="mono ml-1.5 text-xs font-medium text-foreground">
           {fmtMoney(sumShown)}
         </b>
         <span className="ml-1">元</span>
@@ -28,7 +28,7 @@ export function BoqStatusBar({ sumShown, filtering, unpriced, selCount, selTotal
           已选 {selCount} 行 · 合计 <b className="mono font-medium">{fmtMoney(selTotal)}</b> 元
         </Badge>
       )}
-      <span className="ml-auto text-[11px] text-muted-foreground">
+      <span className="ml-auto text-2xs text-muted-foreground">
         {dataShown === dataTotal ? `${dataTotal} 行` : `${dataShown} / ${dataTotal} 行`}
       </span>
     </div>

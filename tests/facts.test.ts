@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseRateValue, parseAmountValue, parseAreaValue, validatePricingFact, setFact } from "../project/facts";
+import { parseRateValue, parseCoefficientValue, parseAmountValue, parseAreaValue, validatePricingFact, setFact } from "../project/facts";
 
 // setFact 封顶测试：mock costFact 表，验证超过 300 条时剪掉最旧行
 const db = vi.hoisted(() => ({ rows: [] as { id: string; projectId: string; createdAt: Date }[], seq: 0 }));
@@ -65,6 +65,34 @@ describe("台账事实数值归一化", () => {
     expect(() => validatePricingFact("檐口高度", "25m")).not.toThrow();
     expect(() => validatePricingFact("操作物高度", "三层")).toThrow();
     expect(() => validatePricingFact("檐口高度", "-5")).toThrow();
+  });
+
+  // 回归钉：人工费调整系数是「调增倍数」，不是 0–100% 费率。
+  // 历史坑：「人工费参考国内×4」被写成系数 4 → 按费率解析成 4%，
+  // 626,369 元的调差只计了 8,351 元（差 75 倍），报价直接失真。
+  it("parseCoefficientValue：裸数字是倍数，带 % 才是百分数", () => {
+    expect(parseCoefficientValue("3")).toBe(3);      // 调增 300% = 人工费 4 倍
+    expect(parseCoefficientValue("3倍")).toBe(3);
+    expect(parseCoefficientValue("×3")).toBe(3);
+    expect(parseCoefficientValue("3x")).toBe(3);
+    expect(parseCoefficientValue("300%")).toBe(3);
+    expect(parseCoefficientValue("0.15")).toBeCloseTo(0.15);
+    expect(parseCoefficientValue("15%")).toBeCloseTo(0.15);
+    expect(parseCoefficientValue("1")).toBe(1);
+    expect(parseCoefficientValue("")).toBeNull();
+    expect(parseCoefficientValue("abc")).toBeNull();
+    // 同一串文本在两个解析器下的语义差异就是本次修复的核心
+    expect(parseRateValue("3")).toBeCloseTo(0.03);
+    expect(parseCoefficientValue("3")).toBe(3);
+  });
+
+  it("validatePricingFact：调整系数允许倍数（>1），仍拒负数/离谱值/非数字", () => {
+    expect(() => validatePricingFact("人工费调整系数", "3")).not.toThrow();
+    expect(() => validatePricingFact("人工费调整系数", "300%")).not.toThrow();
+    expect(() => validatePricingFact("人工费调整系数", "0.15")).not.toThrow();
+    expect(() => validatePricingFact("人工费调整系数", "-1")).toThrow();
+    expect(() => validatePricingFact("人工费调整系数", "11")).toThrow(); // 1100% 明显是误填
+    expect(() => validatePricingFact("人工费调整系数", "abc")).toThrow();
   });
 });
 

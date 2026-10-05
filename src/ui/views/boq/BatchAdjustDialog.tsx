@@ -4,8 +4,14 @@ import type { BoqItemDTO } from "@shared/types";
 import { Modal } from "../../primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney } from "../shared";
 import { ADJ_FIELD, type AdjForm } from "./constants";
+
+/* 字段容器：<Label> 自带 flex 横排 + gap-2 + font-medium，这里抹平回 .cost-field 的
+   竖向堆叠原视觉——行距仍由 .cost-field > span 的 margin-bottom 控制，故 gap-0。 */
+const FIELD = "cost-field flex-col items-stretch gap-0 font-normal leading-normal";
 
 /** 多选批量调价弹窗 */
 export function BatchAdjustDialog({ adjRows, saving, adjForm, setAdjForm, onClose, onSubmit }: {
@@ -25,31 +31,27 @@ export function BatchAdjustDialog({ adjRows, saving, adjForm, setAdjForm, onClos
         onSubmit={(e) => { e.preventDefault(); void onSubmit(); }}
       >
         <div className="grid grid-cols-2 gap-3">
-          <label className="cost-field">
+          <Label className={FIELD}>
             <span>调整字段</span>
-            <select
-              value={adjForm.field}
-              onChange={(e) => setAdjForm(f => ({ ...f, field: e.target.value as typeof f.field }))}
-              className="cost-input lg w-full"
-            >
-              <option value="unitPrice">综合单价</option>
-              <option value="quantity">工程量</option>
-              <option value="mainMaterialPrice">主材暂估价</option>
-            </select>
-          </label>
-          <label className="cost-field">
+            <Select value={adjForm.field} onValueChange={(v) => setAdjForm(f => ({ ...f, field: v as typeof f.field }))}>
+              <SelectTrigger size="sm" className="w-full"><SelectValue>{ADJ_FIELD[adjForm.field]}</SelectValue></SelectTrigger>
+              <SelectContent>
+                {Object.entries(ADJ_FIELD).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Label>
+          <Label className={FIELD}>
             <span>方式</span>
-            <select
-              value={adjForm.mode}
-              onChange={(e) => setAdjForm(f => ({ ...f, mode: e.target.value as typeof f.mode }))}
-              className="cost-input lg w-full"
-            >
-              <option value="percent">按百分比增减</option>
-              <option value="value">统一设为该值</option>
-            </select>
-          </label>
+            <Select value={adjForm.mode} onValueChange={(v) => setAdjForm(f => ({ ...f, mode: v as typeof f.mode }))}>
+              <SelectTrigger size="sm" className="w-full"><SelectValue>{adjForm.mode === "percent" ? "按百分比增减" : "统一设为该值"}</SelectValue></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="percent">按百分比增减</SelectItem>
+                <SelectItem value="value">统一设为该值</SelectItem>
+              </SelectContent>
+            </Select>
+          </Label>
         </div>
-        <label className="cost-field">
+        <Label className={FIELD}>
           <span>{adjForm.mode === "percent" ? "增减百分比（%）— 下浮填负数" : "目标值"}</span>
           <Input
             autoFocus
@@ -59,11 +61,11 @@ export function BatchAdjustDialog({ adjRows, saving, adjForm, setAdjForm, onClos
             inputMode="decimal"
             className="w-full"
           />
-        </label>
+        </Label>
         {adjForm.mode === "percent" && adjForm.value.trim() && Number.isFinite(Number(adjForm.value)) && (
           Number(adjForm.value) <= -100
-            ? <p className="text-[11.5px] text-[var(--destructive)]">下浮不能超过 100%（会得到负值）</p>
-            : <p className="text-[11.5px] text-muted-foreground">
+            ? <p className="text-2xs text-[var(--destructive)]">下浮不能超过 100%（会得到负值）</p>
+            : <p className="text-2xs text-muted-foreground">
                 即 {ADJ_FIELD[adjForm.field]} ×{(1 + Number(adjForm.value) / 100).toFixed(4)}
                 {adjRows?.length ? `，以首行「${adjRows[0].name}」为例：${fmtMoney(Number(adjRows[0][adjForm.field]))} → ${fmtMoney(Number(adjRows[0][adjForm.field]) * (1 + Number(adjForm.value) / 100))} 元` : ""}
               </p>

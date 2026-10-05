@@ -1,9 +1,18 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertTriangle,
   Check,
   ChevronDown,
   Columns3,
@@ -13,7 +22,9 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { ConfirmDialog, toast } from "../primitives";
+import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { cn } from "../views/shared";
+import { PRICE_TYPES, PRICE_TYPE_LABEL, priceTypeLabel } from "../terms";
 import { DatasetMappingPanel } from "./DatasetMappingPanel";
 import { PriceRowsPanel } from "./PriceRowsPanel";
 import { readResponse } from "../api";
@@ -42,7 +53,8 @@ const KINDS = [
   { k: "GENERIC", label: "参考资料", hint: "上传其他 Excel 资料，方便以后查看。" },
 ] as const;
 
-const cn = (...xs: (string | false | undefined)[]) => xs.filter(Boolean).join(" ");
+// Radix Select 的空值即 placeholder 语义（不能当选项值），「自动」用哨兵值再映射回空串。
+const PRICE_TYPE_AUTO = "__auto__";
 
 // 数据集副标题里的来源标签：
 // - 本地计价软件导入的内部库文件（*.DB3 之类）显示人话，全名留在 title 里供复核；
@@ -140,9 +152,9 @@ function DatasetCard({
       <div className="cost-dataset-row flex flex-wrap items-center gap-3 px-4 py-3">
         <FileSpreadsheet size={15} className="shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-medium">{d.name}</div>
+          <div className="truncate text-sm font-medium">{d.name}</div>
           <div
-            className="mt-0.5 break-words text-[11px] text-muted-foreground"
+            className="mt-0.5 break-words text-2xs text-muted-foreground"
             title={sourceLabel(d) === d.filename ? undefined : `源文件：${d.filename}`}
           >
             {[
@@ -158,9 +170,9 @@ function DatasetCard({
               .join(" · ")}
           </div>
         </div>
-        {d.status === "FAILED" && <Badge variant="danger" >失败</Badge>}
-        {d.status === "PENDING" && <Badge variant="warning" >待确认</Badge>}
-        {!d.active && <Badge variant="secondary" >已停用</Badge>}
+        {d.status === "FAILED" && <Badge variant="danger">失败</Badge>}
+        {d.status === "PENDING" && <Badge variant="warning">待确认</Badge>}
+        {!d.active && <Badge variant="secondary">已停用</Badge>}
         {d.kind === "MATERIAL_PRICE" && (d.status === "PENDING" || d.status === "FAILED") && (
           <Button
             size="xs"
@@ -208,8 +220,20 @@ function DatasetCard({
         </div></details>
       </div>
       {dirty && <p className="px-4 pb-2 text-xs text-muted-foreground" role="status">请先保存或取消编辑，再切换面板、筛选或停用数据集。</p>}
-      {panel === "preview" && previewLoading && <div className="cost-empty" role="status"><Loader2 size={14} className="spin" />正在加载预览</div>}
-      {panel === "preview" && previewError && <div className="cost-error" role="alert">{previewError}<Button variant="outline" size="sm" onClick={() => void togglePreview(true)}>重试</Button></div>}
+      {panel === "preview" && previewLoading && (
+        <div role="status">
+          <EmptyState icon={<Loader2 size={22} className="spin" />} title="正在加载预览" />
+        </div>
+      )}
+      {panel === "preview" && previewError && (
+        <Alert variant="destructive" className="mx-4 my-3">
+          <AlertTriangle />
+          <AlertTitle className="line-clamp-none">{previewError}</AlertTitle>
+          <AlertDescription>
+            <Button variant="outline" size="sm" onClick={() => void togglePreview(true)}>重试</Button>
+          </AlertDescription>
+        </Alert>
+      )}
       <ConfirmDialog
         open={confirmDel}
         danger
@@ -222,7 +246,7 @@ function DatasetCard({
       />
       {panel === "preview" && preview && (
         <div className="max-h-72 overflow-auto border-t border-border">
-          <table className="xl-table text-[12px]">
+          <table className="xl-table text-xs">
             <thead>
               <tr>
                 <th className="xl-rn"></th>
@@ -242,9 +266,9 @@ function DatasetCard({
               ))}
             </tbody>
           </table>
-          {!preview.rows.length && <p className="px-3 py-5 text-center text-xs text-muted-foreground">暂无可预览的行数据</p>}
+          {!preview.rows.length && <EmptyState title="暂无可预览的行数据" />}
           {preview.total > preview.rows.length && (
-            <div className="px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="px-3 py-2 text-2xs text-muted-foreground">
               显示前 {preview.rows.length} 行，共 {preview.total} 行
             </div>
           )}
@@ -334,7 +358,15 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
   return (
     <div className="cost-datasets mt-8 space-y-8">
       <nav className="cost-library-tabs" aria-label="共享数据类型">{KINDS.map(k => <button key={k.k} aria-current={kind === k.k ? "page" : undefined} className={kind === k.k ? "active" : ""} disabled={blocked} onClick={() => { setKind(k.k); setQuery(""); }}><strong>{k.label}</strong><span>{datasets.filter(d => d.kind === k.k).length}</span></button>)}</nav>
-      {loadError && <div className="cost-error" role="alert">{loadError}<Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>重试</Button></div>}
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle className="line-clamp-none">{loadError}</AlertTitle>
+          <AlertDescription>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}>重试</Button>
+          </AlertDescription>
+        </Alert>
+      )}
       {/* 上传区 */}
       <div className="rounded-md border border-border bg-[var(--card)] p-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -361,20 +393,23 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
         </div>
         {kind === "MATERIAL_PRICE" && (
           <details className="cost-simple-more mt-2.5"><summary>补充地区、日期或品牌（可选）</summary><div className="cost-more-body">
-            <select
+            <Select
               disabled={busy}
-              aria-label="整表默认价格类型"
-              value={defPriceType}
-              onChange={(e) => setDefPriceType(e.target.value)}
-              className="cost-input"
-              title="整表默认价格类型"
+              value={defPriceType || PRICE_TYPE_AUTO}
+              onValueChange={(v) => setDefPriceType(v === PRICE_TYPE_AUTO ? "" : v)}
             >
-              <option value="">价格类型：自动</option>
-              <option value="INFO">信息价</option>
-              <option value="MARKET">市场价</option>
-              <option value="SUPPLY">供应商价</option>
-              <option value="LABOR">人工价</option>
-            </select>
+              <SelectTrigger size="sm" aria-label="整表默认价格类型" title="整表默认价格类型">
+                <SelectValue>
+                  {defPriceType ? priceTypeLabel(defPriceType) : "价格类型：自动"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={PRICE_TYPE_AUTO}>价格类型：自动</SelectItem>
+                {PRICE_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>{PRICE_TYPE_LABEL[t]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
               disabled={busy}
               aria-label="整表默认地区"
@@ -401,18 +436,18 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
             />
           </div></details>
         )}
-        <p className="mt-2.5 text-[11.5px] text-muted-foreground">
+        <p className="mt-2.5 text-2xs text-muted-foreground">
           {KINDS.find((k) => k.k === kind)?.hint}
         </p>
       </div>
 
       {/* 分组列表 */}
-      <label className="cost-search"><input disabled={blocked} aria-label="搜索数据集" placeholder="搜索数据集名称或文件名" value={query} onChange={e => setQuery(e.target.value)} /></label>
+      <label className="cost-search"><Input disabled={blocked} aria-label="搜索数据集" placeholder="搜索数据集名称或文件名" value={query} onChange={e => setQuery(e.target.value)} className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0" /></label>
       {grouped.map((g) => (
         <section key={g.k}>
           <div className="mb-2 flex items-baseline gap-2">
-            <h2 className="text-[13.5px] font-medium">{g.label}</h2>
-            <span className="text-[11px] text-muted-foreground">{g.items.length} 个数据集</span>
+            <h2 className="text-sm font-medium">{g.label}</h2>
+            <span className="text-2xs text-muted-foreground">{g.items.length} 个数据集</span>
           </div>
           <div className="space-y-2">
             {g.items.map((d) => (
@@ -425,9 +460,10 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               />
             ))}
             {!g.items.length && (
-              <div className="rounded-xl border border-dashed border-input px-4 py-6 text-center text-[12px] text-muted-foreground">
-                {query.trim() ? "没有匹配的数据集" : "还没有数据集，上传 Excel 开始整理"}
-              </div>
+              <EmptyState
+                icon={<FileSpreadsheet size={22} />}
+                title={query.trim() ? "没有匹配的数据集" : "还没有数据集，上传 Excel 开始整理"}
+              />
             )}
           </div>
         </section>

@@ -2,7 +2,7 @@
 import { useStore } from "../store";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { EmptyState } from "../primitives";
-import { cn, SOURCE_LABEL } from "./shared";
+import { cn, SOURCE_LABEL, Tip } from "./shared";
 
 /* ---------------- 事实台账 ---------------- */
 
@@ -27,7 +27,7 @@ export function FactList() {
               <td className="xl-rn">{fi + 1}</td>
               <td className="text-muted-foreground">{f.factType}</td>
               <td>{f.key}</td>
-              <td className="max-w-80 truncate" title={f.value}>{f.value}</td>
+              <td className="max-w-80 truncate"><Tip tip={f.value}>{f.value}</Tip></td>
               <td>
                 <Badge variant={f.source === "INFERRED" ? "warning" : "secondary"}>
                   {SOURCE_LABEL[f.source] ?? f.source}

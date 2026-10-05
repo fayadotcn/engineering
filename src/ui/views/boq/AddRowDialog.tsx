@@ -3,8 +3,15 @@ import type { Dispatch, SetStateAction } from "react";
 import { Modal } from "../../primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FEE_TYPE_HINT } from "../../terms";
 import { cn } from "../shared";
 import type { AddForm } from "./constants";
+
+/* 字段容器：<Label> 自带 flex 横排 + gap-2 + font-medium，这里抹平回 .cost-field 的
+   竖向堆叠原视觉——行距仍由 .cost-field > span 的 margin-bottom 控制，故 gap-0。 */
+const FIELD = "cost-field flex-col items-stretch gap-0 font-normal leading-normal";
 
 /** 手工补录清单行弹窗 */
 export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum, addQtyPreview, unitProjects, onClose, onSubmit }: {
@@ -26,7 +33,7 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
         className="mt-4 space-y-3"
         onSubmit={(e) => { e.preventDefault(); void onSubmit(); }}
       >
-        <label className="cost-field">
+        <Label className={FIELD}>
           <span>项目名称 <i className="not-italic" style={{ color: "var(--destructive)" }}>*</i></span>
           <Input
             autoFocus
@@ -35,22 +42,20 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
             placeholder="如：UPVC排水管 DN110"
             className="w-full"
           />
-        </label>
+        </Label>
         <div className="grid grid-cols-2 gap-3">
-          <label className="cost-field">
+          <Label className={FIELD}>
             <span>费用类别</span>
-            <select
-              value={addForm.feeType}
-              onChange={(e) => setAddForm(f => ({ ...f, feeType: e.target.value }))}
-              className="cost-input lg w-full"
-            >
-              <option value="分部分项">分部分项（量×价）</option>
-              <option value="单价措施">单价措施（量×价）</option>
-              <option value="总价措施">总价措施（只填金额）</option>
-              <option value="其他项目">其他项目（只填金额）</option>
-            </select>
-          </label>
-          <label className="cost-field">
+            <Select value={addForm.feeType} onValueChange={(v) => setAddForm(f => ({ ...f, feeType: v }))}>
+              <SelectTrigger size="sm" className="w-full">
+                <SelectValue>{FEE_TYPE_HINT[addForm.feeType as keyof typeof FEE_TYPE_HINT] ?? addForm.feeType}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(FEE_TYPE_HINT).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Label>
+          <Label className={FIELD}>
             <span>项目编码（选填）</span>
             <Input
               value={addForm.code}
@@ -58,9 +63,9 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
               placeholder="如：031001006"
               className="w-full"
             />
-          </label>
+          </Label>
         </div>
-        <label className="cost-field">
+        <Label className={FIELD}>
           <span>项目特征（选填）</span>
           <Input
             value={addForm.feature}
@@ -68,9 +73,9 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
             placeholder="如：DN100 沟槽连接 室内消防——影响定额/询价匹配"
             className="w-full"
           />
-        </label>
+        </Label>
         {unitProjects.length > 0 && (
-          <label className="cost-field">
+          <Label className={FIELD}>
             <span>单位工程（选填）</span>
             <Input
               value={addForm.unitProject}
@@ -82,10 +87,10 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
             <datalist id="boq-unitprojects">
               {unitProjects.map((u) => <option key={u} value={u} />)}
             </datalist>
-          </label>
+          </Label>
         )}
         {addLumpSum ? (
-          <label className="cost-field">
+          <Label className={FIELD}>
             <span>金额（元）</span>
             <Input
               value={addForm.totalPrice}
@@ -94,10 +99,10 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
               inputMode="decimal"
               className="w-full"
             />
-          </label>
+          </Label>
         ) : (
           <div className="grid grid-cols-3 gap-3">
-            <label className="cost-field">
+            <Label className={FIELD}>
               <span>单位</span>
               <Input
                 value={addForm.unit}
@@ -105,8 +110,8 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
                 placeholder="m / 个 / 套"
                 className="w-full"
               />
-            </label>
-            <label className="cost-field">
+            </Label>
+            <Label className={FIELD}>
               <span>工程量</span>
               <Input
                 value={addForm.quantity}
@@ -115,9 +120,9 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
                 inputMode="decimal"
                 className="w-full"
               />
-              {addQtyPreview && <span className={cn("mt-0.5 block text-[11px]", addQtyPreview === "计算式无效" ? "text-[var(--destructive)]" : "text-muted-foreground")}>{addQtyPreview}</span>}
-            </label>
-            <label className="cost-field">
+              {addQtyPreview && <span className={cn("mt-0.5 block text-2xs", addQtyPreview === "计算式无效" ? "text-[var(--destructive)]" : "text-muted-foreground")}>{addQtyPreview}</span>}
+            </Label>
+            <Label className={FIELD}>
               <span>综合单价（元）</span>
               <Input
                 value={addForm.unitPrice}
@@ -126,7 +131,7 @@ export function AddRowDialog({ addOpen, saving, addForm, setAddForm, addLumpSum,
                 inputMode="decimal"
                 className="w-full"
               />
-            </label>
+            </Label>
           </div>
         )}
         <div className="dlg-actions">

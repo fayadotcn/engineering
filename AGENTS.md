@@ -15,7 +15,7 @@ npm run fixtures          # 生成测试用 Excel 到 fixtures/out/
 
 ## 模型配置
 
-单系统自有引擎（`agent/` runtime + llm + planner + executor + pending + SSE）。`POST /api/projects/[id]/agent/runs` 发起任务，事件经 `/api/runs/[runId]/stream` 回放至工作台左轨原生会话面板；确认门走 `/api/runs/[runId]/confirm`。模型请求失败时 runtime 发 `model_fallback` 事件（payload.reason=失败原因）并降规则引擎——前端据此显示常驻「固定任务模式」横幅，下一次模型产出 thought 事件自动解除。上下文含 `lastRun`（最近一轮的 tool_finished 摘要），供「刚才/那些/继续」类指代解析。
+单系统自有引擎（`agent/` runtime + llm + planner + executor + pending + SSE）。`POST /api/projects/[id]/agent/runs` 发起任务，事件经 `/api/runs/[runId]/stream` 回放至工作台左轨原生会话面板；确认门走 `/api/runs/[runId]/confirm`。模型请求失败时 runtime 发 `model_fallback` 事件（payload.reason=失败原因）并降规则引擎——前端据此显示常驻「固定任务模式」横幅，下一次模型产出 thought 事件自动解除。上下文含 `lastRun`（最近一轮的 tool_finished 摘要），供「刚才/那些/继续」类指代解析。**轮数用尽（`runLLMLoop` 默认 8 轮）不以占位文案结束**：先做一次无工具收尾调用让模型给阶段性总结（成果/卡点/下一步），失败或空回复退 `agent/wrapUp.ts` 的确定性摘要（列出本轮真实执行过的工具与结果要点）——历史事故：145 项综合单价写回 + 2 条回执全部落库，用户只看到「已达到最大推理轮数」，误判任务中断。
 
 **一键报价（autopilot）**：`agent/autopilot.ts` 把造价师标准动作链固化成确定性管线——`extra.autopilot=true`（或文本「一键报价/自动报价」）触发，**绕过 LLM** 走 `matchLibrary→(命中才)fillFromLibrary→quota.match→calculate→(费率齐才)applyCalc→(测算有匹配才)measureFees→feeSummary`；写操作仍过确认门，缺管理费率/利润率时跳过写回并在结尾说明补设置后回复「写回组价」续接（planner 对该词优先于预览/写回Excel 路由）。
 
@@ -41,7 +41,15 @@ MODEL_NAME=deepseek-chat
 - `cost-engine/fileCompare.ts` 两版清单对审：编码优先对齐、无编码按语义组键；输出 价差/量差/独有项 + 总额差（fileCompare 视图）。
 - 确认门：带 `confirm` 标记的专业工具经 `agent/pending.ts` 挂起 run（AWAITING_CONFIRM），POST /api/runs/[runId]/confirm 批准后才执行；文件导入的映射确认同走此门。跨请求的导入待确认表和事件订阅必须存 globalThis（Next 每个 route 独立 module graph）。
 - `cost-engine/calcExpr.ts` 工程量计算式求值（递归下降，禁 eval；×÷（）全角与单位词自动处理）。
-- 前端样式：shadcn/ui new-york 体系——`src/ui/styles/` 分文件，`tokens.css` 管全部设计变量（`--background/--foreground/--card/--primary/--secondary/--muted/--accent/--border/--input/--ring/--destructive` 及 `*-soft`/`*-soft-fg` 语义色）。组件库在 `src/components/ui/`（button/input/badge/card/dialog/alert-dialog/dropdown-menu/context-menu/tabs/table/sonner/select/checkbox/tooltip 等，Radix + cva，统一 `cn()` 合并 class）；按钮一律 `<Button>` 变体（近黑单色 default / outline / ghost / destructive），徽章一律 `<Badge>`，旧 `cost-btn`/`chip`/`icon-btn` 类已废弃（仅剩 `.cost-input` 给原生 `<select>` 撑皮肤）。明暗主题走 `<html data-theme>`：`layout.tsx` 内联脚本首帧前落定（localStorage `cost-theme`=auto|light|dark，auto 跟随系统+跨页签同步），`ui/ThemeToggle.tsx` 三态切换。打印强制浅色口径（tokens.css 尾部 @media print 重置）。
+- 前端样式：shadcn/ui new-york 体系——`src/ui/styles/` 分文件，`tokens.css` 是**唯一设计变量源**。
+  - **分层是硬约束**：`globals.css` 里 `tokens.css` 不入层（`@theme` 必须顶层），其余 6 个样式文件一律 `@import ... layer(components)`。项目 CSS 未分层时会压过 Tailwind 的 `utilities` 层，组件 `variant`/`size` prop 运行时失效、调用点被迫用 `!important` 转义——这是历史坑，别再走回去。**尺寸一律用组件 prop 表达，不要用 CSS 或 className 覆盖**。
+  - **tokens 刻度**：字号 6 档（`--text-2xs` 11 / `--text-xs` 12 / `--text-sm` 14 / `--text-base` 16 / `--text-xl` 20 / `--text-2xl` 26），禁止 `text-[13px]` 之类任意值与小数档；圆角 4 档 `--radius-*`；动效 3 档时长（`--dur-fast/base/slow`）+ 2 条曲线（`--ease-standard/out`）；控件高度统一 32px（全页表单 36px）。**注释里绝不能出现星号加斜杠的连续序列**（如写 `rounded-*/shadow-*`），会提前闭合注释并让整块 `@theme` 被 Tailwind 丢弃——曾导致整套圆角刻度静默失效。
+  - **品牌色**：深林绿系（`--primary` 浅色 #2f5d46 / 暗色 #7fb99b），`ring`/图表/选中态同源；中性面保持灰阶不染绿。所有文字与图形对已按 WCAG 校验（正文 ≥7:1、辅助 ≥4.5:1、焦点环与图表 ≥3:1），改色前先跑 `.design-audit/palette-check.mjs`。
+  - **组件库**：`src/components/ui/`（Radix + cva，统一 `cn()`）。**19 个组件全部在用，业务代码不得再手搓原生控件**：输入 `<Input>`、下拉 `<Select>`、勾选 `<Checkbox>`+`<Label>`、多行 `<Textarea>`、分隔 `<Separator>`、面板 `<Card asChild>`、提示 `<Tooltip>`、错误/警告 `<Alert>`、空态 `<EmptyState>`、骨架 `<Skeleton>`、确认门 `<AlertDialog>`（经 `primitives.tsx` 的 `ConfirmDialog`）。
+    - **控件尺寸一律走 size prop，不用 className 覆盖**：`Input` xs 28 / default 32 / lg 36（整页表单主字段）；`SelectTrigger` xs 28（表格单元格内联编辑）/ sm 32（常规表单）/ default 36；`Button` xs 28 / sm 32 / default 36 / icon-xs 28 / icon-sm 32 / icon 36；`Badge` 默认 / `size="xs"`（表格行内）。原 `.cost-input` 皮肤**已删除**，不要再加回来。
+    - **三个 Radix 坑（都踩过）**：① `SelectValue` 必须显式给 children——收起态靠已挂载的 item 反查文案，服务端渲染/首帧没 item 时是空白；② Select 的 item value **不能是空串**（空串即 placeholder 语义），「全部/未指定/自动」用哨兵值映射回 `""`；③ `TooltipTrigger asChild` 会让 Radix 把 `data-slot` 覆写成 `tooltip-trigger`，所以按 `data-slot="button"` 选择的地方要一并考虑（CSS 已覆盖 `a[data-slot="tooltip-trigger"]`）。
+  - **表格原语是 `.xl-table`（table.css），不是 shadcn `<Table>`**：sticky 表头 + 行号槽 + `.xl-pin-last` 冻结末列 + 行态 + 容器查询收缩 + 打印重置，这套能力超出 shadcn Table（后者自带 `overflow-x-auto` 容器，会**让 sticky 表头静默失效**）。数据网格一律用 `xl-table`，`components/ui/table.tsx` 仅用于无冻结需求的普通小表。**没有** `cost-btn`/`chip`/`icon-btn`/`cost-input` 这类旧类。
+  - 明暗主题走 `<html data-theme>`：`layout.tsx` 内联脚本首帧前落定（localStorage `cost-theme`=auto|light|dark）；`ui/ThemeToggle.tsx` 三态切换；Radix `TooltipProvider` 挂在 layout，说明性提示走 `<Tooltip>` 而非原生 `title=`。字体为 `next/font` 注入的 Inter（仅 Latin 子集，数字等宽）+ 系统 CJK 栈。打印强制浅色口径并带 `@page`/断页控制。
 - 语义比较：BoqSemanticFeature 分组 → featureCompatible 冲突检查 → 价格比。禁止纯字符串匹配。
 - 每个修改动作产生 ActionReceipt；工作区用户编辑也产生（createdBy=user），Agent 上下文可见。
 - DB schema 用 SQLite 但保持 Postgres 可移植（Json/枚举→String + shared/json helpers）。
@@ -85,7 +93,7 @@ MODEL_NAME=deepseek-chat
 - **表-08 分解列**：`其中：人工费/材料费/机械费/管理费/利润` 映射为 `laborFee/machineFee/materialFee/mgmtFee/profitFee`（**合价口径**，不是单价）：原文进 `rawCells.__decomp`，`cost.composition` 直采真值（人材机已知、管利进 other 残差、三分量齐才算 margin）；人/机另折算成每清单单位值进 `BoqItem.laborUnitPrice/machineUnitPrice`（4 位小数）。**含税过滤（taxIncluded）必须覆盖单价措施**——只过滤分部分项会让含税单价的单价措施行先并入税前造价、随后又按含税口径并一次（重复计税）。
 - 费用汇总：`cost.feeSummary`（cost-engine/fees.ts）分部分项→措施→其他项目→规费→税前→税金→含税造价；费率读台账事实（措施费率/规费费率/暂列金额率/暂列金额/税率/定额人工费），未设置计 0 并在行内注明。导入了措施表/其他项目表时用真值，否则费率估算并标注。
 - 成本构成：`cost.composition`（cost-engine/costComposition.ts）把可计价项合价拆成 人工/材料/机械/管利及其他 四分量——分量来源优先级 pricingPlan（定额组价）> 源表分解列（laborUnitPrice/machineUnitPrice）> 仅主材暂估价；`other = 合价 − 已知分量` 恒成立，未分解部分进 other 不猜拆；人材机三分量齐全才算 directCost/margin，margin<0 即**成本倒挂**（报价低于人材机成本）。组价方案行标了主材名但缺主材价 → 材料不完整、margin 置空。
-- 费率/金额事实归一化：`project/facts.ts` 的 `parseRateValue`（"9%"/"9"/"0.09"→0.09）和 `parseAmountValue`（"5万"→50000）；**禁止 `Number(fact.value)`/`D(fact.value)` 直接消费台账值**——"9%" 会得到 NaN 或抛 DecimalError。
+- 费率/金额事实归一化：`project/facts.ts` 的 `parseRateValue`（"9%"/"9"/"0.09"→0.09）和 `parseAmountValue`（"5万"→50000）；**禁止 `Number(fact.value)`/`D(fact.value)` 直接消费台账值**——"9%" 会得到 NaN 或抛 DecimalError。**调整系数类事实走 `parseCoefficientValue`**（"3"/"3倍"/"×3"/"300%"→3 = 调增 300%，即人工费为定额人工费的 4 倍）——裸数字 >1 不折百分数；`validatePricingFact` 对「调整系数」按 0–10 倍数校验、不按 0–100% 费率卡；`fees.ts` 的人工费调整行必须写清「调增至 N 倍」。历史坑：「人工费参考国内×4」被写成系数 4 → 按费率解析成 4%，626,369 元调差只计了 8,351 元（差 75 倍）。
 
 ## 测试
 

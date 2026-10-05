@@ -1,9 +1,11 @@
 "use client";
 import { useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import type { QuotationMatchRow, WorkspaceView } from "@shared/types";
 import { EmptyState } from "../primitives";
-import { cn, fmtMoney } from "./shared";
+import { cn, fmtMoney, Tip } from "./shared";
 
 /* ---------------- 询价匹配 ---------------- */
 
@@ -22,7 +24,15 @@ export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: 
   const [details, setDetails] = useState(false);
   return (
     <div className="h-full overflow-auto p-4">
-      <details className="cost-simple-more mb-3"><summary>更多信息</summary><div className="cost-more-body"><label><input type="checkbox" checked={details} onChange={e => setDetails(e.target.checked)} />显示品牌和匹配评分</label></div></details>
+      <details className="cost-simple-more mb-3">
+        <summary>更多信息</summary>
+        <div className="cost-more-body">
+          <Label className="text-xs">
+            <Checkbox checked={details} onCheckedChange={(v) => setDetails(v === true)} />
+            显示品牌和匹配评分
+          </Label>
+        </div>
+      </details>
       <div className="xl-sheet overflow-auto rounded-lg">
       <table className="xl-table">
         <thead>
@@ -40,11 +50,20 @@ export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: 
           {view.rows.map((r: QuotationMatchRow, ri) => (
             <tr key={r.quotationItemId}>
               <td className="xl-rn">{ri + 1}</td>
-              <td className="max-w-48 truncate" title={r.materialName}>{r.materialName}{!details && (r.spec || r.brand) && <div className="truncate text-[11px] text-muted-foreground" title={[r.spec, r.brand].filter(Boolean).join(" · ")}>{[r.spec, r.brand].filter(Boolean).join(" · ")}</div>}</td>
+              <td className="max-w-48 truncate">
+                <Tip tip={r.materialName}>{r.materialName}</Tip>
+                {!details && (r.spec || r.brand) && (
+                  <div className="truncate text-2xs text-muted-foreground">
+                    <Tip tip={[r.spec, r.brand].filter(Boolean).join(" · ")}>
+                      {[r.spec, r.brand].filter(Boolean).join(" · ")}
+                    </Tip>
+                  </div>
+                )}
+              </td>
               {details && <><td className="mono text-muted-foreground">{r.spec || "—"}</td><td className="text-muted-foreground">{r.brand || "—"}</td></>}
               <td className="mono text-right">{fmtMoney(r.price)}</td>
-              <td className="max-w-64 truncate text-muted-foreground" title={r.matchedNames.join("、")}>
-                {r.matchedNames.join("、") || "—"}
+              <td className="max-w-64 truncate text-muted-foreground">
+                <Tip tip={r.matchedNames.join("、")}>{r.matchedNames.join("、") || "—"}</Tip>
               </td>
               {details && <td className="mono text-muted-foreground">{r.confidence}</td>}
               <td>

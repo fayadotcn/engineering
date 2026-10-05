@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Database, FileSpreadsheet, Search, Upload } from "lucide-react";
+import { AlertTriangle, Database, FileSpreadsheet, Search, Upload } from "lucide-react";
 import { EmptyState, toast } from "../primitives";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { readResponse } from "../api";
+import { priceTypeLabel } from "../terms";
+import { Tip, TipEl } from "./shared";
 
 interface DatasetRow {
   id: string;
@@ -33,13 +36,6 @@ interface PriceRow {
   source: string;
 }
 
-const PRICE_TYPE_LABEL: Record<string, string> = {
-  INFO: "信息价",
-  MARKET: "市场价",
-  SUPPLY: "供应价",
-  LABOR: "人工费",
-};
-
 const STATUS_LABEL: Record<string, { label: string; cls: BadgeVariant }> = {
   PARSED: { label: "已入库", cls: "success" },
   PENDING: { label: "待核对", cls: "warning" },
@@ -55,7 +51,11 @@ const fmtMoney = (v: string | number) => {
 /** 共享价格库：所有用户上传的材料价/人工费都进这一个池子，每个项目的组价都从这里取。 */
 export function PriceLibraryView() {
   const [datasets, setDatasets] = useState<DatasetRow[] | null>(null);
+  /** 加载失败与「空库」是两件事：失败时 datasets 保持 null（未知），错误单独记，
+   *  否则界面会显示「价格库还是空的 / 上传第一份价格表」，把故障伪装成没数据。 */
+  const [listError, setListError] = useState<string | null>(null);
   const [rows, setRows] = useState<PriceRow[]>([]);
+  const [rowError, setRowError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [searching, setSearching] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -69,9 +69,11 @@ export function PriceLibraryView() {
     try {
       const list = await readResponse<DatasetRow[]>(await fetch("/api/admin/datasets"), "加载数据集失败");
       setDatasets(list);
+      setListError(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载数据集失败");
-      setDatasets([]);
+      const message = e instanceof Error ? e.message : "加载数据集失败";
+      setListError(message);
+      toast.error(message);
     }
   };
 
@@ -83,8 +85,11 @@ export function PriceLibraryView() {
         "搜索失败，请重试"
       );
       setRows(res.rows);
+      setRowError(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "搜索失败");
+      const message = e instanceof Error ? e.message : "搜索失败";
+      setRowError(message);
+      toast.error(message);
     } finally {
       setSearching(false);
     }
@@ -142,8 +147,8 @@ export function PriceLibraryView() {
       <div className="xl-sheet mb-4 rounded-lg p-4">
         <div className="flex flex-wrap items-center gap-3">
           <Database size={15} className="text-muted-foreground" />
-          <span className="text-[13px] font-medium">贡献一份价格表</span>
-          <span className="text-[11px] text-muted-foreground">Excel / CSV 都行，系统自动识别列</span>
+          <span className="text-sm font-medium">贡献一份价格表</span>
+          <span className="text-2xs text-muted-foreground">Excel / CSV 都行，系统自动识别列</span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Input
@@ -199,8 +204,12 @@ export function PriceLibraryView() {
             className="w-72 pl-7"
           />
         </div>
-        <span className="text-[11px] text-muted-foreground">
-          库里共 {priceCount.toLocaleString()} 条价格{quotaCount ? `、${quotaCount.toLocaleString()} 条定额` : ""}
+        <span className="text-2xs text-muted-foreground">
+          {listError ? (
+            "价格库统计暂时读不出来"
+          ) : (
+            <>库里共 {priceCount.toLocaleString()} 条价格{quotaCount ? `、${quotaCount.toLocaleString()} 条定额` : ""}</>
+          )}
           {searching ? " · 搜索中…" : ""}
         </span>
       </div>
@@ -226,39 +235,74 @@ export function PriceLibraryView() {
               {rows.map((r, i) => (
                 <tr key={i}>
                   <td className="xl-rn">{i + 1}</td>
-                  <td className="max-w-56 truncate" title={r.name}>{r.name}</td>
-                  <td className="max-w-48 truncate text-muted-foreground" title={r.spec}>{r.spec === r.name ? "" : r.spec}</td>
+                  <td className="max-w-56 truncate"><Tip tip={r.name}>{r.name}</Tip></td>
+                  <td className="max-w-48 truncate text-muted-foreground"><Tip tip={r.spec === r.name ? undefined : r.spec}>{r.spec === r.name ? "" : r.spec}</Tip></td>
                   <td className="text-muted-foreground">{r.unit}</td>
-                  <td className="max-w-24 truncate text-muted-foreground" title={r.brand}>{r.brand}</td>
+                  <td className="max-w-24 truncate text-muted-foreground"><Tip tip={r.brand}>{r.brand}</Tip></td>
                   <td className="mono text-right font-medium">{fmtMoney(r.price)}</td>
-                  <td className="max-w-20 truncate text-muted-foreground" title={r.region}>{r.region}</td>
+                  <td className="max-w-20 truncate text-muted-foreground"><Tip tip={r.region}>{r.region}</Tip></td>
                   <td className="text-muted-foreground">{r.period}</td>
                   <td>
-                    <Badge variant="secondary" className="!py-px !text-[10px]" >
-                      {PRICE_TYPE_LABEL[r.priceType] ?? r.priceType ?? "—"}
+                    <Badge size="xs" variant="secondary">
+                      {priceTypeLabel(r.priceType) || "—"}
                     </Badge>
                   </td>
-                  <td className="max-w-40 truncate text-[11px] text-muted-foreground" title={r.source}>{r.source}</td>
+                  <td className="max-w-40 truncate text-2xs text-muted-foreground"><Tip tip={r.source}>{r.source}</Tip></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {rows.length === 0 && !searching && datasets !== null && (
-        <EmptyState
-          icon={<Search size={22} />}
-          title={q ? "没搜到相关价格" : "价格库还是空的"}
-          hint={q ? "换个关键词试试，或者上传一份包含它的价格表" : "上传第一份价格表，后面的项目就能直接用它组价"}
-        />
+      {rowError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle />
+          <AlertTitle>价格搜索失败，下面不是搜索结果</AlertTitle>
+          <AlertDescription>
+            {rowError}
+            <Button variant="outline" size="xs" onClick={() => void search(q)}>
+              重试
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {listError ? (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle />
+          <AlertTitle>价格库加载失败</AlertTitle>
+          <AlertDescription>
+            {listError}——这不代表库里没有数据，重试一次再看。
+            <Button variant="outline" size="xs" onClick={() => void refresh()}>
+              重试
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : (
+        rows.length === 0 &&
+        !searching &&
+        !rowError &&
+        datasets !== null && (
+          <EmptyState
+            icon={<Search size={22} />}
+            title={q ? "没搜到相关价格" : datasets.length ? "这些表还没解析出价格行" : "价格库还是空的"}
+            hint={
+              q
+                ? "换个关键词试试，或者上传一份包含它的价格表"
+                : datasets.length
+                  ? "表已收到但还没有价格行入库——去「数据管理」核对列识别后重导"
+                  : "上传第一份价格表，后面的项目就能直接用它组价"
+            }
+          />
+        )
       )}
 
       {(datasets ?? []).length > 0 && (
         <>
           <div className="mb-2 mt-5 flex items-center justify-between">
-            <span className="text-[12px] font-medium text-muted-foreground">已收集的数据表</span>
+            <span className="text-xs font-medium text-muted-foreground">已收集的数据表</span>
             {pendingCount > 0 && (
-              <a href="/admin" className="text-[11.5px] text-[var(--foreground)] hover:underline">
+              <a href="/admin" className="text-2xs text-[var(--foreground)] hover:underline">
                 {pendingCount} 份待核对列识别，去数据管理处理 →
               </a>
             )}
@@ -282,8 +326,8 @@ export function PriceLibraryView() {
                     <td>
                       <div className="flex items-center gap-2">
                         <FileSpreadsheet size={13} className="shrink-0 text-muted-foreground" />
-                        <span className="max-w-72 truncate" title={d.filename}>{d.name}</span>
-                        {!d.active && <span className="text-[10px] text-muted-foreground">（已停用）</span>}
+                        <span className="max-w-72 truncate"><Tip tip={d.filename}>{d.name}</Tip></span>
+                        {!d.active && <span className="text-2xs text-muted-foreground">（已停用）</span>}
                       </div>
                     </td>
                     <td>
@@ -297,7 +341,7 @@ export function PriceLibraryView() {
                         {STATUS_LABEL[d.status]?.label ?? d.status}
                       </Badge>
                     </td>
-                    <td className="text-[11px] text-muted-foreground">
+                    <td className="text-2xs text-muted-foreground">
                       {new Date(d.createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}
                     </td>
                   </tr>

@@ -4,11 +4,14 @@
 /* 明暗切换走 <html data-theme="dark">（非 .dark class），dark: 工具变体同步映射过去 */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* 样式按职责分文件：设计变量 → 通用组件 → 数据表 → 页面 → 工作台外壳 → 对话 → 视图 */
+/* 设计变量（语义 token / @theme 刻度 / 明暗两套值）单独一层：@theme 必须在顶层才能被
+   Tailwind 处理，且变量声明不与工具类竞争，放出来最安全。
+   其余样式按职责分文件，统一收进 @layer components——未分层时它们会压过 Tailwind 的
+   utilities 层，导致组件的 variant/size prop 运行时失效、调用点被迫用 !important 转义。 */
 @import "../ui/styles/tokens.css";
-@import "../ui/styles/base.css";
-@import "../ui/styles/table.css";
-@import "../ui/styles/pages.css";
-@import "../ui/styles/workbench.css";
-@import "../ui/styles/conversation.css";
-@import "../ui/styles/views.css";
+@import "../ui/styles/base.css" layer(components);
+@import "../ui/styles/table.css" layer(components);
+@import "../ui/styles/pages.css" layer(components);
+@import "../ui/styles/workbench.css" layer(components);
+@import "../ui/styles/conversation.css" layer(components);
+@import "../ui/styles/views.css" layer(components);

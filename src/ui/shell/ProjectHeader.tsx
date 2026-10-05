@@ -38,7 +38,7 @@ export function ProjectHeader({ section, onOpen, onUpload, convOpen, onOpenConv,
   };
   return <header className="wb-header">
     <div className="wb-top">
-      {!convOpen && <Button variant="ghost" size="icon" className="wb-conv-open" onClick={onOpenConv} title="展开造价助手" aria-label="展开造价助手">
+      {!convOpen && <Button variant="ghost" size="icon-sm" className="wb-conv-open" onClick={onOpenConv} title="展开造价助手" aria-label="展开造价助手">
         <MessageCircle size={16} />{pendingAll > 0 && <i>{pendingAll}</i>}
       </Button>}
       <nav className="wb-crumbs" aria-label="位置">
@@ -50,8 +50,9 @@ export function ProjectHeader({ section, onOpen, onUpload, convOpen, onOpenConv,
         <ProjectSwitch projects={projects} />
       </nav>
       <div className="cost-actions">
-        <ThemeToggle className="wb-theme" />
-        <Button variant="ghost" size="sm" asChild>
+        {/* ≤760px 收起主题与库入口腾出宽度；但「展开造价助手」必须常驻，否则收起对话栏后无法恢复 */}
+        <ThemeToggle className="max-[760px]:hidden" />
+        <Button variant="ghost" size="sm" asChild className="max-[760px]:hidden">
           <a href="/admin" title="各工程共用的材料价格与定额库"><Database size={13} />材料与定额库</a>
         </Button>
         <Button size="sm" disabled={blocked} onClick={onUpload}><Upload size={13} />上传资料</Button>
