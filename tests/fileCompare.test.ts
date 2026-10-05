@@ -79,6 +79,9 @@ describe("compareBoqSets", () => {
     expect(diff.status).toBe("PRICE_DIFF");
     expect(diff.priceDelta).toBe("1500");
     expect(diff.totalDelta).toBe("1500");
+    // lumpPair 标记透出：视图/导出据此把结构单价 0 留白（与导出综合单价同口径）
+    expect(diff.lumpPair).toBe(true);
+    expect(same.lumpPair).toBe(true);
     expect(same.status).toBe("SAME");
     const s = compareSummary(rows);
     expect(s.priceDiff).toBe(1);

@@ -180,8 +180,8 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
                 </td>
                 <td className="mono text-right">{r.aQty ?? "—"}</td>
                 <td className={cn("mono text-right", r.qtyDelta && "font-medium text-[var(--info-soft-fg)]")}>{r.bQty ?? "—"}</td>
-                <td className="mono text-right">{r.aPrice ?? "—"}</td>
-                <td className={cn("mono text-right", r.priceDelta && "font-medium text-[var(--warning-soft-fg)]")}>{r.bPrice ?? "—"}</td>
+                <td className="mono text-right">{r.lumpPair ? "—" : (r.aPrice ?? "—")}</td>
+                <td className={cn("mono text-right", r.priceDelta && "font-medium text-[var(--warning-soft-fg)]")}>{r.lumpPair ? "—" : (r.bPrice ?? "—")}</td>
                 <td className={cn("mono text-right", Number(r.totalDelta) !== 0 && "font-medium")}>
                   {r.totalDelta ? fmtMoney(r.totalDelta) : "—"}
                 </td>

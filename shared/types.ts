@@ -464,6 +464,8 @@ export interface FileCompareRow {
   unitMismatch?: boolean;
   /** 五统一：项目特征语义冲突明细 */
   featureConflict?: string[];
+  /** 两侧都是总额计价行：量/单价为结构常量，价差列承载合价差；展示层据此单价列留白 */
+  lumpPair?: boolean;
 }
 
 /** 人材机成本构成行：金额均为合价口径；null = 该分量未知（混入 other）。 */

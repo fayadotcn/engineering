@@ -29,6 +29,9 @@ export interface FileCompareRow {
   unitMismatch?: boolean;
   /** 五统一符合性：项目特征语义冲突明细（空数组=无冲突，字段不出） */
   featureConflict?: string[];
+  /** 两侧都是总额计价行（总价措施/其他项目）：量/单价是结构常量，价差列承载合价差；
+   *  展示层据此把单价列留白——结构性 0 不是价（与导出同口径） */
+  lumpPair?: boolean;
 }
 
 function alignKey(it: BoqItemDTO): string {
@@ -124,6 +127,7 @@ export function compareBoqSets(a: BoqItemDTO[], b: BoqItemDTO[]): FileCompareRow
         nameMismatch: nameMismatch || undefined,
         unitMismatch: unitMismatch || undefined,
         featureConflict: featureConflict.length ? featureConflict : undefined,
+        lumpPair: lumpPair || undefined,
       });
     } else {
       const it = ia ?? ib!;

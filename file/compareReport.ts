@@ -136,8 +136,9 @@ export async function buildCompareReport(
       r.aQty ? Number(r.aQty) : "",
       r.bQty ? Number(r.bQty) : "",
       r.qtyDelta ? Number(r.qtyDelta) : "",
-      r.aPrice ? Number(r.aPrice) : "",
-      r.bPrice ? Number(r.bPrice) : "",
+      // 总额计价行的单价是结构常量 0——留白，价差列承载真实的合价变动（与清单导出同口径）
+      r.lumpPair ? "" : r.aPrice ? Number(r.aPrice) : "",
+      r.lumpPair ? "" : r.bPrice ? Number(r.bPrice) : "",
       r.priceDelta ? Number(r.priceDelta) : "",
       r.aTotal ? Number(r.aTotal) : "",
       r.bTotal ? Number(r.bTotal) : "",
