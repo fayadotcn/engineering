@@ -33,9 +33,9 @@ const amountRightOf = (raw: string[], labelIdx: number): number | null => {
   return null;
 };
 
-/** 表-04 行标签 → 归一化字段名 */
+/** 表-04 行标签 → 归一化字段名（也服务通用键值汇总页兜底，别名覆盖「分部分项合价/含税工程造价」等写法） */
 const TABLE04_LABELS: [RegExp, string][] = [
-  [/分部分项工程费|分部分项及单价措施/, "分部分项工程费"],
+  [/分部分项工程费|分部分项及单价措施|分部分项合价|分部分项费(?!率)/, "分部分项工程费"],
   [/单价措施项目费/, "单价措施项目费"],
   [/总价措施项目费/, "总价措施项目费"],
   [/安全文明施工/, "安全文明施工费"],
@@ -44,8 +44,10 @@ const TABLE04_LABELS: [RegExp, string][] = [
   [/其他项目费/, "其他项目费"],
   [/附加税/, "附加税"],
   [/规费/, "规费"],
-  [/税金|销项增值税|增值税/, "税金"],
-  [/合计|总计|投标报价|招标控制价/, "合计"],
+  [/税金|销项增值税|增值税|销项税额/, "税金"],
+  [/人工费调整/, "人工费调整"],
+  [/税前工程造价|税前造价|税前总价/, "税前造价"],
+  [/合计|总计|投标报价|招标控制价|含税工程造价|含税总价|含税造价|工程造价/, "合计"],
 ];
 
 interface UnitSummary {
@@ -68,14 +70,17 @@ function unitListFromSummarySheet(sheet: ParsedSheet): { name: string; total: nu
   return out;
 }
 
-/** 表-04：标签→金额抽取；单位工程名由表-03 序号序配给 */
-function summaryFromTable04(sheet: ParsedSheet): Record<string, number> {
+/** 表-04：标签→金额抽取；单位工程名由表-03 序号序配给。
+ *  kvMode=通用键值页模式：费率/系数标签不当金额行——否则「规费费率|18.75」会把费率
+ *  当规费金额吸进对账；「税率」「人工费调整系数」同理。 */
+function summaryFromTable04(sheet: ParsedSheet, kvMode = false): Record<string, number> {
   const items: Record<string, number> = {};
   for (const r of sheet.rows) {
     // 标签可能在任意前导单元格（序号列、名称列、整行合并）
     for (let i = 0; i < r.raw.length; i++) {
       const cell = (r.raw[i] ?? "").trim();
       if (!cell || cell.length > 60) continue;
+      if (kvMode && /[%％率]|系数/.test(cell)) continue;
       const hit = TABLE04_LABELS.find(([re]) => re.test(cell));
       if (!hit) continue;
       const amt = amountRightOf(r.raw, i);
@@ -281,6 +286,26 @@ export function extractFileFacts(sheets: ParsedSheet[], filename: string): Extra
     }
   }
 
+  // 通用键值汇总页兜底：非表-04/13 的 FACTS 表（「口径与汇总」「编制说明」「费用汇总」）
+  // 里「标签|金额」键值行按同一张标签表归一。只在表-04 无产出时合成——结构表存在时
+  // 再叠加会让 compareDeclared 的跨单位工程求和重复计数。
+  if (!summaries.length) {
+    const seenSig = new Set<string>();
+    for (const s of factsSheets) {
+      if (isTable04(s.sheetName) || isTable13(s.sheetName)) continue;
+      const items = summaryFromTable04(s, true);
+      const keys = Object.keys(items);
+      // 至少一个合计类键 + 一个分量键才算汇总页——孤行「税金|3000」不合成
+      const hasTotal = keys.some((k) => k === "合计" || k === "税前造价");
+      const hasPart = keys.some((k) => k !== "合计" && k !== "税前造价");
+      if (!hasTotal || !hasPart) continue;
+      const sig = keys.sort().map((k) => `${k}=${items[k]}`).join("|");
+      if (seenSig.has(sig)) continue; // 多页重复同口径汇总 → 去重防对账翻倍
+      seenSig.add(sig);
+      summaries.push({ sheet: s.sheetName, unitName: s.unitProject ?? s.sheetName, items });
+    }
+  }
+
   // 表-13 规费税金计价表：费率明示优先于表-04 反推；基数文字进 note
   const t13 = factsSheets.filter((s) => isTable13(s.sheetName)).map(ratesFromTable13);
   const explicitTax = median(t13.map((t) => t.taxRate).filter((v): v is number => v !== null));
@@ -334,7 +359,7 @@ export function extractFileFacts(sheets: ParsedSheet[], filename: string): Extra
         summaries.map((u) => ({ sheet: u.sheet, unit: u.unitName, ...u.items }))
       ),
       factType: "FILE_EXTRACTED",
-      note: `${summaries.length} 张单位工程汇总表真值（分部分项/措施/规费/税金/合计），供取费校验与对审`,
+      note: `${summaries.length} 张汇总表真值（分部分项/措施/规费/税金/合计），供取费校验与对审`,
     });
 
   for (const s of factsSheets) facts.push(...headerFields(s));

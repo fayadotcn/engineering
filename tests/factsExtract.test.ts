@@ -179,3 +179,85 @@ describe("extractFileFacts — 散文式口径行取数", () => {
     expect(byKey.has("税率")).toBe(false);
   });
 });
+
+describe("extractFileFacts — 通用键值汇总页兜底（口径与汇总/编制说明）", () => {
+  it("「标签|金额」键值行合成文件汇总事实，别名归一到表-04口径键", () => {
+    const sheets = [
+      factsSheet("口径与汇总", [
+        ["项目", "亿伟三期项目"],
+        ["清单行数", "204"],
+        ["分部分项合价(元)", "404676.52"],
+        ["措施项目费(元)", "2967.36"],
+        ["人工费调整(元)", "626369.64"],
+        ["税前工程造价(元)", "1034013.52"],
+        ["含税工程造价(元)", "1096054.33"],
+        ["计价口径", "地区=马来西亚；税率6%"],
+      ]),
+    ];
+    const facts = extractFileFacts(sheets, "询价清单.xlsx");
+    const sum = facts.find((f) => f.key === "文件汇总:询价清单.xlsx");
+    expect(sum).toBeTruthy();
+    const units = JSON.parse(sum!.value) as Record<string, unknown>[];
+    expect(units).toHaveLength(1);
+    expect(units[0]["分部分项工程费"]).toBe(404676.52);
+    expect(units[0]["措施项目费"]).toBe(2967.36);
+    expect(units[0]["人工费调整"]).toBe(626369.64);
+    expect(units[0]["税前造价"]).toBe(1034013.52);
+    expect(units[0]["合计"]).toBe(1096054.33);
+    expect(units[0].unit).toBe("口径与汇总");
+    // 散文费率照常提取，不与汇总行冲突
+    expect(facts.find((f) => f.key === "税率")?.value).toBe("6%");
+  });
+
+  it("费率/系数标签行不当金额行——规费费率不会变规费金额", () => {
+    const sheets = [
+      factsSheet("编制说明", [
+        ["规费费率", "18.75"],
+        ["税率", "9%"],
+        ["人工费调整系数", "3"],
+        ["分部分项合价(元)", "1000"],
+        ["含税工程造价(元)", "1200"],
+      ]),
+    ];
+    const facts = extractFileFacts(sheets, "a.xlsx");
+    const sum = facts.find((f) => f.key === "文件汇总:a.xlsx");
+    const units = JSON.parse(sum!.value) as Record<string, unknown>[];
+    expect(units[0]["规费"]).toBeUndefined();
+    expect(units[0]["税金"]).toBeUndefined();
+    expect(units[0]["人工费调整"]).toBeUndefined();
+    expect(units[0]["合计"]).toBe(1200);
+  });
+
+  it("表-04 已产出时键值页不叠加，防 compareDeclared 翻倍", () => {
+    const sheets = [
+      factsSheet("表-04 单位工程费汇总表", [
+        ["序号", "项目名称", "金额（元）"],
+        ["1", "分部分项工程费", "1000"],
+        ["2", "税金", "90"],
+        ["3", "合计", "1090"],
+      ]),
+      factsSheet("口径与汇总", [
+        ["分部分项合价(元)", "1000"],
+        ["含税工程造价(元)", "1090"],
+      ]),
+    ];
+    const sum = extractFileFacts(sheets, "a.xlsx").find((f) => f.key === "文件汇总:a.xlsx");
+    const units = JSON.parse(sum!.value) as Record<string, unknown>[];
+    expect(units).toHaveLength(1);
+    expect(units[0].unit).not.toBe("口径与汇总");
+    expect(units[0]["合计"]).toBe(1090);
+  });
+
+  it("两页重复同口径汇总 → 按值签名去重只留一条", () => {
+    const kv = [["分部分项合价(元)", "500"], ["含税工程造价(元)", "600"]];
+    const sheets = [factsSheet("汇总页", kv), factsSheet("说明页", kv)];
+    const sum = extractFileFacts(sheets, "a.xlsx").find((f) => f.key === "文件汇总:a.xlsx");
+    expect(JSON.parse(sum!.value)).toHaveLength(1);
+  });
+
+  it("孤行税金（无合计键）不合成汇总页", () => {
+    const sheets = [factsSheet("说明", [["税金", "3000"], ["备注", "含税"]])];
+    const facts = extractFileFacts(sheets, "a.xlsx");
+    expect(facts.find((f) => f.key.startsWith("文件汇总"))).toBeUndefined();
+  });
+});
