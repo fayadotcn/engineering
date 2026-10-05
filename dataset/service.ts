@@ -83,6 +83,25 @@ const quotaNote = (n: number) =>
     ? "定额子目已导入，匹配特征已从名称自动解析"
     : "未识别到定额表头（需要 定额编号/子目名称/人工费 等列）";
 
+/**
+ * 数据集 meta 合并写：入口处的 meta 只是快照，ingest/PATCH 并发时整写会
+ * 丢对方改动（同项目文件 PATCH /mapping 的读-改-写竞态口径）。
+ * 事务内重读最新 meta 再把本函数产出的字段合上去；data 是同次写入的标量字段。
+ */
+async function mergeDatasetMeta(
+  id: string,
+  mutate: (meta: DatasetMetaJson) => void,
+  data: Record<string, unknown> = {}
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const fresh = await tx.dataset.findUnique({ where: { id }, select: { meta: true } });
+    if (!fresh) return;
+    const meta = fromJson<DatasetMetaJson>(fresh.meta, {});
+    mutate(meta);
+    await tx.dataset.update({ where: { id }, data: { ...data, meta: toJson(meta) } });
+  });
+}
+
 export async function createDataset(
   kind: DatasetKind,
   filename: string,
@@ -103,18 +122,26 @@ export async function createDataset(
   const ext = filename.match(/\.[^.]+$/)?.[0] ?? "";
   const storageKey = await storage.put(buffer, ext || ".bin");
 
-  const ds = await prisma.dataset.create({
-    data: {
-      kind,
-      name: filename.replace(/\.(xlsx?|csv|pdf)$/i, ""),
-      filename,
-      storageKey,
-      sizeBytes: buffer.length,
-      contentHash,
-      // 材料价格库先 PENDING：识别列映射存 meta，确认（或高置信自动放行）后 ingest 导行
-      status: kind === "MATERIAL_PRICE" ? "PENDING" : "PARSED",
-    },
-  });
+  let ds;
+  try {
+    ds = await prisma.dataset.create({
+      data: {
+        kind,
+        name: filename.replace(/\.(xlsx?|csv|pdf)$/i, ""),
+        filename,
+        storageKey,
+        sizeBytes: buffer.length,
+        contentHash,
+        // 材料价格库先 PENDING：识别列映射存 meta，确认（或高置信自动放行）后 ingest 导行
+        status: kind === "MATERIAL_PRICE" ? "PENDING" : "PARSED",
+      },
+    });
+  } catch (e) {
+    // 建档失败的存储块是孤儿——不落库的数据集拿不到 storageKey 回收点
+    // （与项目文件上传 files/route.ts 同口径）
+    await storage.delete(storageKey).catch(() => {});
+    throw e;
+  }
 
   // 并发同内容上传：前置 dup 检查双方都可能落空 → 建档后复检。
   // 确定性输家=（createdAt, id）较大的那个，自己删档并回收存储块；
@@ -160,9 +187,10 @@ export async function createDataset(
         const certain = (s: { templateHit: boolean; userEdited: boolean; minConfidence: number; needsConfirm?: boolean }) =>
           !s.needsConfirm && (s.templateHit || s.userEdited || s.minConfidence >= 0.9);
         if (targets.every(certain)) {
-          await prisma.dataset.update({
-            where: { id: ds.id },
-            data: { meta: toJson(meta) },
+          await mergeDatasetMeta(ds.id, (m) => {
+            // 并发 PATCH 可能已写过映射——只在仍缺时落本文件的识别结果
+            if (!m.mapping) m.mapping = meta.mapping;
+            m.defaults = meta.defaults;
           });
           const r = await ingestDataset(ds.id);
           return r ?? { id: ds.id, rowCount: 0, status: "FAILED" };
@@ -174,10 +202,15 @@ export async function createDataset(
         meta.note =
           "未识别到询价表结构，请在列映射里确认表类型（综合单价表不会自动进价格库）";
       }
-      await prisma.dataset.update({
-        where: { id: ds.id },
-        data: { meta: toJson(meta), status: "PENDING" },
-      });
+      await mergeDatasetMeta(
+        ds.id,
+        (m) => {
+          if (!m.mapping) m.mapping = meta.mapping;
+          m.defaults = meta.defaults;
+          if (meta.note) m.note = meta.note;
+        },
+        { status: "PENDING" }
+      );
       return { id: ds.id, rowCount: 0, status: "PENDING" };
     }
 
@@ -201,19 +234,23 @@ export async function createDataset(
       rowCount = sheets.reduce((n, s) => n + s.rows.length, 0);
     }
 
-    await prisma.dataset.update({
-      where: { id: ds.id },
-      data: { rowCount, meta: toJson(meta), status: "PARSED" },
-    });
+    await mergeDatasetMeta(
+      ds.id,
+      (m) => {
+        if (meta.sheets) m.sheets = meta.sheets;
+        if (meta.note) m.note = meta.note;
+      },
+      { rowCount, status: "PARSED" }
+    );
     return { id: ds.id, rowCount, status: "PARSED" };
   } catch (e) {
-    await prisma.dataset.update({
-      where: { id: ds.id },
-      data: {
-        status: "FAILED",
-        meta: toJson({ error: e instanceof Error ? e.message : String(e) }),
+    await mergeDatasetMeta(
+      ds.id,
+      (m) => {
+        m.error = e instanceof Error ? e.message : String(e);
       },
-    });
+      { status: "FAILED" }
+    );
     return { id: ds.id, rowCount: 0, status: "FAILED" };
   }
 }
@@ -314,10 +351,16 @@ export async function ingestDataset(
         }
       } catch { /* 模板沉淀失败不阻断导入结果 */ }
 
-      await prisma.dataset.update({
-        where: { id },
-        data: { status: "PARSED", rowCount: rows.length, meta: toJson(meta) },
-      });
+      await mergeDatasetMeta(
+        id,
+        (m) => {
+          m.sheets = meta.sheets;
+          m.note = meta.note;
+          // ingest 完成即确认消解；PATCH 过的 sheet 本就 needsConfirm=false
+          if (m.mapping) for (const s of Object.values(m.mapping)) s.needsConfirm = false;
+        },
+        { status: "PARSED", rowCount: rows.length }
+      );
       return { id, rowCount: rows.length, status: "PARSED" };
     }
 
@@ -328,37 +371,36 @@ export async function ingestDataset(
         if (rows.length)
           await tx.quotaRow.createMany({ data: quotaRowsData(rows, id) });
       });
-      meta.note = quotaNote(rows.length);
-      await prisma.dataset.update({
-        where: { id },
-        data: { status: "PARSED", rowCount: rows.length, meta: toJson(meta) },
-      });
+      await mergeDatasetMeta(
+        id,
+        (m) => { m.note = quotaNote(rows.length); },
+        { status: "PARSED", rowCount: rows.length }
+      );
       return { id, rowCount: rows.length, status: "PARSED" };
     }
 
     // GENERIC：只刷新结构画像
     const sheets = parseWorkbook(buffer);
-    meta.sheets = sheets.map((s) => ({
-      name: s.sheetName,
-      type: s.type,
-      rows: s.rows.length,
-    }));
-    await prisma.dataset.update({
-      where: { id },
-      data: { meta: toJson(meta), status: "PARSED" },
-    });
+    await mergeDatasetMeta(
+      id,
+      (m) => {
+        m.sheets = sheets.map((s) => ({
+          name: s.sheetName,
+          type: s.type,
+          rows: s.rows.length,
+        }));
+      },
+      { status: "PARSED" }
+    );
     return { id, rowCount: ds.rowCount, status: "PARSED" };
   } catch (e) {
-    await prisma.dataset.update({
-      where: { id },
-      data: {
-        status: "FAILED",
-        meta: toJson({
-          ...meta,
-          error: e instanceof Error ? e.message : String(e),
-        }),
+    await mergeDatasetMeta(
+      id,
+      (m) => {
+        m.error = e instanceof Error ? e.message : String(e);
       },
-    });
+      { status: "FAILED" }
+    );
     return { id, rowCount: 0, status: "FAILED" };
   }
 }
@@ -370,11 +412,13 @@ export async function getDatasetMapping(id: string) {
   const meta = fromJson<DatasetMetaJson>(ds.meta, {});
   if (!meta.mapping) {
     const buffer = await storage.get(ds.storageKey);
-    meta.mapping = await inspectWithTemplates(buffer, ds.filename);
-    await prisma.dataset.update({
-      where: { id },
-      data: { meta: toJson(meta) },
+    const inspected = await inspectWithTemplates(buffer, ds.filename);
+    // 并发 PATCH 已在事务内自建映射时不能用本结果覆盖——只在仍缺时落库
+    await mergeDatasetMeta(id, (m) => {
+      if (!m.mapping) m.mapping = inspected;
     });
+    const fresh = await prisma.dataset.findUnique({ where: { id }, select: { meta: true } });
+    meta.mapping = fromJson<DatasetMetaJson>(fresh?.meta, {}).mapping ?? inspected;
   }
   return {
     id: ds.id,
