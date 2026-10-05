@@ -40,8 +40,17 @@ export async function ensureInspection(
       // 存储块可能已被清理（撤销删除等）——补算失败不能影响识别结果本身
       try {
         const buffer = await storage.get(file.storageKey);
-        meta.mapping = await withImportCounts(buffer, meta.mapping);
-        await prisma.projectFile.update({ where: { id: file.id }, data: { meta: toJson(meta) } });
+        const counted = await withImportCounts(buffer, meta.mapping);
+        // 合并写：补算期间用户可能已 PATCH 过列映射——只回填 itemsToImport，
+        // 不整写旧快照（R230 同口径，整写会丢并发人工改动）
+        await mergeFileMeta(file.id, (m) => {
+          if (!m.mapping) { m.mapping = counted; return; }
+          for (const s of Object.values(m.mapping)) {
+            const c = counted[s.sheetName];
+            if (c) s.itemsToImport = c.itemsToImport;
+          }
+        });
+        meta.mapping = counted;
       } catch { /* 保留旧识别结果 */ }
     }
     return { file, mapping: meta.mapping, isPdf: false };
@@ -51,10 +60,7 @@ export async function ensureInspection(
   // 只有项目文件需要「将导入 N 行」预报（数据集不做清单导入，14k 行定额表不必白算）
   const mapping = await withImportCounts(buffer, await inspectWithTemplates(buffer, file.filename));
   meta.mapping = mapping;
-  await prisma.projectFile.update({
-    where: { id: file.id },
-    data: { meta: toJson(meta) },
-  });
+  await mergeFileMeta(file.id, (m) => { Object.assign(m, meta); });
   return { file, mapping, isPdf: false };
 }
 
