@@ -106,6 +106,19 @@ describe("material.applyQuotation 询价写回", () => {
     const r = await call("material.applyQuotation");
     expect(r.receipts?.[0]?.actionType).toBe("MATERIAL_PRICE_FILL");
   });
+
+  it("无报价行（0 元：面议/暂估导入落 0）不写回——不能把真主材价清零", async () => {
+    const a = boq("电力电缆", "4x35");
+    a.mainMaterialPrice = "66"; // 已计真价
+    db.items = [a];
+    db.quotes = [quote("电力电缆", "4x35", "0")]; // 「面议」导入落 0
+    const { updateBoqItems } = await import("@boq/service");
+    vi.mocked(updateBoqItems).mockClear();
+    const r = await call("material.applyQuotation");
+    expect(r.observation.applied).toBe(0);
+    expect(r.observation.zeroPrice).toBe(1);
+    expect(vi.mocked(updateBoqItems)).not.toHaveBeenCalled();
+  });
 });
 
 describe("material.compareQuotation", () => {

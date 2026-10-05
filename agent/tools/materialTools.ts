@@ -5,6 +5,7 @@ import { listQuotations } from "@material/service";
 import { searchMaterialPrices, matchLibraryForItem, getPricePrefs } from "@dataset/service";
 import { periodKey } from "@dataset/priceParse";
 import { matchQuotations, specNorm } from "@cost-engine/match";
+import { D } from "@cost-engine/money";
 import { isPricableItem } from "@shared/types";
 import type { AnomalyRow, BoqItemDTO, DiffRow } from "@shared/types";
 
@@ -178,7 +179,8 @@ registerTool({
     let offBrand = 0;
     for (const it of unpriced) {
       const m = await matchLibraryForItem(it, prefs);
-      if (!m || m.score < 60) { misses.push(it); continue; }
+      // 0 元库行（无报价/占位行）不算命中——错价比缺价更糟，0 也是错价
+      if (!m || m.score < 60 || D(m.row.price).isZero()) { misses.push(it); continue; }
       if (m.notes?.some((n) => n.includes("非指定"))) offBrand++;
       rows.push({
         quotationItemId: `lib:${it.id}`,
@@ -232,7 +234,7 @@ registerTool({
     let offBrand = 0;
     for (const it of unpriced) {
       const m = await matchLibraryForItem(it, prefs);
-      if (!m || m.score < 60) { misses.push(it.name); continue; }
+      if (!m || m.score < 60 || D(m.row.price).isZero()) { misses.push(it.name); continue; }
       if (m.notes?.some((n) => n.includes("非指定"))) offBrand++;
       patches.push({ id: it.id, mainMaterialPrice: m.row.price, src: `${m.row.name} ${m.row.spec}（${m.row.source}）` });
     }
@@ -292,8 +294,12 @@ registerTool({
     // 同一清单项可能被多条命中询价覆盖——按候选集取置信度最高者，
     // 同分维持后到覆盖先到（询价列表按上传序，后到=更新的报价），并记多源冲突数
     const candidates = new Map<string, { price: string; conf: number }[]>();
+    let zeroPrice = 0;
     for (const r of rows) {
       if (r.status !== "MATCHED") continue;
+      // 「面议/暂估/—」等非数值报价导入时落 0——0 价若写回会把
+      // 已计的主材暂估价清零（真价被无报价抹掉），无报价行一律不写
+      if (D(r.price).isZero()) { zeroPrice++; continue; }
       for (const id of r.matchedBoqItemIds) {
         if (allowed && !allowed.has(id)) continue;
         const it = itemById.get(id);
@@ -312,8 +318,8 @@ registerTool({
     }
     if (!finalPatches.length)
       return {
-        observation: { applied: 0, unmatchedQuotes: rows.filter((r) => r.status !== "MATCHED").length },
-        message: "没有询价命中清单项，未写回任何主材暂估价",
+        observation: { applied: 0, unmatchedQuotes: rows.filter((r) => r.status !== "MATCHED").length, zeroPrice },
+        message: `没有询价命中清单项，未写回任何主材暂估价${zeroPrice ? `（${zeroPrice} 条命中行报价为 0 已跳过）` : ""}`,
       };
 
     const { before, after } = await updateBoqItems(ctx.projectId, finalPatches);
@@ -331,6 +337,7 @@ registerTool({
       observation: {
         applied: finalPatches.length,
         multiSource,
+        zeroPrice,
         skippedQuotes: skipped.map((s) => s.materialName),
       },
       views: [
@@ -353,6 +360,7 @@ registerTool({
       ],
       message: `已将询价写入 ${finalPatches.length} 个清单项的主材暂估价（组价输入，未动综合单价）` +
         (multiSource ? `；${multiSource} 项有多条命中询价，已取置信度最高者` : "") +
+        (zeroPrice ? `；${zeroPrice} 条无报价（0 元）询价未写回` : "") +
         `；${skipped.length} 条未匹配的询价已在匹配表中标出`,
     };
   },
