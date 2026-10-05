@@ -79,8 +79,9 @@ vi.mock("@file/storage", () => ({
   },
 }));
 
-import { createDataset, ingestDataset } from "../dataset/service";
+import { createDataset, ingestDataset, getMeasureFeeRates } from "../dataset/service";
 import { mergeFileMeta } from "../file/inspection";
+import { prisma } from "@database/client";
 
 const sheetMeta = {
   sheetName: "报价",
@@ -169,5 +170,14 @@ describe("mergeFileMeta 文件侧同口径", () => {
     expect(written.mapping["清单"].userEdited).toBe(true);
     expect(written.mapping["清单"].needsConfirm).toBe(false);
     expect(state.writtenData.kind).toBe("BOQ");
+  });
+});
+
+describe("getMeasureFeeRates 多库启用", () => {
+  it("多份启用的系数库按最新建档取——无序 findFirst 的结果是 SQLite 内部序，不可复现", async () => {
+    await getMeasureFeeRates();
+    expect(vi.mocked(prisma.dataset.findFirst).mock.lastCall?.[0]).toMatchObject({
+      orderBy: { createdAt: "desc" },
+    });
   });
 });

@@ -765,6 +765,9 @@ export async function setDatasetActive(id: string, active: boolean) {
 export async function getMeasureFeeRates() {
   const ds = await prisma.dataset.findFirst({
     where: { active: true, meta: { contains: '"MEASURE_FEE"' } },
+    // 多份启用的系数库（上传新版忘停旧版）取最新——无 orderBy 的 findFirst
+    // 返回 SQLite 内部序，同库不同建连可能拿到不同版本，计取结果不可复现
+    orderBy: { createdAt: "desc" },
   });
   if (!ds) return [];
   try {
