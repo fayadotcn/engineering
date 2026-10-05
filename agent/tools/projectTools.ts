@@ -9,7 +9,7 @@ import { FILE_KIND_LABEL, type FileKind } from "@shared/types";
 import { storage } from "@file/storage";
 import { parseWorkbook } from "@file/excel";
 import { classifyFile } from "@file/classify";
-import { ensureInspection, mappingToView, toSheetMappings, SHEET_TYPE_LABEL } from "@file/inspection";
+import { ensureInspection, mappingToView, mergeFileMeta, toSheetMappings, SHEET_TYPE_LABEL } from "@file/inspection";
 import { COLUMN_ROLE_LABEL, type ColumnRole } from "@shared/types";
 import { colLetter } from "@file/excel";
 import { importBoqFromSheets, deleteByFile } from "@boq/service";
@@ -244,14 +244,12 @@ registerTool({
     const certain = (s: { templateHit: boolean; userEdited: boolean; minConfidence: number; needsConfirm?: boolean }) =>
       !s.needsConfirm && (s.templateHit || s.userEdited || s.minConfidence >= 0.9);
     if (targets.every(certain)) return null;
-    // 低置信 sheet 标记待确认，用户可在「列映射」视图里修正后再批准
-    const meta = fromJson<{ mapping?: Record<string, { needsConfirm?: boolean }> }>(file.meta, {});
-    for (const s of targets)
-      if (!certain(s) && meta.mapping?.[s.sheetName])
-        meta.mapping[s.sheetName].needsConfirm = true;
-    await prisma.projectFile.update({
-      where: { id: file.id },
-      data: { meta: JSON.stringify(meta) },
+    // 低置信 sheet 标记待确认，用户可在「列映射」视图里修正后再批准。
+    // 合并写：入口 meta 是快照，并发 PATCH 的列改动不能被整写覆盖
+    const uncertain = targets.filter((s) => !certain(s)).map((s) => s.sheetName);
+    await mergeFileMeta(file.id, (meta) => {
+      for (const name of uncertain)
+        if (meta.mapping?.[name]) meta.mapping[name].needsConfirm = true;
     });
     const parts = targets
       .filter((s) => !certain(s))
@@ -401,29 +399,32 @@ registerTool({
       }
     } catch { /* 模板沉淀失败不阻断导入 */ }
 
-    const meta = {
-      sheets:
-        sheets?.map((s) => ({
-          name: s.sheetName,
-          type: s.type,
-          headerRow: s.headerRow + 1,
-          rows: s.rows.length,
-          columns: Object.entries(s.columns)
-            .filter(([, v]) => v !== undefined)
-            .map(([k, v]) => `${k}:${(v as number) + 1}`),
-        })) ?? [],
-      pages: pdfPages ?? undefined,
-      classifyConfidence: confidence,
-      ...(mapping ? { mapping } : {}),
-    };
-    await prisma.projectFile.update({
-      where: { id: file.id },
-      data: {
-        kind,
-        status: sheets || pdfPages ? "PARSED" : "FAILED",
-        meta: JSON.stringify(meta),
+    const metaSheets =
+      sheets?.map((s) => ({
+        name: s.sheetName,
+        type: s.type,
+        headerRow: s.headerRow + 1,
+        rows: s.rows.length,
+        columns: Object.entries(s.columns)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => `${k}:${(v as number) + 1}`),
+      })) ?? [];
+    // 合并写：确认门开着时用户可能已 PATCH 过列映射——整写会丢人工改动；
+    // fresh mapping 存在就保留它（重导按用户口径），只清已消费 sheet 的确认标记
+    await mergeFileMeta(
+      file.id,
+      (m) => {
+        m.sheets = metaSheets;
+        if (pdfPages) m.pages = pdfPages;
+        m.classifyConfidence = confidence;
+        if (mapping) {
+          if (m.mapping) for (const s of Object.values(m.mapping)) s.needsConfirm = false;
+          else m.mapping = mapping;
+        }
       },
-    });
+      { kind, status: sheets || pdfPages ? "PARSED" : "FAILED" }
+    );
+    const meta = { sheets: metaSheets };
 
     // fact extraction — FILE_EXTRACTED, never INFERRED masquerading
     // 重导幂等：清掉本文件上一轮提取的事实再重抽

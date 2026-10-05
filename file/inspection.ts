@@ -244,6 +244,25 @@ export function applySheetPatch(
   sheet.minConfidence = confs.length ? Math.min(...confs) : 0;
 }
 
+/**
+ * 文件 meta 合并写：入口读的 meta 只是快照，ingest/确认门执行期间并发的
+ * mapping PATCH 若被整写覆盖会静默丢人工改动（与数据集 mergeDatasetMeta 同口径）。
+ * 事务内重读最新 meta 再打补丁；data 是同次写入的标量字段。
+ */
+export async function mergeFileMeta(
+  fileId: string,
+  mutate: (meta: FileMetaJson) => void,
+  data: Record<string, unknown> = {}
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const fresh = await tx.projectFile.findUnique({ where: { id: fileId }, select: { meta: true } });
+    if (!fresh) return;
+    const meta = fromJson<FileMetaJson>(fresh.meta, {});
+    mutate(meta);
+    await tx.projectFile.update({ where: { id: fileId }, data: { ...data, meta: toJson(meta) } });
+  });
+}
+
 export function mappingToView(
   file: ProjectFile,
   mapping: Record<string, SheetMeta>

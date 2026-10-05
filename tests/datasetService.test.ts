@@ -45,6 +45,16 @@ vi.mock("@database/client", () => {
   };
   const prisma = {
     dataset,
+    projectFile: {
+      findUnique: vi.fn(async (args: { select?: { meta?: boolean } }) =>
+        args?.select?.meta ? { meta: state.mergeMeta } : null
+      ),
+      update: vi.fn(async (args: { data: { meta?: string } & Record<string, unknown> }) => {
+        state.writtenMeta = args.data.meta ?? "";
+        state.writtenData = args.data;
+        return {};
+      }),
+    },
     materialPrice: {
       deleteMany: vi.fn(async () => ({})),
       createMany: vi.fn(async () => ({ count: 1 })),
@@ -70,6 +80,7 @@ vi.mock("@file/storage", () => ({
 }));
 
 import { createDataset, ingestDataset } from "../dataset/service";
+import { mergeFileMeta } from "../file/inspection";
 
 const sheetMeta = {
   sheetName: "报价",
@@ -141,5 +152,22 @@ describe("ingestDataset meta 合并写", () => {
     // ingest 自己的产出也合上去了
     expect(written.sheets).toBeDefined();
     expect(state.writtenData.status).toBe("PARSED");
+  });
+});
+
+describe("mergeFileMeta 文件侧同口径", () => {
+  it("在事务内 fresh meta 上打补丁，不丢并发改动", async () => {
+    state.mergeMeta = JSON.stringify({
+      mapping: { 清单: { needsConfirm: true, userEdited: true } },
+      note: "并发写入",
+    });
+    await mergeFileMeta("f1", (m) => {
+      if (m.mapping?.["清单"]) m.mapping["清单"].needsConfirm = false;
+    }, { kind: "BOQ", status: "PARSED" });
+    const written = JSON.parse(state.writtenMeta);
+    expect(written.note).toBe("并发写入");
+    expect(written.mapping["清单"].userEdited).toBe(true);
+    expect(written.mapping["清单"].needsConfirm).toBe(false);
+    expect(state.writtenData.kind).toBe("BOQ");
   });
 });
