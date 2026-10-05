@@ -105,7 +105,7 @@ export async function DELETE(
       data: {
         projectId: item.projectId,
         actionType: "USER_EDIT",
-        summary: `用户在工作区删除清单行「${item.name}」（${item.sheetName} 第 ${item.rowIndex + 1} 行）`,
+        summary: `用户在工作区删除清单行「${item.name}」（${item.rowIndex >= 1 ? `${item.sheetName} 第 ${item.rowIndex} 行` : item.sheetName}）`,
         before: toJson([item]),
         after: toJson([]),
         createdBy: "user",

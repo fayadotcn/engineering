@@ -4,11 +4,11 @@ import { buildExportWorkbook, writeBackPrices } from "@file/excel";
 import type { BoqItemDTO } from "@shared/types";
 import { getTool, type ToolContext } from "@agent/tools/registry";
 
-const mocks = vi.hoisted(() => ({ files: vi.fn(), file: vi.fn(), items: vi.fn(), put: vi.fn(), artifact: vi.fn(), inspect: vi.fn(), feeParams: vi.fn() }));
+const mocks = vi.hoisted(() => ({ files: vi.fn(), file: vi.fn(), items: vi.fn(), put: vi.fn(), get: vi.fn(), artifact: vi.fn(), inspect: vi.fn(), feeParams: vi.fn() }));
 vi.mock("@database/client", () => ({ prisma: { projectFile: { findMany: mocks.files, findUnique: mocks.file }, artifact: { create: mocks.artifact } } }));
 vi.mock("@boq/service", () => ({ listBoq: mocks.items }));
 vi.mock("@project/facts", () => ({ loadFeeParams: mocks.feeParams }));
-vi.mock("@file/storage", () => ({ storage: { put: mocks.put } }));
+vi.mock("@file/storage", () => ({ storage: { put: mocks.put, get: mocks.get } }));
 vi.mock("@file/inspection", () => ({ ensureInspection: mocks.inspect, mappingToView: vi.fn() }));
 import "@agent/tools/excelTools";
 
@@ -124,5 +124,53 @@ describe("可追溯的清单导出", () => {
     ], { 安装: { quantity: 1, unitPrice: 2, totalPrice: 3 } }));
     expect(wb.worksheets[0].getCell("C2").value).toBe(12.5);
     expect(wb.worksheets[0].getCell("D2").value).toBe(25);
+  });
+
+  it("写回不覆盖源表「详见…」注解格，总额计价行只写合价", async () => {
+    const book = new ExcelJS.Workbook();
+    const ws = book.addWorksheet("措施");
+    ws.addRow(["项目名称", "费率%", "合价", "工程量"]);
+    ws.addRow(["安全文明施工费", 0.05, "详见本标准表 E.4.2", "项"]); // row 2：注解+费率+单位原文
+    ws.addRow(["夜间施工增加费", 0.02, 800, "项"]);               // row 3：真金额
+    mocks.get.mockResolvedValue(Buffer.from(await book.xlsx.writeBuffer()));
+    mocks.file.mockResolvedValue({
+      id: "f1", projectId: "p1", filename: "清单.xlsx", storageKey: "k1",
+      meta: JSON.stringify({ mapping: { 措施: { columns: { unitPrice: 1, totalPrice: 2, quantity: 3 } } } }),
+    });
+    mocks.items.mockResolvedValue([
+      // 金额格是注解 → 导入落 0 且 __nonNumeric 留痕；写 0 会抹掉「详见」原文
+      item({ id: "fee", sheetName: "措施", rowIndex: 2, feeType: "总价措施", name: "安全文明施工费",
+             quantity: "0", unitPrice: "0", totalPrice: "0", rawCells: { __nonNumeric: ["totalPrice"] } }),
+      item({ id: "night", sheetName: "措施", rowIndex: 3, feeType: "总价措施", name: "夜间施工增加费",
+             quantity: "0", unitPrice: "0", totalPrice: "950" }),
+    ]);
+    const result = await getTool("excel.write")!.handler!(ctx, { fileId: "f1" });
+    expect(result.observation).toMatchObject({ writtenRows: 1, skippedAnnotated: 1 });
+    const w = (await load(mocks.put.mock.calls[0][0])).getWorksheet("措施")!;
+    expect(w.getCell("B2").value).toBe(0.05);                     // 费率格不被结构 0 覆盖
+    expect(w.getCell("C2").value).toBe("详见本标准表 E.4.2");     // 注解原文保留
+    expect(w.getCell("D2").value).toBe("项");                     // 量列原文保留
+    expect(w.getCell("C3").value).toBe(950);                      // 真合价照常写回
+    expect(w.getCell("B3").value).toBe(0.02);                     // 另一行费率同样不动
+  });
+
+  it("可计价行源格是非数值注解且量仍为 0 时跳过该格", async () => {
+    const book = new ExcelJS.Workbook();
+    const ws = book.addWorksheet("清单");
+    ws.addRow(["名称", "工程量", "综合单价", "合价"]);
+    ws.addRow(["临时设施", "按图计算", "", ""]); // row 2：量格是注解
+    mocks.get.mockResolvedValue(Buffer.from(await book.xlsx.writeBuffer()));
+    mocks.file.mockResolvedValue({
+      id: "f1", projectId: "p1", filename: "清单.xlsx", storageKey: "k1",
+      meta: JSON.stringify({ mapping: { 清单: { columns: { quantity: 1, unitPrice: 2, totalPrice: 3 } } } }),
+    });
+    mocks.items.mockResolvedValue([
+      item({ sheetName: "清单", rowIndex: 2, quantity: "0", unitPrice: "60",
+             totalPrice: "0", rawCells: { __nonNumeric: ["quantity"] } }),
+    ]);
+    await getTool("excel.write")!.handler!(ctx, { fileId: "f1" });
+    const w = (await load(mocks.put.mock.calls[0][0])).getWorksheet("清单")!;
+    expect(w.getCell("B2").value).toBe("按图计算"); // 量注解保留
+    expect(w.getCell("C2").value).toBe(60);        // 单价正常写回
   });
 });

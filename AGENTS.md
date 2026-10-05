@@ -118,5 +118,7 @@ MODEL_NAME=deepseek-chat
   原值≠新值的单元格记批注（原值→新值+计算式），可审计可复算。复制/补录行
   `rowIndex=-1` 无源表坐标——写回时跳过并在结果里报数（`skippedNoAnchor`）；
   `writeBackPrices` 对非法行号同样跳过（getRow(≤0) 会抛 Invalid Address 中止整本写回）。
+  源格是「详见…」式注解（`__nonNumeric` 留痕）且当前值仍为 0 → 跳过该格不写 0
+  （`skippedAnnotated`）；总价措施/其他项目行量与单价结构上不可编辑，写回只写合价。
 - **撤销口径**：回执 before/after 全字段快照；删除重建时源文件已删则 fileId 置空并注明。
   撤销冲突检测「只还原受影响字段」——行被后续改过会 409 拒撤。

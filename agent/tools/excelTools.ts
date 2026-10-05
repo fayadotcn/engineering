@@ -111,25 +111,40 @@ registerTool({
     for (const [name, s] of Object.entries(meta.mapping ?? {}))
       if (s.columns && Object.keys(s.columns).length) colMaps[name] = { ...s.columns };
     // 未定价行不写价字段——把 0 写进源表空价单元格 = 把「未报价」落成「报价 0」，
-    // 与导出留白同口径；工程量/计算式照常写回
+    // 与导出留白同口径；工程量/计算式照常写回。
+    // 总额计价行（总价措施/其他项目）量与单价在结构上不可编辑（恒为导入值），
+    // 写回只会覆盖源表费率格/「项」原文——只写合价。
+    // 源格是非数值注解（「详见本标准表 E.4.x」导入落 0 + __nonNumeric 留痕）且
+    // 当前仍为 0 时跳过该格：写 0 会抹掉源表原注解。
     let skippedUnpriced = 0;
+    let skippedAnnotated = 0;
     const patches: CellPatch[] = mine.map((i) => {
+      const lumpSum = i.feeType === "总价措施" || i.feeType === "其他项目";
+      const nonNum = new Set(
+        Array.isArray(i.rawCells?.__nonNumeric) ? (i.rawCells!.__nonNumeric as unknown[]).filter((x): x is string => typeof x === "string") : []
+      );
+      const clobber = (role: string, v: string) => nonNum.has(role) && D(v).isZero();
       const unpriced = isPricableItem(i) && D(i.unitPrice).isZero();
       if (unpriced) skippedUnpriced++;
+      if (!lumpSum && !unpriced && clobber("unitPrice", i.unitPrice)) skippedAnnotated++;
+      if (!lumpSum && clobber("quantity", i.quantity)) skippedAnnotated++;
+      if (!unpriced && clobber("totalPrice", i.totalPrice)) skippedAnnotated++;
+      const quantity = lumpSum || clobber("quantity", i.quantity) ? undefined : i.quantity;
       return {
         sheetName: i.sheetName,
         rowIndex: i.rowIndex,
-        unitPrice: unpriced ? undefined : i.unitPrice,
-        quantity: i.quantity,
-        quantityExpr: i.quantityExpr || undefined,
-        totalPrice: unpriced ? undefined : i.totalPrice,
+        unitPrice: lumpSum || unpriced || clobber("unitPrice", i.unitPrice) ? undefined : i.unitPrice,
+        quantity,
+        quantityExpr: quantity !== undefined ? i.quantityExpr || undefined : undefined,
+        totalPrice: unpriced || clobber("totalPrice", i.totalPrice) ? undefined : i.totalPrice,
       };
     });
+    const writtenRows = patches.filter((p) => p.unitPrice !== undefined || p.quantity !== undefined || p.totalPrice !== undefined).length;
     const original = await storage.get(file.storageKey);
     const out = await writeBackPrices(original, patches, colMaps);
     const artifact = await saveArtifact(ctx, out, `${file.filename.replace(/\.xlsx?$/i, "")}_已更新.xlsx`);
     return {
-      observation: { artifactId: artifact.id, writtenRows: patches.length, skippedUnpriced, skippedNoAnchor: noAnchor },
+      observation: { artifactId: artifact.id, writtenRows, skippedUnpriced, skippedNoAnchor: noAnchor, skippedAnnotated },
       views: [
         {
           kind: "exportResult",
@@ -137,13 +152,13 @@ registerTool({
           title: "已写回源文件",
           artifactId: artifact.id,
           filename: artifact.label,
-          summary: `已将 ${patches.length} 行单价/工程量/合价写回「${file.filename}」${outside ? `；另有 ${outside} 行来自其他文件或手工补录，不在该源文件内` : ""}${noAnchor ? `；${noAnchor} 行无源表坐标（复制/补录行）未写回` : ""}${skippedUnpriced ? `；${skippedUnpriced} 行未定价，价字段留白` : ""}`,
+          summary: `已将 ${writtenRows} 行单价/工程量/合价写回「${file.filename}」${outside ? `；另有 ${outside} 行来自其他文件或手工补录，不在该源文件内` : ""}${noAnchor ? `；${noAnchor} 行无源表坐标（复制/补录行）未写回` : ""}${skippedUnpriced ? `；${skippedUnpriced} 行未定价，价字段留白` : ""}${skippedAnnotated ? `；${skippedAnnotated} 个源表注解格（详见类说明）保留原样` : ""}`,
         },
       ],
       receipts: [
         {
           actionType: "EXPORT",
-          summary: `写回源文件：${file.filename}（${patches.length} 行）`,
+          summary: `写回源文件：${file.filename}（${writtenRows} 行）`,
           before: {},
           after: { artifactId: artifact.id, label: artifact.label },
           reversible: false,
@@ -152,7 +167,8 @@ registerTool({
       message: `已把最新价格写回源文件，生成「${artifact.label}」` +
         (outside ? `；另有 ${outside} 行（手工补录/其他源文件）不在该文件内，请用「导出清单」取全量` : "") +
         (noAnchor ? `；${noAnchor} 行复制/补录行无源表坐标未写回` : "") +
-        (skippedUnpriced ? `；${skippedUnpriced} 行未定价，价单元格留白未动` : ""),
+        (skippedUnpriced ? `；${skippedUnpriced} 行未定价，价单元格留白未动` : "") +
+        (skippedAnnotated ? `；${skippedAnnotated} 个「详见…」式源表注解格保留原文未写 0` : ""),
     };
   },
 });
