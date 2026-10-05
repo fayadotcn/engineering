@@ -114,12 +114,14 @@ export async function loadSummaryPayload(id: string) {
 
 // Conversation history: reconstruct blocks from persisted runs + events.
 export async function loadRunsPayload(id: string) {
-  // 服务重启后残留的 RUNNING/AWAITING_CONFIRM 永远不会结束（确认门 resolver 已丢，
-  // 确认门超时 10 分钟，15 分钟一定是死的）——懒清理为 FAILED
+  // 服务重启后残留的活 run 永远不会结束——懒清理为 FAILED。
+  // 口径与 liveRunWhere 互补：AWAITING_CONFIRM 不算僵尸——本进程内它必配对
+  // 活 resolver（确认门 10 分钟超时收口），按 createdAt 判死会杀掉仍待确认的 run；
+  // 进程重启由 startRun 前的 markZombieRunsFailed 全量清尾兜底。
   await prisma.agentRun.updateMany({
     where: {
       projectId: id,
-      status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
+      status: "RUNNING",
       createdAt: { lt: new Date(Date.now() - 15 * 60 * 1000) },
     },
     data: {
