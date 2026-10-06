@@ -1,12 +1,12 @@
 // 一次性导入：四川2020 安装措施费系数 → Dataset(meta JSON)
-// 数据源 DE_SC20.DB3:
-//   ps_fy  措施费项目字典：fyid → fymc 名称(含分册) + jsgs 计算基数公式
+// 数据源 DE_SC21.DB3（真2020清单定额；SC20=四川2000定额，历史误标）:
+//   ps_fy  措施费项目字典：fyid → fymc 名称(尾部带册码「… CK」「…(CA)」) + jsgs 计算基数公式
 //   ps_fl  费率档：fyid → 档位(檐口高度/操作物高度分档或平费率) + fl费率% + rg/cl/jx 人材机占比%
 // 用法: npx tsx scripts/import-sc2020-measurefee.ts
 import { DatabaseSync } from "node:sqlite";
 import { prisma } from "@database/client";
 
-const DE_DB = "C:/Program Files/清单计价专家N10/DATABASE/DE_SC20.DB3";
+const DE_DB = "C:/Program Files/清单计价专家N10/DATABASE/DE_SC21.DB3";
 
 interface PsFy { fyid: number; fymc: string; jsgs: string | null }
 interface PsFl { fyid: number; flmc: string; fl: number | null; rg: number | null; cl: number | null; jx: number | null }
@@ -20,7 +20,8 @@ const categoryOf = (name: string): string => {
   return "其他措施费";
 };
 const bookOf = (name: string): string => {
-  const m = name.match(/\((5[A-Z])分部/);
+  // SC21 fymc 尾部带册码：「脚手架搭拆费 CK」「脚手架搭拆费(起重设备安装… CA)」「建筑物超高增加费(CD)」
+  const m = name.match(/[（(][^（）()]*?([A-Z]{2})\s*[）)]\s*$/) ?? name.match(/\s([A-Z]{2})\s*$/);
   return m ? m[1] : "通用";
 };
 
@@ -56,8 +57,8 @@ async function main() {
     update: { meta: JSON.stringify({ type: "MEASURE_FEE", fees }), rowCount: fees.length },
     create: {
       id: "sc2020-measure-fee",
-      kind: "GENERIC", name: "四川2020措施费系数", filename: "DE_SC20.ps_fy+ps_fl",
-      storageKey: "n10/DE_SC20", rowCount: fees.length,
+      kind: "GENERIC", name: "四川2020措施费系数", filename: "DE_SC21.ps_fy+ps_fl",
+      storageKey: "n10/DE_SC21", rowCount: fees.length,
       meta: JSON.stringify({ type: "MEASURE_FEE", fees }),
     },
   });

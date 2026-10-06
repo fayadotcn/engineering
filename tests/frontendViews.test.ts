@@ -10,7 +10,7 @@ vi.mock("../src/ui/primitives", () => ({
 const state = vi.hoisted(() => ({
   items: [] as BoqItemDTO[], files: [] as { id: string; filename: string; status: string; kindLabel: string }[],
   blocks: [] as unknown[], views: [] as WorkspaceView[], closedViewIds: [] as string[], facts: [], receipts: [],
-  boqQuery: "", boqOnlyUnpriced: false, running: false, agentRunning: false, importRunning: false, saving: false,
+  boqQuery: "", boqOnlyUnpriced: false, running: false, agentRunning: false, importRunning: false, saving: false, viewOpen: false,
   projectId: "project", patchItem: vi.fn(), setBoqQuery: vi.fn(), setActiveView: vi.fn(), replaceView: vi.fn(), init: vi.fn(),
   summary: { itemCount: 0, pricedCount: 0, pricableCount: 0, disciplines: [] as { key: string; label: string; amount: string; share: number; count: number }[], missingSettings: [] as string[], fees: { unpricedCount: 0, preTax: "0", grandTotal: "0", rows: [] as { seq: string; name: string; basis: string; rate: string | null; amount: string; level: "leaf" | "subtotal" | "total"; note?: string }[] } },
   ready: true, projectName: "工程", activeViewId: "view:boq", pendingViewId: null,
@@ -24,6 +24,7 @@ import { PriceRowsPanel } from "../src/ui/admin/PriceRowsPanel";
 import { ColumnMappingView } from "../src/ui/views/ColumnMappingView";
 import { DatasetManager } from "../src/ui/admin/DatasetManager";
 import { Workbench } from "../src/ui/Workbench";
+import { ResultsPanel } from "../src/ui/shell/ResultsPanel";
 
 /** 复刻 layout.tsx 的根环境：应用里所有视图都在 TooltipProvider 之内。 */
 const render = (el: React.ReactElement) => renderToStaticMarkup(React.createElement(TooltipProvider, null, el));
@@ -40,13 +41,14 @@ beforeEach(() => {
   state.items = []; state.files = []; state.blocks = []; state.views = []; state.closedViewIds = [];
   state.boqQuery = ""; state.boqOnlyUnpriced = false; state.importRunning = false;
   state.summary.itemCount = 0; state.summary.missingSettings = []; state.summary.fees.unpricedCount = 0;
-  state.activeViewId = "view:boq";
+  state.activeViewId = "view:boq"; state.viewOpen = false;
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("工作区五个分区；成果按类只列最新一份，可直接切换", () => {
+it("工作区五个分区入口在顶栏；成果按类只列最新一份，可直接切换", () => {
   state.items = [item];
   state.activeViewId = "quota";
+  state.viewOpen = true;
   state.views = [
     { kind: "boqTable", id: "view:boq", title: "工程清单" },
     { kind: "quotationMatch", id: "match", title: "材料匹配", rows: [], unmatched: [] },
@@ -54,15 +56,20 @@ it("工作区五个分区；成果按类只列最新一份，可直接切换", (
     { kind: "quotaResult", id: "quota", title: "测算结果", rows: [], mgmtRate: 0, profitRate: 0 },
   ];
   const html = render(React.createElement(Workbench, { projectId: "project" }));
-  const nav = html.match(/<nav class="wb-nav"[\s\S]*?<\/nav>/)![0];
+  const nav = html.match(/<nav class="wb-views[^"]*"[\s\S]*?<\/nav>/)![0];
   expect(nav.match(/<button/g)).toHaveLength(5);
   for (const label of ["概况", "清单", "资料", "成果", "设置"]) expect(nav).toContain(label);
-  expect(nav).toMatch(/aria-current="page" class="active">[\s\S]*?成果/);
-  const list = html.match(/<nav class="results-list"[\s\S]*?<\/nav>/)![0];
+  const current = nav.match(/<button[^>]*aria-current="page"[^>]*>[\s\S]*?<\/button>/)![0];
+  expect(current).toContain("成果");
+  expect(current).toMatch(/class="[^"]*\bactive\b/);
+  // 成果列表在视图浮层（Radix Dialog portal）里，服务端渲染不产内容，直接渲染面板验证
+  const panel = render(React.createElement(ResultsPanel, { projectId: "project", onUpload: () => {} }));
+  const list = panel.match(/<nav class="results-list"[\s\S]*?<\/nav>/)![0];
   expect(list.match(/aria-label="移除测算结果"/g)).toHaveLength(1);
   expect(list).toContain("材料匹配");
-  expect(html).toContain("重新生成");
-  expect(html).not.toContain("较早生成的快照");
+  expect(list).toContain(">测算结果</span>");
+  expect(panel).toContain("重新生成");
+  expect(panel).not.toContain("较早生成的快照");
 });
 
 it("清单页的待导入提示引导核对，不直接批准看不到的映射", () => {
@@ -82,6 +89,14 @@ it("资料只有文档时，总览引导补清单，不显示可直接生成成�
   const html = render(React.createElement(CostOverview));
   expect(html).toContain("还需要导入工程清单");
   expect(html).not.toContain("生成费用汇总");
+});
+
+it("列映射属于导入流程，不把报价成果标成已完成", () => {
+  state.views = [{ kind: "columnMapping", id: "view:mapping:f1", title: "列映射", fileId: "f1", fileStatus: "PENDING", filename: "待核对.xlsx", sheets: [] }];
+  const html = render(React.createElement(CostOverview));
+  expect(html).toContain('报价成果<span class="sr-only">待完成</span>');
+  state.views.push({ kind: "exportResult", id: "export:1", title: "报价文件", artifactId: "artifact", filename: "报价.xlsx", summary: "已导出" });
+  expect(render(React.createElement(CostOverview))).toContain('报价成果<span class="sr-only">已完成</span>');
 });
 
 it("搜索无结果时保留筛选提示和清除入口", () => {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
-import { ActiveRunError, startRun } from "@agent/runtime";
+import { ActiveRunError } from "@agent/runs";
+import { startRun } from "@agent/runtime";
 
 export async function POST(
   req: Request,

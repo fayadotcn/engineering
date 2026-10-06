@@ -1,12 +1,14 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../../store";
 import type { BoqItemDTO, WorkspaceView } from "@shared/types";
 import { DISCIPLINE_LABEL, isPricableItem, type Discipline } from "@shared/types";
 import { ChevronDown, Download, FileSpreadsheet, Funnel, Plus, X } from "lucide-react";
-import { ConfirmDialog, EmptyState, toast } from "../../primitives";
+import { ConfirmDialog, toast } from "../../primitives";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -491,8 +493,8 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
   };
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <div className="cost-table-toolbar flex flex-wrap items-center gap-2 border-b border-border bg-[var(--muted)] px-3 py-1.5">
+    <div className="boq-grid flex flex-1 min-h-0 flex-col">
+      <div className="cost-table-toolbar flex flex-wrap items-center gap-2">
         <Funnel size={12} className="shrink-0 text-muted-foreground" />
         <Input
           ref={searchRef}
@@ -502,7 +504,7 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
           onKeyDown={(e) => { if (e.key === "Escape" && query) { e.stopPropagation(); setBoqQuery(""); } }}
           placeholder="查找清单项目（/）"
           aria-label="搜索工程清单"
-          className="w-56 h-8"
+          className="w-56"
         />
         <Button variant="outline" size="sm" aria-pressed={!!boqOnlyUnpriced} className="aria-pressed:bg-secondary" disabled={!!editing || saving} onClick={() => { useStore.setState({ boqOnlyUnpriced: !boqOnlyUnpriced }); setLimit(300); }}>只看未报价{unpriced ? `（${unpriced}）` : ""}</Button>
         <details className="cost-simple-more"><summary>更多筛选</summary><div className="cost-more-body">
@@ -526,18 +528,27 @@ export function BoqTable({ view }: { view?: Extract<WorkspaceView, { kind: "boqT
             <X size={11} /> 清除筛选
           </Button>
         )}
-        <Button variant="outline" size="sm" disabled={!!editing || saving || running || agentRunning || importRunning} onClick={openAdd} title="清单里漏掉的项目可以手工补一行，会记入操作记录"><Plus size={13} />补一行</Button>
-        <Button variant="outline" size="sm" asChild
-          className={cn((!dataTotal || saving || running || agentRunning || importRunning) && "pointer-events-none opacity-40")}
-        >
-          <a
-            href={projectId ? `/api/projects/${projectId}/export` : undefined}
-            download
-            title="把当前清单直接下载为 Excel（含计算式与来源，不经过助手）"
-          >
-            <Download size={12} />导出
-          </a>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="sm" disabled={!!editing || saving || running || agentRunning || importRunning} onClick={openAdd}><Plus size={13} />补一行</Button>
+          </TooltipTrigger>
+          <TooltipContent>清单里漏掉的项目可以手工补一行，会记入操作记录</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="sm" asChild
+              className={cn((!dataTotal || saving || running || agentRunning || importRunning) && "pointer-events-none opacity-40")}
+            >
+              <a
+                href={projectId ? `/api/projects/${projectId}/export` : undefined}
+                download
+              >
+                <Download size={12} />导出
+              </a>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>把当前清单直接下载为 Excel（含计算式与来源，不经过助手）</TooltipContent>
+        </Tooltip>
         <span className="ml-auto text-2xs text-muted-foreground">
           {dataShown === dataTotal
             ? `${dataTotal} 行`

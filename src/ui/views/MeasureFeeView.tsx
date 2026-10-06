@@ -9,7 +9,7 @@ import { fmtMoney } from "./shared";
 
 export function MeasureFeeView({ view }: { view: Extract<WorkspaceView, { kind: "measureFee" }> }) {
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <div className="mb-3 text-xs text-muted-foreground">
         基数为定额测算的分册定额人工费；费率档按檐口/操作物高度自动选档。计取结果已写入台账「系数措施费」，费用汇总表自动采用。
       </div>

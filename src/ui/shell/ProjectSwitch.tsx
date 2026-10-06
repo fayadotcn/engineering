@@ -10,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useStore } from "../store";
 
 export type ProjectEntry = { id: string; name: string };
@@ -31,8 +33,8 @@ export function ProjectSwitch({ projects }: { projects: ProjectEntry[] }) {
     return (
       <span className="wb-switch">
         <span className="wb-avatar" aria-hidden="true">{initialOf(s.projectName)}</span>
-        <input
-          className="wb-name-input" autoFocus value={editing} maxLength={120} aria-label="工程名称"
+        <Input
+          size="default" className="w-56 max-w-full" autoFocus value={editing} maxLength={120} aria-label="工程名称"
           onChange={(e) => setEditing(e.target.value)} onBlur={() => void commit()}
           onKeyDown={(e) => { if (e.key === "Enter") void commit(); if (e.key === "Escape") setEditing(null); }}
         />
@@ -47,11 +49,11 @@ export function ProjectSwitch({ projects }: { projects: ProjectEntry[] }) {
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
-              <button className="wb-switch-trigger" aria-haspopup="menu">
+              <Button variant="ghost" size="sm" className="wb-switch-trigger max-w-full" aria-haspopup="menu">
                 <span className="wb-avatar" aria-hidden="true">{initialOf(s.projectName)}</span>
                 <span className="wb-switch-name">{s.projectName || "工程"}</span>
                 <ChevronDown size={13} className="wb-switch-caret" aria-hidden="true" />
-              </button>
+              </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
           <TooltipContent>切换工程 / 更多操作</TooltipContent>

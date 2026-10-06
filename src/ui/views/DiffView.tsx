@@ -1,14 +1,15 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { WorkspaceView } from "@shared/types";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { EmptyState } from "../primitives";
+
 import { FIELD_LABEL, Tip } from "./shared";
 
 /* ---------------- Diff ---------------- */
 
 export function DiffView({ view }: { view: Extract<WorkspaceView, { kind: "diff" }> }) {
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <div className="xl-sheet overflow-auto rounded-lg">
         <table className="xl-table xl-pin-last">
           <thead>

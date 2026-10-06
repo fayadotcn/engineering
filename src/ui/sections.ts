@@ -21,6 +21,7 @@ const SECTION_OF: Record<WorkspaceView["kind"], SectionId> = {
   factList: "settings",
   receipts: "settings",
   quotaResult: "results",
+  quotaUsage: "results",
   quotationMatch: "results",
   specResult: "results",
   anomalyTable: "results",

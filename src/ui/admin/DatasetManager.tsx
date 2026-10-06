@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -22,7 +23,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { ConfirmDialog, toast } from "../primitives";
 import { cn } from "../views/shared";
 import { PRICE_TYPES, PRICE_TYPE_LABEL, priceTypeLabel } from "../terms";
 import { DatasetMappingPanel } from "./DatasetMappingPanel";
@@ -148,7 +149,7 @@ function DatasetCard({
   );
 
   return (
-    <div className="overflow-hidden rounded-md border border-border bg-[var(--card)]">
+    <div className="dataset-card">
       <div className="cost-dataset-row flex flex-wrap items-center gap-3 px-4 py-3">
         <FileSpreadsheet size={15} className="shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
@@ -203,7 +204,6 @@ function DatasetCard({
           role="switch"
           aria-checked={d.active}
           aria-label={`${d.name}参与匹配与测算`}
-          title={d.active ? "已启用 — 点击停用" : "已停用 — 点击启用"}
         >
           {d.active ? "停用这份数据" : "启用这份数据"}
         </Button>
@@ -213,7 +213,6 @@ function DatasetCard({
           onClick={() => setConfirmDel(true)}
           disabled={busy || dirty}
           aria-label={`删除数据集${d.name}`}
-          title="删除数据集"
         >
           {busy ? <Loader2 size={12} className="spin" /> : <Trash2 size={13} />}删除
         </Button>
@@ -357,7 +356,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
 
   return (
     <div className="cost-datasets mt-8 space-y-8">
-      <nav className="cost-library-tabs" aria-label="共享数据类型">{KINDS.map(k => <button key={k.k} aria-current={kind === k.k ? "page" : undefined} className={kind === k.k ? "active" : ""} disabled={blocked} onClick={() => { setKind(k.k); setQuery(""); }}><strong>{k.label}</strong><span>{datasets.filter(d => d.kind === k.k).length}</span></button>)}</nav>
+      <nav className="cost-library-tabs" aria-label="共享数据类型">{KINDS.map(k => <Button variant="ghost" size="sm" key={k.k} aria-current={kind === k.k ? "page" : undefined} className={kind === k.k ? "active" : ""} disabled={blocked} onClick={() => { setKind(k.k); setQuery(""); }}><strong>{k.label}</strong><span>{datasets.filter(d => d.kind === k.k).length}</span></Button>)}</nav>
       {loadError && (
         <Alert variant="destructive">
           <AlertTriangle />
@@ -368,7 +367,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
         </Alert>
       )}
       {/* 上传区 */}
-      <div className="rounded-md border border-border bg-[var(--card)] p-4">
+      <div className="library-upload">
         <div className="flex flex-wrap items-center gap-2">
           <div><strong className="text-sm">导入{KINDS.find(k => k.k === kind)?.label}</strong><p className="text-xs text-muted-foreground">各工程共用，启用后参与匹配与测算</p></div>
           <input
@@ -398,7 +397,7 @@ export function DatasetManager({ initial }: { initial: DatasetDTO[] }) {
               value={defPriceType || PRICE_TYPE_AUTO}
               onValueChange={(v) => setDefPriceType(v === PRICE_TYPE_AUTO ? "" : v)}
             >
-              <SelectTrigger size="sm" aria-label="整表默认价格类型" title="整表默认价格类型">
+              <SelectTrigger size="sm" aria-label="整表默认价格类型">
                 <SelectValue>
                   {defPriceType ? priceTypeLabel(defPriceType) : "价格类型：自动"}
                 </SelectValue>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyTemplateToSheet } from "../file/inspection";
-import type { SheetInspection } from "../file/excel";
+import { applySheetPatch, applyTemplateToSheet, withImportCounts, type SheetMeta } from "../file/inspection";
+import { inspectWorkbook, type SheetInspection } from "../file/excel";
+import ExcelJS from "exceljs";
 
 /** 一份毫无歧义的招标清单表：项目编码 + 项目特征 + 工程量 + 综合单价。 */
 function boqSheet(): SheetInspection {
@@ -31,6 +32,24 @@ const poisonedTemplate = {
 };
 
 describe("模板套用", () => {
+  it("询价行数预报与导入口径一致，改成清单后按新的单价角色重算", async () => {
+    const book = new ExcelJS.Workbook();
+    const sheet = book.addWorksheet("数据");
+    sheet.addRow(["名称", "规格型号", "单位", "数量", "单价", "金额"]);
+    sheet.addRow(["镀锌钢管", "DN100", "m", 10, 50, 500]);
+    sheet.addRow(["镀锌钢管", "DN50", "m", 10, 30, 300]);
+    const buffer = Buffer.from(await book.xlsx.writeBuffer());
+    const meta: SheetMeta = { ...inspectWorkbook(buffer)[0], userEdited: false, needsConfirm: true };
+    expect(meta.type).toBe("QUOTATION");
+    await withImportCounts(buffer, { 数据: meta });
+    expect(meta.itemsToImport).toBe(2);
+    applySheetPatch(meta, { type: "BOQ" });
+    expect(meta.itemsToImport).toBeUndefined();
+    expect(meta.columns.unitPrice).toBe(4);
+    await withImportCounts(buffer, { 数据: meta });
+    expect(meta.itemsToImport).toBe(2);
+  });
+
   it("模板类型与本文件证据冲突时不盲从模板，并要求人工核对", () => {
     const { sheet, needsConfirm } = applyTemplateToSheet(boqSheet(), poisonedTemplate);
     expect(sheet.type).toBe("BOQ");

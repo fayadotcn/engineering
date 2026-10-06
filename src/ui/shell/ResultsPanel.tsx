@@ -1,9 +1,10 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { BarChart3, Download, RefreshCw, X } from "lucide-react";
 import type { WorkspaceView } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { EmptyState } from "../primitives";
+
 import { useStore } from "../store";
 import { isBusy, isDirty } from "../busy";
 import { resultKey, sectionOf } from "../sections";
@@ -68,7 +69,7 @@ export function ResultsPanel({ projectId, onUpload }: { projectId: string; onUpl
     <EmptyState
       icon={<BarChart3 size={22} />}
       title="还没有成果"
-      hint={s.items.length ? "在左侧对话里提出测算、检查或汇总任务，结果会出现在这里。也可以直接生成：" : "先上传工程清单，再生成成果。"}
+      hint={s.items.length ? "向助手提出测算、检查或汇总任务，结果会出现在这里。也可以直接生成：" : "先上传工程清单，再生成成果。"}
       action={s.items.length > 0
         ? <div className="cost-actions justify-center">{QUICK_RESULTS.map((q) => <Button key={q.label} variant="outline" size="sm" disabled={blocked} onClick={() => void s.send(q.task)}>{q.label}</Button>)}</div>
         : <Button onClick={onUpload}>上传清单</Button>}
@@ -78,21 +79,21 @@ export function ResultsPanel({ projectId, onUpload }: { projectId: string; onUpl
   const regen = active && regenTask(active);
   return <div className="results">
     <nav className="results-list" aria-label="成果列表">
+      <div className="results-list-heading"><span>报价成果</span><small>{list.length}</small></div>
       {list.map((v) => {
         const current = active && resultKey(active) === resultKey(v);
         return <div key={v.id} className={current ? "active" : ""}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button onClick={() => s.setActiveView(v.id)} aria-current={current ? "page" : undefined}>
-                <small>{KIND_LABEL[v.kind] ?? "成果"}</small>
-                <span>{v.title}</span>
-              </button>
+              <Button variant="ghost" size="default" className="min-w-0 flex-1 justify-start" onClick={() => s.setActiveView(v.id)} aria-current={current ? "page" : undefined}>
+                <BarChart3 size={14} /><span>{v.title}</span>
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="right">{v.title}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="results-close" aria-label={`移除${v.title}`} onClick={() => remove(v)}><X size={12} /></button>
+              <Button variant="ghost" size="icon-xs" className="results-close" aria-label={`移除${v.title}`} onClick={() => remove(v)}><X size={12} /></Button>
             </TooltipTrigger>
             <TooltipContent side="right">移除此成果</TooltipContent>
           </Tooltip>

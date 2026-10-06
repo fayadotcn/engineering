@@ -10,9 +10,10 @@ export type ThemeChoice = "auto" | "light" | "dark";
 export function themeChoice(): ThemeChoice {
   try {
     const v = localStorage.getItem(KEY);
-    return v === "light" || v === "dark" ? v : "auto";
+    // 未选过默认浅色（产品默认面貌是蓝白浅色）；存过 auto/dark/light 才按选择
+    return v === "auto" || v === "dark" ? v : "light";
   } catch {
-    return "auto";
+    return "light";
   }
 }
 

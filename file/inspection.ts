@@ -12,7 +12,7 @@ import { reconcilePriceRole } from "@shared/mapping";
 export interface SheetMeta extends SheetInspection {
   userEdited: boolean;
   needsConfirm: boolean;
-  /** 按当前映射确认导入后会落库的清单行数（0 = 该表不会导入任何行） */
+  /** 按当前映射确认导入后会落库的清单或询价行数（0 = 该表不会导入任何行） */
   itemsToImport?: number;
 }
 
@@ -162,7 +162,8 @@ export async function inspectWithTemplates(
 
 /**
  * 用与正式导入完全相同的解析路径（parseWorkbook + importableRowCount）算出
- * 每张表「将导入 N 行」。识别结果里带上它，列映射视图才能在确认前红标 0 行表。
+ * 每张表「将导入 N 行」，询价表按 importQuotationsFromSheets 的具名数据行口径计数。
+ * 识别结果里带上它，列映射视图才能在确认前红标 0 行表。
  * 解析失败不阻断识别——只是没有这个提示。
  */
 export async function withImportCounts(
@@ -174,7 +175,10 @@ export async function withImportCounts(
     const { importableRowCount } = await import("@boq/ingestRules");
     const sheets = parseWorkbook(buffer, { mapping: toSheetMappings(mapping) });
     const counts = new Map<string, number>();
-    for (const s of sheets) counts.set(s.sheetName, importableRowCount(s));
+    for (const s of sheets) counts.set(s.sheetName,
+      s.type === "QUOTATION" || s.type === "MATERIAL_PRICE"
+        ? s.rows.filter(r => r.isItem && (r.cells.materialName || r.cells.name || "").trim()).length
+        : importableRowCount(s));
     for (const meta of Object.values(mapping))
       meta.itemsToImport = counts.get(meta.sheetName) ?? 0;
   } catch {
@@ -195,6 +199,8 @@ export function applySheetPatch(
     type?: SheetInspection["type"];
   }
 ): void {
+  // 类型或列位改变后，旧行数预报不再代表当前映射。
+  delete sheet.itemsToImport;
   if (body.type && SHEET_TYPE_LABEL[body.type] !== undefined) {
     sheet.type = body.type;
     sheet.typeConfidence = 1;

@@ -1,7 +1,8 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
-import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { ConfirmDialog, toast } from "../primitives";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -537,7 +538,6 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
             size="icon-xs"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1 || loading || dirty || !!error}
-            title="上一页"
             aria-label="上一页"
           >
             <ChevronLeft size={12} />
@@ -550,7 +550,6 @@ export function PriceRowsPanel({ datasetId, onDirtyChange }: { datasetId: string
             size="icon-xs"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages || loading || dirty || !!error}
-            title="下一页"
             aria-label="下一页"
           >
             <ChevronRight size={12} />

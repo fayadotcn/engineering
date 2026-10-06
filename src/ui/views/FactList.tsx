@@ -1,7 +1,8 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useStore } from "../store";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { EmptyState } from "../primitives";
+
 import { cn, SOURCE_LABEL, Tip } from "./shared";
 
 /* ---------------- 事实台账 ---------------- */
@@ -9,7 +10,7 @@ import { cn, SOURCE_LABEL, Tip } from "./shared";
 export function FactList() {
   const { facts } = useStore();
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <div className="xl-sheet overflow-auto rounded-lg">
       <table className="xl-table">
         <thead>

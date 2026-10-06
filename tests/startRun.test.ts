@@ -31,7 +31,8 @@ vi.mock("@database/client", () => {
   return { prisma: { ...tx, $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx) } };
 });
 
-import { ActiveRunError, startRun } from "../agent/runtime";
+import { ActiveRunError } from "../agent/runs";
+import { startRun } from "../agent/runtime";
 
 const fresh = () => ({ id: "live-1", status: "RUNNING", createdAt: new Date() });
 
@@ -78,7 +79,7 @@ describe("startRun 单项目单任务串行", () => {
 
 describe("markZombieRunsFailed 启动清尾", () => {
   it("RUNNING/AWAITING_CONFIRM 全部判 FAILED（重启后这些 run 不可能再结束）", async () => {
-    const { markZombieRunsFailed } = await import("../agent/runtime");
+    const { markZombieRunsFailed } = await import("../agent/runs");
     const mod = await import("@database/client");
     const spy = vi.spyOn(mod.prisma.agentRun, "updateMany");
     await markZombieRunsFailed();
@@ -91,7 +92,7 @@ describe("markZombieRunsFailed 启动清尾", () => {
   it("进程内首个 startRun 自动清尾一次，后续不再重复扫", async () => {
     vi.resetModules();
     // 清尾 flag 在 globalThis（防 dev 热重载误杀活 run）——测试需显式复位
-    delete (globalThis as { __zombiesSwept?: boolean }).__zombiesSwept;
+    delete (globalThis as { __runInitialization?: Promise<void> }).__runInitialization;
     const mod = await import("@database/client");
     const spy = vi.spyOn(mod.prisma.agentRun, "updateMany");
     const { startRun: freshStart } = await import("../agent/runtime");

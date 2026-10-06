@@ -21,7 +21,9 @@ export interface QuotaEntry {
   /** 全部未计价材料及含量（管件/法兰/配件…多主材并存）；缺省 = 只有 mainQtyPerUnit 单一主材 */
   materials?: QuotaMaterial[];
   /** 定额详情（解释口径）：工程内容/分册/章节路径/基价/主材名 */
-  detail?: { gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string };
+  detail?: { gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string;
+    /** SC21 附注：子目其他说明/计算规则/所属章节工作内容、定额管理费/利润单价 */
+    qtsm?: string; jsgz?: string; mlsm?: string };
   match: {
     category?: string;
     material?: RegExp;

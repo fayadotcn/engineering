@@ -1,7 +1,8 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { CostCompositionRow, WorkspaceView } from "@shared/types";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { EmptyState } from "../primitives";
+
 import { fmtMoney, PALETTE, Tip, TipEl } from "./shared";
 
 /* ---------------- 人材机成本构成 ---------------- */
@@ -24,7 +25,7 @@ export function CostCompositionView({ view }: { view: Extract<WorkspaceView, { k
     { label: "管利及未分解", amount: t.other, color: PALETTE[4] },
   ];
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Badge variant="secondary" >可计价 {view.rows.length} 项，合价 {fmtMoney(t.revenue)} 元</Badge>
         {c.plan > 0 && <Badge variant="secondary" >定额组价 {c.plan} 项</Badge>}

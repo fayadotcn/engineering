@@ -137,34 +137,3 @@ export function ConfirmDialog({
     </AlertDialog>
   );
 }
-
-/* ---------------- EmptyState ---------------- */
-
-export function EmptyState({
-  icon,
-  title,
-  hint,
-  action,
-  size = "default",
-}: {
-  icon?: React.ReactNode;
-  title: string;
-  hint?: string;
-  action?: React.ReactNode;
-  /** lg：整页/整分区级别的空态（更高留白与更大图标砖），default：卡片/表格内空态 */
-  size?: "default" | "lg";
-}) {
-  const lg = size === "lg";
-  return (
-    <div className={cn("flex flex-col items-center justify-center gap-2.5 text-center", lg ? "min-h-[22rem] py-10" : "h-40")}>
-      {icon && (
-        <span className={cn("mb-1 flex items-center justify-center bg-muted text-muted-foreground", lg ? "h-13 w-13 rounded-xl" : "h-11 w-11 rounded-xl")}>
-          {icon}
-        </span>
-      )}
-      <div className={cn("font-medium text-foreground", lg ? "text-base" : "text-xs")}>{title}</div>
-      {hint && <div className={cn("max-w-sm px-4 text-2xs leading-relaxed text-muted-foreground", lg && "text-xs")}>{hint}</div>}
-      {action && <div className="mt-2">{action}</div>}
-    </div>
-  );
-}

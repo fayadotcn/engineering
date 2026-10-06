@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+// 数据写接口只依赖轻量任务查询，不能触发运行时与全量工具注册。
+vi.mock("@agent/runtime", () => { throw new Error("普通写接口不应加载 Agent runtime"); });
+
 // 活 run 守卫契约（R244）：工作区写路由在 RUNNING/AWAITING_CONFIRM 期间
 // 一律 409——直连 API 不能在 run 写盘中途插入用户写（丢失更新）。
 // findLiveRun 查的是 agentRun.findFirst + liveRunWhere，测试只需让

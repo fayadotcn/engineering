@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { toJson } from "@shared/json";
-import { findLiveRun } from "@agent/runtime";
+import { findLiveRun } from "@agent/runs";
 import { z } from "zod";
 
 const body = z.object({ ids: z.array(z.string().min(1)).min(1).max(500) }).strict();

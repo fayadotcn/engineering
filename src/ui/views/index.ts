@@ -16,3 +16,4 @@ export { SpecResultView } from "./SpecResultView";
 export { FactList } from "./FactList";
 export { ExportResult } from "./ExportResult";
 export { FileList } from "./FileList";
+export { UsageMatch } from "./UsageMatch";

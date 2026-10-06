@@ -1,10 +1,11 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import type { QuotationMatchRow, WorkspaceView } from "@shared/types";
-import { EmptyState } from "../primitives";
+
 import { cn, fmtMoney, Tip } from "./shared";
 
 /* ---------------- 询价匹配 ---------------- */
@@ -23,7 +24,7 @@ const MATCH_LABEL: Record<string, string> = {
 export function QuotationMatch({ view }: { view: Extract<WorkspaceView, { kind: "quotationMatch" }> }) {
   const [details, setDetails] = useState(false);
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <details className="cost-simple-more mb-3">
         <summary>更多信息</summary>
         <div className="cost-more-body">

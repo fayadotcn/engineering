@@ -302,8 +302,8 @@ export function displayFeature(raw: string, name: string): string {
   return out.length ? out.join(" · ") : raw;
 }
 
-// 暖纸系 muted 调色板：深松绿为主，递推到浅灰绿，语义色只点缀。
-// 走 CSS 变量，深色主题下由 globals.css 整体提亮。
+// 图表色板：行动蓝起头 + 冷暖交替（tokens.css 里按相邻可分辨性排过序）。
+// 走 CSS 变量，深色主题下由 tokens 的暗色刻度整体提亮。
 export const PALETTE = [
   "var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)",
   "var(--chart-6)", "var(--chart-7)", "var(--chart-8)", "var(--chart-9)", "var(--chart-10)",

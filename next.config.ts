@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
-const nextConfig: NextConfig = {
+const nextConfig = (phase: string): NextConfig => ({
+  // 开发与正式构建独立输出，避免运行中的服务读到另一套 webpack 文件。
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? ".next-dev" : ".next",
   serverExternalPackages: ["@prisma/client", "exceljs", "pdfjs-dist"],
   outputFileTracingRoot: __dirname,
   devIndicators: false,
@@ -14,6 +17,7 @@ const nextConfig: NextConfig = {
           "**/node_modules/**",
           "**/.git/**",
           "**/.next/**",
+          "**/.next-dev/**",
           "**/prisma/dev.db*",
           "**/storage/**",
           "**/.verify/**",
@@ -23,6 +27,6 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-};
+});
 
 export default nextConfig;

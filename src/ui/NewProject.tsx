@@ -1,15 +1,16 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { Plus, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toast } from "./primitives";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function NewProject() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const router = useRouter();
   const lock = useRef(false);
 
@@ -17,6 +18,7 @@ export function NewProject() {
     if (!name.trim() || lock.current) return;
     lock.current = true;
     setBusy(true);
+    setError("");
     try {
     const res = await fetch("/api/projects", {
       method: "POST",
@@ -26,7 +28,7 @@ export function NewProject() {
     const p = await res.json();
     if (!res.ok || !p.id) throw new Error(p.error ?? "项目创建失败");
     router.push(`/p/${p.id}`);
-    } catch (error) { toast.error(error instanceof Error ? error.message : "项目创建失败"); lock.current = false; setBusy(false); }
+    } catch (error) { setError(error instanceof Error ? error.message : "项目创建失败"); lock.current = false; setBusy(false); }
   };
 
   return (
@@ -38,20 +40,23 @@ export function NewProject() {
           size="lg"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="工程名称，如：三亚航院一期安装工程"
+          placeholder="例如：三亚航院一期安装工程"
+          aria-describedby="project-name-hint"
           aria-label="工程名称"
           maxLength={120}
           required
           disabled={busy}
           autoFocus
         />
-        <footer><Button variant="outline" asChild><a href="/">返回工程列表</a></Button>
+        <p id="project-name-hint" className="form-hint">使用容易辨认的名称，之后也可以修改。</p>
+        {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+        <footer>
         <Button
           type="submit"
-          size="lg"
+          size="default"
           disabled={!name.trim() || busy}
         >
-          {busy ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}{busy ? "正在创建…" : "创建工程"}
+          {busy ? <Loader2 size={14} className="spin" /> : null}{busy ? "正在创建…" : "创建并进入工程"}{!busy && <ArrowRight size={14} />}
         </Button>
         </footer>
     </form>

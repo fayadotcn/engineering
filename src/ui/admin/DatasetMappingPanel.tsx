@@ -1,12 +1,14 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { COLUMN_ROLE_LABEL, COLUMN_ROLES } from "@shared/types";
 import { reconcilePriceRole } from "@shared/mapping";
-import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { ConfirmDialog, toast } from "../primitives";
 import { cn } from "../views/shared";
 import { FILE_TYPE_LABEL, FILE_TYPE_OPTIONS, type FileType } from "../terms";
 import { readResponse } from "../api";
@@ -246,17 +248,21 @@ export function DatasetMappingPanel({
         <span className="text-2xs text-muted-foreground">
           检查每列是否识别正确；有错误就改一下，再保存。
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => { if (dirty) setConfirmClose(true); else onClose(); }}
-          disabled={busy}
-          aria-label="收起列映射"
-          title="收起"
-          className="ml-auto"
-        >
-          <X size={13} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => { if (dirty) setConfirmClose(true); else onClose(); }}
+              disabled={busy}
+              aria-label="收起列映射"
+              className="ml-auto"
+            >
+              <X size={13} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>收起</TooltipContent>
+        </Tooltip>
       </div>
 
       {!mapping.sheets.length && (

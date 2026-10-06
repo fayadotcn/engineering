@@ -2,12 +2,12 @@ import { prisma } from "@database/client";
 import { makeEmitter } from "./events";
 import { executeTool } from "./executor";
 import { getTool, type ToolContext, type ToolResult } from "./tools/registry";
-import { waitForConfirm } from "./pending";
-import { toJson } from "@shared/json";
-import { randomUUID } from "node:crypto";
+import { requestToolConfirmation } from "./confirmation";
+import { createAgentRun, finishAgentRun } from "./runs";
 import { resolveContext, type RunContext } from "./context";
-import { modelConfig, runLLMLoop } from "./llm";
+import { askModel, modelConfig, runLLMLoop } from "./llm";
 import { RulePlanner, type Plan, type PlanStep } from "./planner";
+import { AUTO_PROJECT_NAME } from "@shared/types";
 
 // Agent runtime: one run per user message.
 // message → resolveContext → LLM loop（配置了模型）或 RulePlanner →
@@ -21,89 +21,13 @@ export interface StartRunInput {
   extra?: Record<string, unknown>; // e.g. { ingestFileId }
 }
 
-export class ActiveRunError extends Error {
-  constructor(public runId: string) {
-    super("已有任务在执行或等待确认");
-  }
-}
-
-// 活 run 判定窗口与文件删除/reingest 守卫同口径：超窗视为僵尸 run 不再拦截
-export const LIVE_WINDOW_MS = 15 * 60 * 1000;
-
-/**
- * 活 run 查询条件：RUNNING 按创建窗口判（超窗=僵尸，懒清理）；
- * AWAITING_CONFIRM 不按窗判——本进程里它必然配对一个活 resolver
- * （确认门 10 分钟超时即收口），创建超窗只是「跑了很久才到确认门」，
- * 按 createdAt 判死会放行第二个 run 并发写清单（真实竞态）。
- */
-export const liveRunWhere = () => ({
-  status: { in: ["RUNNING", "AWAITING_CONFIRM"] },
-  OR: [
-    { status: "AWAITING_CONFIRM" },
-    { createdAt: { gt: new Date(Date.now() - LIVE_WINDOW_MS) } },
-  ],
-});
-
-/**
- * 进程启动时清尾：RUNNING/AWAITING_CONFIRM 的执行器与确认门 resolver 只活在
- * 旧进程内存里，重启后这些 run 永远不可能结束——立即判 FAILED，释放
- * 「单项目单活 run」守卫，用户不必等 15 分钟懒清理窗口。
- */
-export function markZombieRunsFailed() {
-  return prisma.agentRun.updateMany({
-    where: { status: { in: ["RUNNING", "AWAITING_CONFIRM"] } },
-    data: {
-      status: "FAILED",
-      summary: "服务重启，任务中断，请重新发送",
-      finishedAt: new Date(),
-    },
-  });
-}
-
-// 本进程是否已做过启动清尾：每个进程首个 startRun 前清一次僵尸。
-// 不用 instrumentation.register()——它会连工具/存储图一起打进不允许
-// Node 内置模块的 bundle；进程内首调清尾等效且零打包面。
-// flag 必须存 globalThis：dev 热重载会重建 module graph，普通模块变量会让
-// 新图把本进程仍存活的 AWAITING_CONFIRM run（resolver 在 globalThis 上活着）
-// 误杀成 FAILED。
-const sweepState = (globalThis as typeof globalThis & { __zombiesSwept?: boolean });
-const zombiesSwept = () => sweepState.__zombiesSwept === true;
-const markSwept = () => { sweepState.__zombiesSwept = true; };
-
-/** 外部写路由的活 run 守卫：RUNNING/AWAITING_CONFIRM 期间一律 409——run 写盘
- *  中途插入的用户写会拿入口快照过校验再覆盖 run 的新值（丢失更新）。UI 已拦
- *  按钮，这是服务端兜底；文件映射 PATCH 不能用——待确认导入本就要求用户改映射。 */
-export function findLiveRun(projectId: string) {
-  return prisma.agentRun.findFirst({
-    where: { projectId, ...liveRunWhere() },
-    select: { id: true },
-  });
-}
-
 export async function startRun(input: StartRunInput): Promise<{ runId: string }> {
-  // 本进程第一次起任务前清尾：数据库里遗留的 RUNNING/AWAITING_CONFIRM 都属
-  // 于已死进程（本进程的 resolver/执行器不可能属于重启前的 run），立即判 FAILED。
-  if (!zombiesSwept()) {
-    markSwept();
-    await markZombieRunsFailed().catch(() => { /* 清尾失败由懒清理兜底，不阻塞启动 */ });
-  }
   const isImport = typeof input.extra?.ingestFileId === "string";
   const isAutopilot = input.extra?.autopilot === true;
-  // 单项目单任务串行：检查+建单同事务，双窗口/直连 API 也不会起并发 run
-  // （两个 run 交错 deleteByFile/createMany 或并发写清单是真实风险）
-  const run = await prisma.$transaction(async (tx) => {
-    const live = await tx.agentRun.findFirst({
-      where: { projectId: input.projectId, ...liveRunWhere() },
-      select: { id: true },
-    });
-    if (live) throw new ActiveRunError(live.id);
-    return tx.agentRun.create({
-      data: {
-        projectId: input.projectId,
-        userMessage: input.message,
-        planner: isImport ? "import" : isAutopilot ? "autopilot" : modelConfig() ? "llm" : "rule",
-      },
-    });
+  const run = await createAgentRun({
+    projectId: input.projectId,
+    message: input.message,
+    planner: isImport ? "import" : isAutopilot ? "autopilot" : modelConfig() ? "llm" : "rule",
   });
   // fire-and-forget: events stream via subscribeRun
   void executeRun(run.id, input).catch(async (e) => {
@@ -112,11 +36,8 @@ export async function startRun(input: StartRunInput): Promise<{ runId: string }>
     const last = await prisma.agentEvent.aggregate({ _max: { seq: true }, where: { runId: run.id } }).catch(() => null);
     const emit = makeEmitter(run.id, (last?._max.seq ?? -1) + 1);
     await emit("error", { text: e instanceof Error ? e.message : String(e) });
+    await finishAgentRun(run.id, "FAILED");
     await emit("run_finished", { status: "FAILED" });
-    await prisma.agentRun.update({
-      where: { id: run.id },
-      data: { status: "FAILED", finishedAt: new Date() },
-    });
   });
   return { runId: run.id };
 }
@@ -138,24 +59,10 @@ async function executeRun(runId: string, input: StartRunInput) {
     const def = getTool(t);
     if (def?.implemented && def.confirm) {
       const parsed = def.schema.safeParse(a ?? {});
-      const description = parsed.success ? await def.confirm(parsed.data) : `执行 ${t}`;
+      if (!parsed.success) return executeTool(c, t, a);
+      const description = await def.confirm(parsed.data, c);
       if (!description) return executeTool(c, t, a); // 本次调用不需要确认
-      const confirmId = randomUUID();
-      const approval = waitForConfirm(runId, t, description);
-      await prisma.agentRun.update({
-        where: { id: runId },
-        data: {
-          status: "AWAITING_CONFIRM",
-          pendingAction: toJson({ confirmId, tool: t, args: a, description }),
-        },
-      });
-      await c.emit("confirm_request", { confirmId, tool: t, description, args: a as Record<string, unknown> });
-      const approved = await approval;
-      await prisma.agentRun.update({
-        where: { id: runId },
-        data: { status: "RUNNING", pendingAction: "{}" },
-      });
-      await c.emit("confirm_resolved", { confirmId, approved });
+      const approved = await requestToolConfirmation(c, t, a, description);
       if (!approved) {
         cancelled = true;
         return { observation: { cancelled: true }, message: `已取消：${description}` };
@@ -194,19 +101,56 @@ async function executeRun(runId: string, input: StartRunInput) {
 
     const summary = summaries.filter(Boolean).join("\n") || "完成。";
     await emit("message", { role: "agent", text: summary });
-    await emit("run_finished", { status: cancelled ? "CANCELLED" : "DONE" });
-    await prisma.agentRun.update({
-      where: { id: runId },
-      data: { status: cancelled ? "CANCELLED" : "DONE", summary, finishedAt: new Date() },
-    });
+    const status = cancelled ? "CANCELLED" : "DONE";
+    await finishAgentRun(runId, status, summary);
+    // 先改名再发 run_finished：客户端收到结束事件立刻刷新工程信息，顺序反过来会漏名
+    // 自动命名是润色不是任务本体：失败静默，不影响 run 终态
+    await autoNameProject(input).catch(() => {});
+    await emit("run_finished", { status });
   } catch (e) {
     await emit("error", { text: e instanceof Error ? e.message : String(e) });
+    await finishAgentRun(runId, "FAILED");
     await emit("run_finished", { status: "FAILED" });
-    await prisma.agentRun.update({
-      where: { id: runId },
-      data: { status: "FAILED", finishedAt: new Date() },
-    });
   }
+}
+
+/** 首页快捷启动的工程带哨兵名（AUTO_PROJECT_NAME）：首个 run 结束后按任务文本 +
+ *  已上传文件名自动起名。有模型走 askModel 一句话总结；无模型退回文件名/消息截断。
+ *  用户手工改过名（不再是哨兵值）时不动。改名留 PROJECT_RENAME 回执供审计。 */
+async function autoNameProject(input: StartRunInput) {
+  const project = await prisma.project.findUnique({ where: { id: input.projectId }, select: { name: true } });
+  if (!project || project.name !== AUTO_PROJECT_NAME) return;
+  const files = await prisma.projectFile.findMany({
+    where: { projectId: input.projectId },
+    select: { filename: true },
+    orderBy: { createdAt: "asc" },
+    take: 6,
+  });
+  const material = [
+    `用户任务：${input.message}`,
+    files.length ? `上传文件：${files.map((f) => f.filename).join("、")}` : "",
+  ].filter(Boolean).join("\n");
+  let name = modelConfig()
+    ? await askModel(
+        "你是工程造价项目的命名助手。根据用户任务和上传文件名，给出一个简短的工程名称。只输出名称本身：不超过16个汉字，不带引号、标点和「工程」二字以外的前缀。",
+        material,
+      )
+    : null;
+  if (!name) name = files[0]?.filename.replace(/\.[^.]+$/, "") ?? input.message;
+  name = name.replace(/[\s"'“”‘’《》<>【】，。；：,.;!?！？]+/g, "").slice(0, 18).trim();
+  if (!name || name === AUTO_PROJECT_NAME) return;
+  await prisma.project.update({ where: { id: input.projectId }, data: { name } });
+  await prisma.actionReceipt.create({
+    data: {
+      projectId: input.projectId,
+      actionType: "PROJECT_RENAME",
+      summary: `自动命名工程：${name}`,
+      before: JSON.stringify({ name: project.name }),
+      after: JSON.stringify({ name }),
+      reversible: false,
+      createdBy: "agent",
+    },
+  });
 }
 
 async function runPlan(

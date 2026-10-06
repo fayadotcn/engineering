@@ -3,6 +3,7 @@ html {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+*, ::before, ::after { border-color: var(--border); }
 body {
   background: var(--background);
   color: var(--foreground);
@@ -92,7 +93,7 @@ body {
   background: transparent;
 }
 ::selection {
-  background: color-mix(in srgb, var(--foreground) 14%, transparent);
+  background: color-mix(in srgb, var(--info) 16%, transparent);
 }
 /* 勾选控件统一走 <Checkbox> 组件（Radix），原生 checkbox/radio 已无调用点 */
 input[type="radio"] {
@@ -100,7 +101,7 @@ input[type="radio"] {
 }
 /* 拖拽上传时左栏的高亮态 */
 .drop-armed {
-  outline: 2px dashed var(--foreground);
+  outline: 2px dashed var(--ring);
   outline-offset: -6px;
   background: color-mix(in srgb, var(--muted) 60%, var(--card)) !important;
 }
@@ -131,7 +132,9 @@ input[type="radio"] {
   outline-offset: 2px;
 }
 /* 品牌砖：logo/头像/工程标识共用——单色实心方块 */
-.brand-tile { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); }
+.brand-tile { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); }
+.skip-link { position: fixed; top: 8px; left: 16px; z-index: 100; transform: translateY(-160%); padding: 8px 14px; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); font-size: var(--text-sm); }
+.skip-link:focus { transform: none; }
 /* 徽章统一走 Badge 组件（src/components/ui/badge.tsx）。
    输入控件已全部改用 <Input> / <Select> 组件（尺寸走 size prop：xs 28 / default 32 / lg 36），
    此处原 .cost-input 皮肤（含 select 的下拉箭头 data-URI）已删除——不要再加回来。 */
@@ -174,7 +177,7 @@ input::placeholder, textarea::placeholder { color: var(--muted-foreground); opac
 button:disabled { cursor: default; }
 summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px; }
 .cost-empty .cost-empty-hint { display: flex; align-items: center; gap: 10px; font-size: var(--text-xs); color: var(--muted-foreground); }
-.cost-link { display: inline; padding: 0; border: 0; background: none; color: var(--foreground); font-size: inherit; font-weight: 500; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--muted-foreground); }
+.cost-link { display: inline; padding: 0; border: 0; background: none; color: var(--info); font-size: inherit; font-weight: 500; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in srgb, var(--info) 40%, transparent); }
 .cost-link:enabled:hover { text-decoration-color: var(--foreground); }
 .cost-link:disabled { color: var(--muted-foreground); cursor: default; }
 @media (prefers-reduced-motion: reduce) {

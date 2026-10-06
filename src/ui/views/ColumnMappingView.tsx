@@ -168,7 +168,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
   };
 
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <div className="mb-3 flex flex-wrap items-center gap-2 break-words">
         <FileSpreadsheet size={15} className="text-muted-foreground" />
         <span className="text-sm font-medium">{view.filename}</span>
@@ -203,7 +203,7 @@ export function ColumnMappingView({ view }: { view: MappingView }) {
                         : undefined
                     }
                   >
-                    <SelectValue />
+                    <SelectValue>{FILE_TYPE_LABEL[d.type]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {FILE_TYPE_OPTIONS.map((t) => (

@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Fragment, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -6,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import type { WorkspaceView } from "@shared/types";
 import { ChevronDown } from "lucide-react";
-import { EmptyState } from "../primitives";
+
 import { cn, fmtMoney, Tip, TipEl } from "./shared";
 
 /* ---------------- 定额测算 ---------------- */
@@ -21,7 +22,7 @@ export function QuotaResult({ view }: { view: Extract<WorkspaceView, { kind: "qu
     (r) => r.deviation !== null && Math.abs(Number(r.deviation)) > 20
   ).length;
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Badge variant="secondary" >{view.rows.length} 项中，{matched} 项找到定额</Badge>
         {needMain > 0 && <Badge variant="warning" >{needMain} 项还缺材料价</Badge>}

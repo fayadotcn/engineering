@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 
 export function ExportResult({ view }: { view: Extract<WorkspaceView, { kind: "exportResult" }> }) {
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="w-full max-w-80 rounded-xl border border-border bg-[var(--card)] p-5 break-words">
-        <FileSpreadsheet size={20} className="text-muted-foreground" />
+    <div className="flex flex-1 items-center justify-center py-8">
+      <div className="w-full max-w-80 rounded-xl border border-border bg-card p-6 break-words">
+        <span className="export-file-icon"><FileSpreadsheet size={24} /></span>
+        <p className="mt-5 text-2xs text-muted-foreground">成果文件已生成</p>
         <div className="mt-3 text-sm font-medium">{view.filename}</div>
         <div className="mt-1 text-xs text-muted-foreground">{view.summary}</div>
         <Button asChild className="mt-4 w-full">
@@ -18,7 +19,7 @@ export function ExportResult({ view }: { view: Extract<WorkspaceView, { kind: "e
             download={view.filename}
             aria-label={`下载${view.filename}`}
           >
-            <Download size={13} /> 下载
+            <Download size={14} /> 下载 Excel
           </a>
         </Button>
       </div>

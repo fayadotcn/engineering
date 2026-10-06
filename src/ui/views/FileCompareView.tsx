@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import {
@@ -10,8 +11,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import type { WorkspaceView } from "@shared/types";
-import { EmptyState } from "../primitives";
+
 import { cn, fmtMoney, Tip, TipEl } from "./shared";
 
 /* ---------------- 清单对审 ---------------- */
@@ -35,7 +37,7 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
   );
   const s = view.summary;
   return (
-    <div className="flex h-full flex-col">
+    <div className="boq-grid flex flex-1 min-h-0 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-[var(--card)] px-4 py-2 text-xs">
         <span className="text-muted-foreground">
           差额合计 <b className="mono text-foreground">{fmtMoney(s.totalDelta)}</b> 元
@@ -62,20 +64,13 @@ export function FileCompareView({ view }: { view: Extract<WorkspaceView, { kind:
             ["SAME", `一致 ${s.same}`],
             ["ALL", `全部 ${s.total}`],
           ].map(([k, l]) => (
-            <button
+            <Button variant={filter === k ? "secondary" : "ghost"} size="xs"
               key={k}
               onClick={() => setFilter(k)}
               aria-pressed={filter === k}
-              className={cn(
-                "rounded px-2 py-1 text-2xs transition-colors",
-                filter === k
-                  ? "font-medium text-[var(--background)]"
-                  : "text-muted-foreground hover:bg-[var(--accent)]"
-              )}
-              style={filter === k ? { background: "var(--foreground)" } : undefined}
             >
               {l}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

@@ -1,8 +1,9 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useEffect, useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { AlertTriangle, Database, FileSpreadsheet, Search, Upload } from "lucide-react";
-import { EmptyState, toast } from "../primitives";
+import { toast } from "../primitives";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,12 +140,10 @@ export function PriceLibraryView() {
   const pendingCount = (datasets ?? []).filter((d) => d.status === "PENDING").length;
 
   return (
-    <div className="h-full overflow-auto p-4">
-      <p className="cost-file-hint">
-        这里是大家共用的材料价和人工费，上传一次，所有人的项目组价都能用上它。
-      </p>
+    <div className="view-content">
+      <header className="view-heading"><div><span className="page-eyebrow">各工程共享的价格依据</span><h2>材料价格</h2><p>按名称、规格或品牌搜索，核对价格来源与期次。</p></div></header>
 
-      <div className="xl-sheet mb-4 rounded-lg p-4">
+      <div className="library-upload mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <Database size={15} className="text-muted-foreground" />
           <span className="text-sm font-medium">贡献一份价格表</span>

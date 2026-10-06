@@ -274,10 +274,50 @@ model SpecSection {
   book      String   // 册，如 "C.H 工业管道工程" / "A 房屋建筑与装饰"
   title     String   // 节标题，如 "第一章 给排水管道" 或 "册说明"
   content   String   // 正文（条文文本）
+  /** 语料来源：sc2020=2020定额说明PDF | sc2015=2015定额手册CHM | qd=清单项目库(GB 清单编码级工程内容) */
+  source    String   @default("sc2020")
   orderIdx  Int      @default(0)
   createdAt DateTime @default(now())
 
   @@index([book])
+  @@index([source])
+}
+
+// 历史工程定额套用经验库（宏业 GCFX 工程文件解析沉淀，scripts/import-gcfx-usage.ts 导入）
+// 主键 itemKey = 归一化「名称模式|单位」桶；清单编码不可靠（自编/错填常见）不作键
+model UsageStat {
+  id        String   @id @default(cuid())
+  itemKey   String   // 归一化名称模式|单位
+  itemName  String   // 桶内代表清单名
+  quotaCode String   // 内部归并码（去 换/补/T 后缀）
+  applied   String   @default("") // 文件里显示的定额编号（如 CJ0199、CD2328换）
+  quotaName String
+  unit      String   @default("")
+  uses      Int      @default(0)  // 套用次数
+  projects  Int      @default(0)  // 独立项目数（可信度主依据）
+  conv      Int      @default(0)  // 其中换算次数
+  flag      String   @default("rare") // common | rare | suspect（孤例且桶内有共识）
+  specs     String   @default("[]")   // JSON 规格档 top：DN150/Φ12…
+  mats      String   @default("[]")   // JSON 常见主材 top
+  samples   String   @default("[]")   // JSON 来源工程文件名 top（溯源）
+  updatedAt DateTime @updatedAt
+
+  @@index([itemKey])
+  @@index([quotaCode])
+}
+
+// 组合套用：一清单挂多定额（制作+安装 / 敷设+防腐），整体频次比单定额更说明套法
+model UsageCombo {
+  id        String   @id @default(cuid())
+  itemKey   String
+  itemName  String
+  lines     String   @default("[]") // JSON [{code,applied,name,unit,conv}] 按套用顺序
+  uses      Int      @default(0)
+  projects  Int      @default(0)
+  flag      String   @default("rare")
+  updatedAt DateTime @updatedAt
+
+  @@index([itemKey])
 }
 
 model QuotaRow {
@@ -301,4 +341,30 @@ model QuotaRow {
 
   @@index([code])
   @@index([datasetId])
+}
+
+// 语义匹配沉淀：模型判出的等价品名（别名→规范名）。
+// 检索端把 canonical 当额外名称键、打分端当等效名——别名命中后走纯 SQL/纯函数路径，
+// 与代码内词表不同：它是数据、可审计可删、由判定自动生长。source: LLM | MANUAL
+model MaterialAlias {
+  id        String   @id @default(cuid())
+  normKey   String   @unique  // normalizeNameKey 归一后的别名词
+  canonical String            // 规范品名（库内检索键，如「大便器」）
+  source    String   @default("LLM")
+  model     String   @default("")
+  createdAt DateTime @default(now())
+}
+
+// 语义判定缓存：queryKey(归一名|归一规格|单位) × 库行 → 同品与否。
+// 让重跑确定且零模型成本；模型名留痕便于换模型后失效重判。
+model MaterialMatchVerdict {
+  id        String   @id @default(cuid())
+  queryKey  String
+  rowId     String
+  same      Boolean
+  model     String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([queryKey, rowId])
+  @@index([queryKey])
 }

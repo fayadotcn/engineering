@@ -1,5 +1,8 @@
 // Shared domain types. No runtime deps — safe on client and server.
 
+/** 首页直达任务建工程时用的哨兵名：首个 run 结束后由 runtime 按对话内容/文件名自动改名的标记位。 */
+export const AUTO_PROJECT_NAME = "未命名工程";
+
 export type Discipline =
   | "ELECTRICAL"
   | "PLUMBING"
@@ -363,6 +366,14 @@ export type WorkspaceView =
   | { kind: "fileList"; id: string; title: string }
   | { kind: "priceLibrary"; id: string; title: string }
   | {
+      kind: "quotaUsage";
+      id: string;
+      title: string;
+      /** 检索模式（quota.usage 工具）：query 原文；匹配模式（quota.match）：undefined */
+      query?: string;
+      rows: UsageMatchRow[];
+    }
+  | {
       kind: "columnMapping";
       id: string;
       title: string;
@@ -409,6 +420,31 @@ export interface AnomalyRow {
   prices: string[];
   spread?: string; // max-min
   reason: string;
+}
+
+/** 历史工程定额套用（宏业 GCFX 语料）：flag=common 共识 / rare 低频 / suspect 存疑孤例 */
+export interface UsageMatchRow {
+  itemName: string;
+  unit?: string;
+  /** 模糊命中（名称桶前缀/包含匹配，非精确桶） */
+  fuzzy?: boolean;
+  quotas: {
+    code: string;
+    applied: string;
+    name: string;
+    unit: string;
+    uses: number;
+    projects: number;
+    conv: number;
+    flag: "common" | "rare" | "suspect" | string;
+    specs: string[];
+  }[];
+  combos: {
+    lines: { code: string; applied: string; name: string; conv: boolean }[];
+    uses: number;
+    projects: number;
+    flag: string;
+  }[];
 }
 
 export interface QuotationMatchRow {

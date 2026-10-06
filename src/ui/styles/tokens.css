@@ -1,70 +1,72 @@
 /* ============================================================================
    设计变量单源（tokens）
    ────────────────────────────────────────────────────────────────────────────
-   1. 品牌色：深林绿系。primary/ring/图表/选中态同源，中性面保持灰阶不染绿，
-      「极简 + 一个性格色」而不是整车刷绿。
+   1. 风格基准：america.gov 的「Civic Clarity」——纯白面、中性灰阶容器、
+      单一行动蓝 #0052cc 只落在可点元素上；大标题用衬线体建立公文式权威感。
    2. 全部文字/图形对已按 WCAG 校验：正文 ≥7:1、辅助文字 ≥4.5:1、
       焦点环与图表色 ≥3:1（校验脚本见 .design-audit/palette-check.mjs）。
    3. 刻度：字号 6 档、圆角 4 档、阴影 5 档、动效 3 档时长 2 条曲线。
+      按钮/主输入框胶囊化（组件内 rounded-full），面板卡片用 lg 圆角。
    4. 明暗两套经 <html data-theme> 切换；打印强制浅色口径。
    ============================================================================ */
 :root {
   color-scheme: light;
 
-  /* ── 面色（保持中性灰阶，不染绿） ── */
-  --background: #ffffff;
-  --foreground: #16211c;
+  /* ── 面色：浅灰页底 + 白卡浮起（america.gov 实站是 dim 灰底，不是纯白） ── */
+  --background: #f7f8fa;
+  --foreground: #000c1f;
   --card: #ffffff;
-  --card-foreground: #16211c;
+  --card-foreground: #000c1f;
   --popover: #ffffff;
-  --popover-foreground: #16211c;
+  --popover-foreground: #000c1f;
 
-  /* ── 品牌色：深林绿 ── */
-  --primary: #2f5d46;
-  --primary-foreground: #f6fbf8;
+  /* ── 行动色：深藏青实心按钮（america.gov 的 Menu/发送键），
+     亮蓝 #0052cc 留给焦点环/链接/信息色 ── */
+  --primary: #14245f;
+  --primary-foreground: #ffffff;
 
-  --secondary: #f0f3f1;
-  --secondary-foreground: #1a2a22;
-  --muted: #f2f4f3;
-  --muted-foreground: #5c6862;      /* on muted 5.26:1 */
-  --accent: #eef3f0;
-  --accent-foreground: #1a2a22;
+  --secondary: #f3f3f3;
+  --secondary-foreground: #000c1f;
+  --muted: #f3f3f3;
+  --muted-foreground: #3f4a5a;      /* on muted ≈7.4:1 */
+  --accent: #e9ecef;
+  --accent-foreground: #000c1f;
 
-  --destructive: #c62828;
-  --border: #e2e7e4;
-  --input: #e2e7e4;
-  --ring: #4a7c5f;                  /* on 白 4.84:1 */
+  --destructive: #d92d20;
+  --border: #e0e3e8;
+  --input: #d6dce3;
+  --ring: #0052cc;                  /* on 白 ≈7.5:1 */
 
   /* ── 语义软色（徽标/横幅）：浅底深字，全部 ≥4.5:1 ── */
-  --success: #1d7a4d;
-  --success-soft: #f0faf4;
-  --success-soft-fg: #14603b;
-  --warning: #a2620a;
-  --warning-soft: #fdf7ec;
-  --warning-soft-fg: #8a5209;
-  --destructive-soft: #fdf2f2;
-  --destructive-soft-fg: #a01f1f;
-  --info: #1f5fa8;
-  --info-soft: #eff5fd;
-  --info-soft-fg: #1a4f8c;
+  --success: #1b5e20;
+  --success-soft: #e8f5e9;
+  --success-soft-fg: #1b5e20;
+  --warning: #b25000;
+  --warning-soft: #fdf0e3;
+  --warning-soft-fg: #8a3d00;
+  --destructive-soft: #fdecea;
+  --destructive-soft-fg: #a1261a;
+  --info: #0052cc;
+  --info-soft: #e3f0ff;
+  --info-soft-fg: #14245f;
 
   /* ── 圆角 4 档 ── */
-  --radius: 0.625rem;
+  --radius: 0.75rem;
 
-  /* ── 阴影 5 档：以描边为主，阴影只做弹层离地提示 ── */
+  /* ── 阴影 5 档：america.gov 口径，描边为主、弹层才离地 ── */
   --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 12px 0 rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 16px 40px 0 rgb(0 0 0 / 0.12);
   --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
 
-  /* ── 图表色板：绿系为主 + 冷暖对比色。全部 ≥3:1，且 chart-1..5 相邻可分辨
+  /* ── 图表色板：行动蓝起头 + 冷暖交替。全部 ≥3:1，且相邻可分辨
      （亮度比 ≥1.25 或 色相差 ≥40°）—— 多序列图元不能只测"对背景" ── */
-  --chart-1: #2f5d46; --chart-2: #5f9a78; --chart-3: #2c6070; --chart-4: #4a8296; --chart-5: #6b4bb0;
-  --chart-6: #8a6a2f; --chart-7: #b08d4a; --chart-8: #a8483f; --chart-9: #2f7d70; --chart-10: #7d8d86;
-  --chart-total: #24402f;
-  --chart-line: #7e9488;
-  --chart-track: #eef1ef;
+  --chart-1: #0052cc; --chart-2: #007a63; --chart-3: #6b4bb0; --chart-4: #b25000; --chart-5: #0070a8;
+  --chart-6: #a1261a; --chart-7: #4d6b8a; --chart-8: #2e7d46; --chart-9: #8e3fa3; --chart-10: #6b7684;
+  --chart-total: #14245f;
+  --chart-line: #b0b8c1;
+  --chart-track: #e9ecef;
 
   /* ── 专业域固定色：同一专业全站同色，点图下钻的视觉锚 ── */
   --disc-electrical: #b06a12; --disc-plumbing: #1f6fa8; --disc-fire: #c0392b;
@@ -78,9 +80,14 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ── 字体：Inter（next/font 注入 --font-inter，仅 Latin 子集）负责西文与数字，
-     CJK 交给系统字体。--font-inter 缺失时自动跳过，不影响 fallback 链。 ── */
+     CJK 交给系统字体。--font-inter 缺失时自动跳过，不影响 fallback 链。
+     --font-display 是衬线标题体（america.gov 的 Rhymes Text 位）：中文优先思源宋体
+     （next/font 注入 --font-noto-serif），公文标题的笔形比宋体粗壮、适合大字号；
+     网页字体不可用时退回系统衬线栈。只用在 hero/页级标题与品牌字标，正文表格不碰。 ── */
   --font-ui: var(--font-inter), "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-noto-serif), "Source Han Serif SC", "Noto Serif CJK SC",
+    "Songti SC", "STSong", Georgia, "Times New Roman", "SimSun", serif;
 }
 
 /* Tailwind 语义色映射（@theme inline：工具类用时点取 var，暗色翻转自动生效） */
@@ -127,9 +134,9 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 12px 0 rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 16px 40px 0 rgb(0 0 0 / 0.12);
   --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
 
   /* 字号六档：微 11 / 密 12 / 正 14 / 标 16 / 页 20 / 主 26
@@ -152,39 +159,39 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --background: #0b120f;
-  --foreground: #f2f6f4;
-  --card: #131c18;
-  --card-foreground: #f2f6f4;
-  --popover: #131c18;
-  --popover-foreground: #f2f6f4;
+  --background: #0c1422;
+  --foreground: #eef2f9;
+  --card: #121c30;
+  --card-foreground: #eef2f9;
+  --popover: #121c30;
+  --popover-foreground: #eef2f9;
 
-  --primary: #7fb99b;
-  --primary-foreground: #0a1a12;
+  --primary: #9db8f0;
+  --primary-foreground: #101a38;
 
-  --secondary: #1e2a24;
-  --secondary-foreground: #f2f6f4;
-  --muted: #1e2a24;
-  --muted-foreground: #a8b6b0;
-  --accent: #1e2a24;
-  --accent-foreground: #f2f6f4;
+  --secondary: #1a2740;
+  --secondary-foreground: #eef2f9;
+  --muted: #182338;
+  --muted-foreground: #9fadc4;
+  --accent: #1e2c48;
+  --accent-foreground: #eef2f9;
 
-  --destructive: #e0574f;
+  --destructive: #e0665c;
   --border: rgb(255 255 255 / 10%);
   --input: rgb(255 255 255 / 16%);
-  --ring: #7fb99b;
+  --ring: #7fb2ff;
 
   --success: #4ec27f;
-  --success-soft: #12301f;
-  --success-soft-fg: #8ee0ac;
-  --warning: #e0a44a;
-  --warning-soft: #33260f;
+  --success-soft: #122b1f;
+  --success-soft-fg: #9be0b5;
+  --warning: #f0a44a;
+  --warning-soft: #2e2210;
   --warning-soft-fg: #f0cd8c;
-  --destructive-soft: #3a1a18;
+  --destructive-soft: #38201d;
   --destructive-soft-fg: #f0a9a3;
-  --info: #6fa8e0;
-  --info-soft: #14273c;
-  --info-soft-fg: #a8cdf0;
+  --info: #7fb2ff;
+  --info-soft: #13253f;
+  --info-soft-fg: #aacdff;
 
   /* 深底上浅色阴影几乎不可见，换重的 */
   --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.5);
@@ -194,11 +201,11 @@
   --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.65), 0 8px 10px -6px rgb(0 0 0 / 0.6);
 
   /* 图表色板：深底上不用"整排浅色同亮度"，改成中等亮度 + 冷暖交替，相邻可分辨 */
-  --chart-1: #4e9e77; --chart-2: #7fc4a6; --chart-3: #3f8fa8; --chart-4: #6fb8c9; --chart-5: #c9a163;
-  --chart-6: #a98ae0; --chart-7: #d98a80; --chart-8: #8fd0a8; --chart-9: #dcbc86; --chart-10: #9aa8a2;
-  --chart-total: #a9d6bd;
-  --chart-line: #6b7d75;
-  --chart-track: #243029;
+  --chart-1: #7fb2ff; --chart-2: #4ec2a8; --chart-3: #a98ae0; --chart-4: #f0a44a; --chart-5: #5cb8e0;
+  --chart-6: #d98a80; --chart-7: #8fd0a8; --chart-8: #dcbc86; --chart-9: #c98fd8; --chart-10: #9aa8b8;
+  --chart-total: #aacdff;
+  --chart-line: #4a5a70;
+  --chart-track: #1e2c48;
 
   --disc-electrical: #e0a44a; --disc-plumbing: #5aa8d8; --disc-fire: #e0756a;
   --disc-hvac: #3fb8a8; --disc-weak: #a98ae0; --disc-other: #9aa8a2;
@@ -219,22 +226,22 @@
 @media print {
   :root[data-theme="dark"] {
     color-scheme: light;
-    --background: #ffffff; --foreground: #16211c;
-    --card: #ffffff; --card-foreground: #16211c;
-    --popover: #ffffff; --popover-foreground: #16211c;
-    --primary: #2f5d46; --primary-foreground: #f6fbf8;
-    --secondary: #f0f3f1; --secondary-foreground: #1a2a22;
-    --muted: #f2f4f3; --muted-foreground: #5c6862;
-    --accent: #eef3f0; --accent-foreground: #1a2a22;
-    --destructive: #c62828;
-    --border: #e2e7e4; --input: #e2e7e4; --ring: #4a7c5f;
-    --success: #1d7a4d; --success-soft: #f0faf4; --success-soft-fg: #14603b;
-    --warning: #a2620a; --warning-soft: #fdf7ec; --warning-soft-fg: #8a5209;
-    --destructive-soft: #fdf2f2; --destructive-soft-fg: #a01f1f;
-    --info: #1f5fa8; --info-soft: #eff5fd; --info-soft-fg: #1a4f8c;
-    --chart-1: #2f5d46; --chart-2: #5f9a78; --chart-3: #2c6070; --chart-4: #4a8296; --chart-5: #6b4bb0;
-    --chart-6: #8a6a2f; --chart-7: #b08d4a; --chart-8: #a8483f; --chart-9: #2f7d70; --chart-10: #7d8d86;
-    --chart-total: #24402f; --chart-line: #7e9488; --chart-track: #eef1ef;
+    --background: #ffffff; --foreground: #000c1f;
+    --card: #ffffff; --card-foreground: #000c1f;
+    --popover: #ffffff; --popover-foreground: #000c1f;
+    --primary: #14245f; --primary-foreground: #ffffff;
+    --secondary: #f3f3f3; --secondary-foreground: #000c1f;
+    --muted: #f3f3f3; --muted-foreground: #3f4a5a;
+    --accent: #e9ecef; --accent-foreground: #000c1f;
+    --destructive: #d92d20;
+    --border: #e0e3e8; --input: #d6dce3; --ring: #0052cc;
+    --success: #1b5e20; --success-soft: #e8f5e9; --success-soft-fg: #1b5e20;
+    --warning: #b25000; --warning-soft: #fdf0e3; --warning-soft-fg: #8a3d00;
+    --destructive-soft: #fdecea; --destructive-soft-fg: #a1261a;
+    --info: #0052cc; --info-soft: #e3f0ff; --info-soft-fg: #003d99;
+    --chart-1: #0052cc; --chart-2: #007a63; --chart-3: #6b4bb0; --chart-4: #b25000; --chart-5: #0070a8;
+    --chart-6: #a1261a; --chart-7: #4d6b8a; --chart-8: #2e7d46; --chart-9: #8e3fa3; --chart-10: #6b7684;
+    --chart-total: #14245f; --chart-line: #b0b8c1; --chart-track: #e9ecef;
     --disc-electrical: #b06a12; --disc-plumbing: #1f6fa8; --disc-fire: #c0392b;
     --disc-hvac: #0f7a70; --disc-weak: #6b4bb0; --disc-other: #6b7d75;
   }

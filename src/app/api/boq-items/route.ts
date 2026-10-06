@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { toJson } from "@shared/json";
 import { createBoqItem } from "@boq/service";
-import { findLiveRun } from "@agent/runtime";
+import { findLiveRun } from "@agent/runs";
 import { z } from "zod";
 
 const create = z.object({

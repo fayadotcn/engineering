@@ -2,6 +2,7 @@
 import { X } from "lucide-react";
 import type { WorkspaceView } from "@shared/types";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FIXED_VIEWS } from "../sections";
 import { useStore } from "../store";
@@ -37,12 +38,12 @@ export function SubTabs({ views, active, label }: { views: WorkspaceView[]; acti
           {!FIXED_VIEWS.has(v.id) && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
+                <Button variant="ghost" size="icon-xs"
                   aria-label={`关闭${v.title}`}
                   onClick={() => s.closeView(v.id, current ? views[i - 1]?.id ?? views[0]?.id : undefined)}
                 >
                   <X size={11} />
-                </button>
+                </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">关闭</TooltipContent>
             </Tooltip>

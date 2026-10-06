@@ -16,12 +16,12 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
   const { send } = useStore();
   const [details, setDetails] = useState(false);
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       {view.unpricedCount > 0 && (
         <Alert variant="warning" className="mb-3">
           <AlertTriangle />
           <AlertTitle>还有 {view.unpricedCount} 项未报价，以下总价尚不完整</AlertTitle>
-          <AlertDescription>请先在清单页点击「自动测算」。</AlertDescription>
+          <AlertDescription>在清单页补齐未报价项，或让助手一键报价。</AlertDescription>
         </Alert>
       )}
       {view.issues?.filter((i) => i.label !== "清单未定价").map((i) => (
@@ -88,7 +88,7 @@ export function FeeSummaryView({ view }: { view: Extract<WorkspaceView, { kind: 
       ) : null}
       <div className="mt-3 flex items-baseline justify-end gap-2 text-xs text-muted-foreground">
         含税工程造价
-        <span className="mono text-xl font-semibold" style={{ color: "var(--foreground)" }}>
+        <span className="font-[var(--font-display)] text-xl font-medium tabular-nums" style={{ color: "var(--foreground)" }}>
           {fmtMoney(view.grandTotal)}
         </span>
         元

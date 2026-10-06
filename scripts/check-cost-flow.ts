@@ -12,7 +12,7 @@ async function main() {
   const checkDir = path.join(root, ".verify", `e2e-${Date.now()}`);
   await mkdir(checkDir, { recursive: true });
   await writeFile(path.join(checkDir, "check.db"), "");
-  process.env.DATABASE_URL = `file:${path.relative(path.join(root, "prisma"), path.join(checkDir, "check.db")).replaceAll("\\", "/")}`;
+  process.env.DATABASE_URL = `file:${path.join(checkDir, "check.db").replaceAll("\\", "/")}`;
   process.env.STORAGE_DIR = path.join(checkDir, "storage");
   const setup = spawnSync(process.execPath, ["node_modules/prisma/build/index.js", "db", "push", "--skip-generate"], { cwd: root, env: process.env, encoding: "utf8", windowsHide: true });
   if (setup.status !== 0) throw new Error(setup.stdout + setup.stderr);
@@ -38,6 +38,17 @@ async function main() {
     const project = await request("/api/projects", "POST", { name: "安装造价接口验收" });
     await request("/api/projects", "POST", { name: 23 }, 400);
     const id = project.id as string;
+    // 验证前端入口在生产服务下能返回完整页面，且引用的样式确实可访问。
+    const styles = new Set<string>();
+    for (const page of ["/", "/new", "/admin", `/p/${id}`]) {
+      const response = await fetch(base + page);
+      assert(response.ok, `${page}: ${response.status}`);
+      const html = await response.text();
+      assert(html.includes("<main"), `${page}: missing page content`);
+      for (const match of html.matchAll(/href="([^"]+\.css(?:\?[^"]*)?)"/g)) styles.add(match[1].replaceAll("&amp;", "&"));
+    }
+    assert(styles.size > 0, "production pages should reference stylesheets");
+    for (const style of styles) assert((await fetch(new URL(style, base))).ok, `stylesheet unavailable: ${style}`);
     await request(`/api/projects/${id}`, "PATCH", { name: "安装造价接口验收（改名）" });
     assert.equal((await request(`/api/projects/${id}`)).name, "安装造价接口验收（改名）");
     await request(`/api/projects/${id}`, "PATCH", { name: "  " }, 400);
@@ -79,7 +90,9 @@ async function main() {
     assert.equal(stream.status, 200); const reader = stream.body!.getReader();
     const first = await reader.read();
     assert.equal(first.done, false); assert(!new TextDecoder().decode(first.value).includes('"run_finished"'));
-    await request(`/api/files/${uploaded.file.id}/mapping`, "PATCH", { sheetName: "数据", type: "BOQ" });
+    const savedMapping = await request(`/api/files/${uploaded.file.id}/mapping`, "PATCH", { sheetName: "数据", type: "BOQ" });
+    assert.equal(savedMapping.view.sheets[0].itemsToImport, 2);
+    assert.equal(savedMapping.view.sheets[0].columns.unitPrice, 4);
     await request(`/api/runs/${uploaded.runId}/confirm`, "POST", {}, 400);
     await request(`/api/runs/${uploaded.runId}/confirm`, "POST", { approve: true });
     let finished = false;
@@ -87,6 +100,7 @@ async function main() {
     try { for (;;) { const value = await reader.read(); if (value.done) break; if (new TextDecoder().decode(value.value).includes('"run_finished"')) finished = true; } }
     finally { clearTimeout(timer); }
     assert(finished, "SSE should remain connected through approval and completion");
+    assert.equal((await prisma.agentRun.findUniqueOrThrow({ where: { id: uploaded.runId } })).status, "DONE");
     const items = await request(`/api/projects/${id}/boq`); assert.equal(items.filter((i: { isHeader: boolean }) => !i.isHeader).length, 2);
     // 同内容文件再传一次 → contentHash 去重，不起新 run
     const formDup = new FormData();
@@ -152,7 +166,24 @@ async function main() {
     assert.equal(feeExport.worksheets[2].getCell("I2").value, 1400);
     assert.equal(feeExport.worksheets[2].getCell("L2").value, "总价措施");
     assert.equal(feeExport.worksheets[2].getCell("N2").value, "措施清单.xlsx");
-    console.log("PASS: 映射确认与 SSE、设置取价、主材价格语义、撤销冲突保护、费用复核、Agent 工具执行、总额编辑与撤销、同名源表 Excel 导出");
+    // 领域服务与工具共用计算路径：真库写回、回执、撤销一起验收。
+    await request(`/api/boq-items/${item.id}`, "PATCH", { mainMaterialPrice: "50", rawFeature: "DN100 沟槽连接 室内消防" });
+    const { previewProjectPricing } = await import("../quota/pricing");
+    const preview = await previewProjectPricing(id);
+    const pricedRow = preview.rows.find(r => r.itemId === item.id)!;
+    assert(pricedRow.quotaCode); assert.equal(pricedRow.needsMainPrice, false);
+    const written = await runTool("quota.applyCalc", { onlyItemIds: [item.id] });
+    assert.equal(written.applied, 1);
+    current = (await request(`/api/projects/${id}/boq`)).find((i: { id: string }) => i.id === item.id);
+    assert.equal(current.unitPrice, pricedRow.calcPrice);
+    assert.equal(current.mainMaterialPrice, "50");
+    assert(current.pricingPlan.length > 0);
+    assert(current.pricingPlan.every((line: { suggested?: boolean }) => !line.suggested));
+    const pricingReceipt = await prisma.actionReceipt.findFirstOrThrow({ where: { projectId: id, actionType: "PRICE_APPLY" }, orderBy: { createdAt: "desc" } });
+    await request(`/api/receipts/${pricingReceipt.id}/revert`, "POST");
+    current = (await request(`/api/projects/${id}/boq`)).find((i: { id: string }) => i.id === item.id);
+    assert.equal(current.unitPrice, "56"); assert.equal(current.mainMaterialPrice, "50");
+    console.log("PASS: 映射确认与 SSE 终态、设置取价、主材价格语义、撤销冲突保护、费用复核、Agent 工具执行、总额编辑与撤销、同名源表 Excel 导出、组价服务测算/写回一致与撤销");
     console.log(`隔离验收工程：${checkDir}`);
   } finally { await prisma.$disconnect(); server.kill(); }
 }

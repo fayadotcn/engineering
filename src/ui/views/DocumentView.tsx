@@ -1,13 +1,14 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { WorkspaceView } from "@shared/types";
 import { FileText } from "lucide-react";
-import { EmptyState } from "../primitives";
+
 
 /* ---------------- PDF 文档 ---------------- */
 
 export function DocumentView({ view }: { view: Extract<WorkspaceView, { kind: "document" }> }) {
   return (
-    <div className="h-full space-y-4 overflow-auto p-6">
+    <div className="view-content space-y-4">
       {view.pages.map((p, i) => (
         <div key={i} className="rounded-xl border border-border bg-[var(--card)] p-5 shadow-[var(--shadow-sm)]">
           <div className="mb-2 text-2xs text-muted-foreground">第 {i + 1} 页</div>

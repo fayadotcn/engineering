@@ -488,7 +488,7 @@ export class RulePlanner implements Planner {
       };
     }
 
-    // 人工组价：「镀锌钢管 定额改为 5H0332」「消防管 增列定额 5G0110」「XX 清除组价方案」
+    // 人工组价：「镀锌钢管 定额改为 CK0772」「消防管 增列定额 CJ0016」「XX 清除组价方案」
     // ——存疑匹配的专业处置出口。必须在「定额测算」之前：这些句式也含「定额」
     const quotaM = m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(?:定额|组价)?(?:改|换|设)(?:为|成)?\s*[：:=""]?\s*(?:定额|定额编号)?\s*([0-9A-Za-z][\w-]{2,15})\s*$/);
     const appendM = !quotaM && m.match(/([一-龥A-Za-z0-9]{1,20}?)(?:的)?(?:定额|子目|组价方案)?(?:增列|追加|加套|补套|增加)(?:定额|子目)?\s*[：:=""]?\s*([0-9A-Za-z][\w-]{2,15})\s*$/);
@@ -513,6 +513,17 @@ export class RulePlanner implements Planner {
         };
       };
       return { steps: [compute], fallbackMessage: scope ? `没有匹配「${scope}」的清单项` : "没有可组价的清单项" };
+    }
+
+    // 历史套用经验：「以前工程里防火阀怎么套」「查一下刚性防水套管的套用经验」
+    // ——必须在定额库检索之前：这些句式常同时含「定额」与「查」
+    if (/历史|经验|原来|以往|以前|宏业|怎么套|套用经验|套的什么/.test(m) && /套|定额/.test(m)) {
+      const q = m
+        .replace(/查一下|查|看|找|检索|看看|一下|的|历史|经验|原来|以往|以前|宏业|工程|里|中|内|定额|套用|怎么套|套的什么|怎么|吗|呢|啊|吧|？|\?|，|,|、|请|帮我/g, " ")
+        .replace(/\s+/g, " ").trim();
+      return {
+        steps: [{ tool: "quota.usage", args: { query: q || m.slice(0, 30) }, activity: "正在检索历史套用经验" }],
+      };
     }
 
     // 定额库检索：「定额库里有什么支吊架子目」「查一下DN150的定额」——查子目不走整单匹配
@@ -564,7 +575,7 @@ export class RulePlanner implements Planner {
       const apply = /补|填|写|套/.test(m) && !/预览|看看|查/.test(m);
       const steps: StepOrFn[] = [
         ...prefSteps,
-        { tool: "material.matchLibrary", args: {}, activity: "正在用材料库匹配未定价项主材价" },
+        { tool: "material.matchLibrary", args: {}, activity: "正在用材料库匹配缺主材价项" },
       ];
       if (apply)
         steps.push(

@@ -1,9 +1,10 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../store";
 import { FileSpreadsheet } from "lucide-react";
-import { EmptyState, toast } from "../primitives";
+import { toast } from "../primitives";
 import { Button } from "@/components/ui/button";
 import { cn, Tip, TipEl } from "./shared";
 
@@ -14,6 +15,7 @@ const ACTION_LABEL: Record<string, string> = {
   BOQ_UPDATE: "清单修改", PRICE_APPLY: "价格写回", QUANTITY_ADJUST: "总价调整", PRICE_ADJUST: "总价调整",
   FILE_IMPORT: "文件导入", FILE_DELETE: "文件删除", EXPORT: "导出",
   USER_EDIT: "手动编辑", FACT_SET: "台账写入", REVERT: "撤销", SETTINGS_UPDATE: "计价设置", PROJECT_CREATE: "新建工程",
+  PROJECT_RENAME: "工程改名",
 };
 
 export function ReceiptsView() {
@@ -31,7 +33,8 @@ export function ReceiptsView() {
     finally { setBusy(null); }
   };
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
+      <header className="view-heading"><div><span className="page-eyebrow">每次修改，有据可查</span><h2>操作记录</h2><p>查看修改来源，定位相关清单，或撤销可还原的操作。</p></div></header>
       <div className="xl-sheet overflow-auto rounded-lg">
         <table className="xl-table xl-pin-last">
           <thead>
@@ -63,7 +66,7 @@ export function ReceiptsView() {
                   </Badge>
                 </td>
                 <td className={`max-w-96 truncate ${r.reverted ? "text-muted-foreground line-through decoration-border" : "text-muted-foreground"} ${jumpable ? "group-hover:text-foreground group-hover:underline decoration-border underline-offset-2" : ""}`}><Tip tip={r.summary}>{r.summary}</Tip></td>
-                <td className="text-2xs text-muted-foreground">{r.createdBy === "user" ? "手动" : "Agent"}</td>
+                <td className="text-2xs text-muted-foreground">{r.createdBy === "user" ? "手动" : "助手"}</td>
                 <td className="text-center" onClick={(e) => e.stopPropagation()}>
                   {r.actionType === "REVERT" ? null : r.reverted ? (
                     <span className="text-2xs text-muted-foreground">已撤销</span>

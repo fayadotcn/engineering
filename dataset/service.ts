@@ -24,6 +24,8 @@ import {
   applicableBrands,
   pickBestPriceRow,
   specTokens,
+  normalizeNameKey,
+  GENERIC_SPEC,
   type PriceCandidate,
   type PricePrefs,
 } from "./priceMatch";
@@ -805,6 +807,7 @@ const toCandidate = (r: {
   region: string;
   period: string;
   createdAt: Date;
+  features?: string | null;
   dataset?: { name: string } | null;
 }): PriceCandidate => ({
   id: r.id,
@@ -818,24 +821,94 @@ const toCandidate = (r: {
   period: r.period,
   source: r.dataset?.name ?? "材料库",
   createdAt: r.createdAt.toISOString(),
+  category: fromJson<{ category?: string }>(r.features, {}).category,
 });
 
 /**
- * 候选取数三路 OR：名称前缀键 + 规格词根（型号式报价行无「材料名称」列，
- * 单靠 name contains 会整库漏掉）+ 特征材质（features JSON 子串）。
+ * 候选取数 = 检索键集合 × 每键独立限量。
+ *  单条 OR 混装的教训：宽键（管道类特征词、DN25 口径、泛尾部词）一检几千行，
+ *  take 截断把真命中行挤出候选——所以每个键单独 take，谁也不用猜「这个词够不够窄」。
+ *  键清单：名称前缀/首段/尾段（产品头部家族词）、特征材质、归一名 2-gram 召回
+ *  （翘板→跷板 同义归一后 contains）、规格词根（型号式报价行无材料名列）。
+ *  打分端头部判据（headSuffixLen）+ 类别 + 量词修饰把关，召回宽了也错不进去。
  */
-const priceCandidateWhere = (name: string, spec?: string, material?: string) => {
-  const key = name.slice(0, 6);
-  const or: Record<string, unknown>[] = [{ name: { contains: key } }];
-  // 查询侧同步归一（存储侧 ingest 已落 x 分隔符）——「4×35」查询命中「4x35」行
-  const specCompact = String(spec ?? "").replace(/\s/g, "").replace(/[×*]/g, "x");
-  if (specCompact) or.push({ spec: { contains: specCompact.slice(0, 20) } });
-  for (const t of [...specTokens(spec)].filter((t) => t.length >= 3).slice(0, 4))
-    or.push({ spec: { contains: t } });
+const priceNameKeys = (name: string, material?: string): { key: Record<string, unknown>; take: number }[] => {
+  const out: { key: Record<string, unknown>; take: number }[] = [];
+  const push = (where: Record<string, unknown>, take: number) => out.push({ key: where, take });
+  push({ name: { contains: name.slice(0, 6) } }, 25);
+  const cjkLead = name.match(/[一-龥]+/)?.[0];
+  if (cjkLead && cjkLead !== name && cjkLead.length >= 3)
+    push({ name: { contains: cjkLead.slice(0, 6) } }, 15);
+  const cjkTail = name.match(/[一-龥]+$/)?.[0] ?? "";
+  const tail3 = cjkTail.slice(-3), tail2 = cjkTail.slice(-2);
+  if (cjkTail.length >= 3 && tail3 !== name.slice(0, 6) && tail3 !== cjkLead?.slice(0, 6))
+    push({ name: { contains: tail3 } }, 20);
+  if (tail2.length === 2 && tail2 !== cjkTail.slice(0, 2))
+    push({ name: { contains: tail2 } }, 15);
   const mf = material ?? parseSemanticFeature(name, "").material;
-  if (mf) or.push({ features: { contains: `"material":"${mf}"` } });
+  if (mf) push({ features: { contains: `"material":"${mf}"` } }, 20);
+  // 归一名 2-gram 召回：只负责把同族行捞进候选，打分端决定命运
+  const nt = (normalizeNameKey(name).match(/[一-龥]+/g) ?? []).join("");
+  const grams = new Set<string>();
+  for (let i = 0; i + 1 < nt.length; i++) grams.add(nt.slice(i, i + 2));
+  for (const g of [...grams].slice(0, 10)) push({ name: { contains: g } }, 12);
+  return out;
+};
+
+const priceSpecWhere = (spec?: string, extraSpecText?: string) => {
+  const or: Record<string, unknown>[] = [];
+  // 查询侧同步归一（存储侧 ingest 已落 x 分隔符、² 归一为 2）——「4×35/4mm²」查询命中「4x35/4mm2」行；
+  // 「综合」这类泛口径词不当规格（行 spec 描述文含「综合考虑」会瞎撞）
+  const specCompact = String(spec ?? "").replace(/\s/g, "").replace(/[×*]/g, "x").replace(/²/g, "2").replace(/³/g, "3");
+  if (specCompact && !GENERIC_SPEC.test(specCompact)) {
+    or.push({ spec: { contains: specCompact.slice(0, 20) } });
+    or.push({ name: { contains: specCompact.slice(0, 20) } });
+  }
+  // 词根取数合并 extraSpecText（清单名里的型号段如 JDG20/ZB2-BV-4mm2，特征 spec 只有 DN20/4mm²）
+  for (const t of [...specTokens(`${spec ?? ""} ${extraSpecText ?? ""}`)].filter((t) => t.length >= 3).slice(0, 4)) {
+    or.push({ spec: { contains: t } });
+    or.push({ name: { contains: t } });
+  }
+  if (!or.length) return null;
   return { AND: [ACTIVE_DATASET, { OR: or }] };
 };
+
+/** 价格候选查询：每个检索键独立限量取数（并行），按键序合并去重保证可复现 */
+async function queryPriceCandidates(
+  name: string,
+  spec: string | undefined,
+  opts: { material?: string; category?: string; extraSpecText?: string; take?: number }
+) {
+  const sel = { include: { dataset: { select: { name: true } } },
+    // 同分候选的裁决依赖输入顺序——固定排序保证匹配结果可复现
+    orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }] };
+  const nameKeys = priceNameKeys(name, opts.material);
+  const specWhere = priceSpecWhere(spec, opts.extraSpecText);
+  const cat = opts.category ?? parseSemanticFeature(name, "").category;
+  const cjkTail = name.match(/[一-龥]+$/)?.[0] ?? "";
+  const catNameOr = [...new Set([cjkTail.slice(-3), cjkTail.slice(-2)])]
+    .filter((k) => k.length >= 2)
+    .map((k) => ({ name: { contains: k } }));
+  const [keyRows, specRows, catRows] = await Promise.all([
+    Promise.all(nameKeys.map(({ key, take }) =>
+      prisma.materialPrice.findMany({ ...sel, where: { AND: [ACTIVE_DATASET, key] }, take })
+    )),
+    specWhere
+      ? prisma.materialPrice.findMany({ ...sel, where: specWhere, take: opts.take ?? 80 })
+      : Promise.resolve([]),
+    cat && catNameOr.length
+      ? prisma.materialPrice.findMany({
+          ...sel,
+          // 类别 + 尾部词双约束：泛称家族行（单相三极插座/普通暗插座）只有这条轴检得到
+          where: { AND: [ACTIVE_DATASET, { features: { contains: `"category":"${cat}"` } }, { OR: catNameOr }] },
+          take: 60,
+        })
+      : Promise.resolve([]),
+  ]);
+  const seen = new Set<string>();
+  return [...keyRows.flat(), ...specRows, ...catRows]
+    .filter((r) => !seen.has(r.id) && seen.add(r.id));
+}
 
 /** 全局材料价格库检索（供 Agent 工具消费）；价格偏好（品牌/地区）参与排序 */
 export async function searchMaterialPrices(
@@ -896,11 +969,13 @@ export async function searchMaterialPrices(
   return out;
 }
 
-/** 主材价查找（定额测算用）：名称候选 → pickBestPriceRow 打分（含品牌/地区/期次偏好） */
+/** 主材价查找（定额测算用）：名称候选 → pickBestPriceRow 打分（含品牌/地区/期次偏好）。
+ *  opts.material/unit 参与打分会话；opts.extraSpecText 追加进词根取数（清单名里的型号段）。 */
 export async function findLibraryPrice(
   name: string,
   spec: string,
-  prefs?: PricePrefs
+  prefs?: PricePrefs,
+  opts?: { material?: string; unit?: string; category?: string; extraSpecText?: string }
 ): Promise<{
   price: number;
   name: string;
@@ -913,14 +988,17 @@ export async function findLibraryPrice(
   score: number;
   notes: string[];
 } | null> {
-  const rows = await prisma.materialPrice.findMany({
-    where: priceCandidateWhere(name, spec),
-    include: { dataset: { select: { name: true } } },
-    // 同分候选的裁决依赖输入顺序——固定排序保证匹配结果可复现
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: 80,
+  const rows = await queryPriceCandidates(name, spec, {
+    material: opts?.material, category: opts?.category, extraSpecText: opts?.extraSpecText, take: 80,
   });
-  const pick = pickBestPriceRow(rows.map(toCandidate), { name, spec }, prefs);
+  const pick = pickBestPriceRow(
+    rows.map(toCandidate),
+    {
+      name, spec, material: opts?.material, unit: opts?.unit,
+      category: opts?.category ?? parseSemanticFeature(name, "").category,
+    },
+    prefs
+  );
   if (!pick) return null;
   const r = pick.row;
   return {
@@ -942,7 +1020,7 @@ export async function matchLibraryForItem(
   item: {
     name: string;
     unit?: string;
-    features?: { material?: string; diameter?: string; specification?: string };
+    features?: { material?: string; diameter?: string; specification?: string; category?: string };
   },
   prefs?: PricePrefs
 ): Promise<{
@@ -961,18 +1039,13 @@ export async function matchLibraryForItem(
   notes: string[];
 } | null> {
   const spec = item.features?.diameter ?? item.features?.specification;
-  const rows = await prisma.materialPrice.findMany({
-    where: priceCandidateWhere(
-      item.features?.material ?? item.name,
-      [item.features?.diameter, item.features?.specification]
-        .filter(Boolean)
-        .join(" "),
-      item.features?.material
-    ),
-    include: { dataset: { select: { name: true } } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    take: 100,
-  });
+  const rows = await queryPriceCandidates(
+    item.features?.material ?? item.name,
+    [item.features?.diameter, item.features?.specification]
+      .filter(Boolean)
+      .join(" "),
+    { material: item.features?.material, extraSpecText: item.name, take: 100 }
+  );
   const pick = pickBestPriceRow(
     rows.map(toCandidate),
     {
@@ -980,6 +1053,7 @@ export async function matchLibraryForItem(
       spec,
       unit: item.unit,
       material: item.features?.material,
+      category: item.features?.category,
     },
     prefs
   );

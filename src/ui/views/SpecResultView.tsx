@@ -1,13 +1,14 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { WorkspaceView } from "@shared/types";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { EmptyState } from "../primitives";
+
 
 /* ---------------- 定额说明条文 ---------------- */
 
 export function SpecResultView({ view }: { view: Extract<WorkspaceView, { kind: "specResult" }> }) {
   return (
-    <div className="h-full space-y-4 overflow-auto p-6">
+    <div className="view-content space-y-4">
       <div className="text-2xs text-muted-foreground">
         检索词「{view.query}」· {view.hits.length} 条相关条文 · 来源：《四川省2020建设工程工程量清单计价定额》说明及计算规则
       </div>
@@ -16,7 +17,7 @@ export function SpecResultView({ view }: { view: Extract<WorkspaceView, { kind: 
         <div key={i} className="rounded-xl border border-border bg-[var(--card)] shadow-[var(--shadow-sm)]">
           <div className="flex items-center gap-2 border-b border-border px-5 py-3">
             <Badge variant="secondary" >{h.book}</Badge>
-            <span className="text-sm font-semibold text-foreground">{h.title}</span>
+            <span className="font-[var(--font-display)] text-sm font-medium text-foreground">{h.title}</span>
           </div>
           <pre className="whitespace-pre-wrap px-5 py-4 font-sans text-xs leading-relaxed text-foreground">
             {h.excerpt}

@@ -58,7 +58,7 @@ export function PricingSettings() {
         </SelectContent>
       </Select>
     : <Input value={values[f.key] ?? ""} onChange={e => { setDirty(true); setValues({ ...values, [f.key]: e.target.value }); }} type={f.key === "价格期" ? "month" : "text"} />}<small>{f.hint}</small></Label>;
-  return <form onSubmit={save} className="cost-settings"><Alert><Info /><AlertDescription>先填写常用设置。品牌可以留空；不计取的费率请填 0%。</AlertDescription></Alert>
+  return <form onSubmit={save} className="cost-settings"><header className="view-heading"><div><span className="page-eyebrow">报价的计算依据</span><h2>计价条件</h2><p>先填常用条件，其他费用按工程需要补充。</p></div></header><Alert className="mb-6"><Info /><AlertDescription>品牌可以留空；不计取的费率请填 0%。</AlertDescription></Alert>
     <fieldset disabled={busy || running || agentRunning || importRunning} className="min-w-0" aria-busy={busy}><div className="cost-settings-grid">{PRICING_FIELDS.filter(f => basic.has(f.key)).map(field)}</div><details className="cost-fact-details"><summary>更多费用和工程条件</summary><div className="cost-settings-grid">{PRICING_FIELDS.filter(f => !basic.has(f.key)).map(field)}</div></details></fieldset>
     <footer><p role="status">{dirty ? "有未保存的计价条件" : "计价条件已与当前测算同步"}</p><div className="cost-actions"><Button variant="outline" size="sm" disabled={busy || !dirty} type="button" onClick={() => setDirty(false)}>取消修改</Button><Button size="sm" disabled={busy || running || agentRunning || importRunning || !dirty} type="submit"><Save size={14} />{busy ? "正在保存…" : "保存计价条件"}</Button></div></footer>
     <details className="cost-fact-details"><summary>查看所有已保存信息</summary><FactList /></details>

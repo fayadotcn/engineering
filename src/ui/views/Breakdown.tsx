@@ -19,7 +19,7 @@ export function Breakdown({ view }: { view: Extract<WorkspaceView, { kind: "brea
   const colorOf = (s: BreakdownSlice, i: number) =>
     view.mode === "discipline" ? DISCIPLINE_COLOR[s.key] ?? DISCIPLINE_COLOR.OTHER : PALETTE[i % PALETTE.length];
   return (
-    <div className="flex h-full flex-wrap items-start gap-8 overflow-auto p-8 max-[420px]:gap-5 max-[420px]:p-4">
+    <div className="view-content flex flex-wrap items-start gap-8 max-[420px]:gap-5">
       <svg width="150" height="150" viewBox="0 0 140 140" className="mt-1 shrink-0 -rotate-90">
         <circle cx="70" cy="70" r={R} fill="none" strokeWidth="20" style={{ stroke: "var(--chart-track)" }} />
         {view.slices.map((s: BreakdownSlice, i) => {
@@ -39,7 +39,7 @@ export function Breakdown({ view }: { view: Extract<WorkspaceView, { kind: "brea
         })}
       </svg>
       <div className="min-w-0 flex-1 basis-80">
-        <div className="mono mb-4 text-xl font-medium">{fmtMoney(total)} <span className="text-xs font-normal text-muted-foreground">元</span></div>
+        <div className="mb-4 font-[var(--font-display)] text-xl font-medium tabular-nums">{fmtMoney(total)} <span className="font-sans text-xs font-normal text-muted-foreground">元</span></div>
         {view.slices.map((s, i) => (
           <div key={s.key} className="flex items-center gap-3 border-b border-border py-1.5 text-xs max-[420px]:flex-wrap max-[420px]:gap-x-2.5 max-[420px]:gap-y-0.5">
             <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: colorOf(s, i) }} />

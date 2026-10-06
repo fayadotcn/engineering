@@ -1,7 +1,6 @@
 "use client";
 import { usePathname } from "next/navigation";
-import { Database, FolderKanban, Layers3, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Database, FolderKanban, Layers3 } from "lucide-react";
 import { ThemeToggle } from "../ThemeToggle";
 
 const LINKS = [
@@ -9,10 +8,13 @@ const LINKS = [
   { href: "/admin", label: "材料与定额库", Icon: Database, match: (p: string) => p.startsWith("/admin") },
 ];
 
-/** 全局顶栏：品牌回首页 + 站点菜单 + 新建工程 + 主题。非工作台页面共用。 */
+/** 全局顶栏：官方条 + 品牌回首页 + 站点菜单 + 新建工程 + 主题。非工作台页面共用。 */
 export function SiteHeader() {
   const pathname = usePathname() ?? "/";
   return (
+    <>
+    <a className="skip-link" href="#main-content">跳到主要内容</a>
+    <div className="gov-strip">安装造价工作台 · <b>对话即造价</b></div>
     <header className="site-nav">
       <a href="/" className="site-nav-brand" aria-label="安装造价 · 返回首页">
         <span className="brand-tile"><Layers3 size={15} /></span>
@@ -26,13 +28,9 @@ export function SiteHeader() {
         ))}
       </nav>
       <div className="site-nav-actions">
-        <Button size="sm" asChild>
-          <a href="/new" aria-current={pathname === "/new" ? "page" : undefined}>
-            <Plus size={13} />新建工程
-          </a>
-        </Button>
         <ThemeToggle />
       </div>
     </header>
+    </>
   );
 }

@@ -8,8 +8,15 @@ const toRe = (v: unknown) =>
 const toExactRe = (v: unknown) =>
   typeof v === "string" && v ? new RegExp(`^${escapeRe(v)}$`, "i") : undefined;
 
-// 四川2020安装定额分册 → 所属系统词（用于跨册同名子目的 tiebreak）
+// 定额分册码 → 所属系统词（用于跨册同名子目的 tiebreak）
+// SC21=川2020清单定额（CA机械设备…CJ消防/CK给排水/CG通风/CM刷油绝热），5A–5K=川2000旧库
 const BOOK_SYSTEM: Record<string, string> = {
+  "CA": "机械设备", "CB": "热力|锅炉", "CC": "静置|金属结构|储罐|球罐",
+  "CD": "电气|配电|照明|电缆|桥架|防雷", "CE": "建筑智能化|弱电|智能",
+  "CF": "自动化|仪表|自控", "CG": "通风|空调|防排烟|风管",
+  "CH": "工业管道|工艺管道", "CJ": "消防|喷淋|消火栓|火灾报警|气体灭火",
+  "CK": "给水|排水|采暖|燃气|卫生器具", "CL": "通信|弱电|线路",
+  "CM": "刷油|防腐|绝热|保温",
   "5A": "机械设备", "5B": "电气|配电|照明|电缆|桥架|防雷",
   "5C": "热力|锅炉", "5D": "炉窑|砌筑", "5E": "静置|金属结构|储罐|球罐",
   "5F": "工业管道|工艺管道", "5G": "消防|喷淋|消火栓|火灾报警|气体灭火",
@@ -28,7 +35,7 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
       // 脏 JSON 行不拖垮整库匹配——兜底为空对象，该行退化为低分候选
       const mk = fromJson<Record<string, string>>(r.matchKeys, {});
       const fresh = parseSemanticFeature(r.name, "");
-      const raw = fromJson<{ gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string }>(r.raw, {});
+      const raw = fromJson<{ gcnr?: string; fb?: string; chapter?: string; jj?: number; mainMaterial?: string; qtsm?: string; jsgz?: string; mlsm?: string; glf?: number; lr?: number }>(r.raw, {});
       const mats = fromJson<{ name?: string; unit?: string; qtyPerUnit?: number }[]>(r.materials, [])
         .filter((m) => m.name && Number(m.qtyPerUnit) > 0)
         .map((m) => ({ name: String(m.name), unit: String(m.unit ?? ""), qtyPerUnit: Number(m.qtyPerUnit) }));
@@ -46,7 +53,7 @@ export async function getQuotaLibrary(): Promise<QuotaEntry[]> {
         machine: num(r.machine),
         mainQtyPerUnit: pos(r.mainQtyPerUnit, 1),
         materials: mats,
-        detail: { gcnr: raw.gcnr, fb: raw.fb, chapter: raw.chapter, jj: raw.jj, mainMaterial: raw.mainMaterial },
+        detail: { gcnr: raw.gcnr, fb: raw.fb, chapter: raw.chapter, jj: raw.jj, mainMaterial: raw.mainMaterial, qtsm: raw.qtsm, jsgz: raw.jsgz, mlsm: raw.mlsm },
         match: {
           // matchKeys 是导入时固化的旧规则产物——按当前语义规则重解析定额名，
           // 新类别（卫生器具/计量表/装饰类）立即可用，无需重导定额库

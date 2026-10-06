@@ -62,6 +62,7 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
+    ".next-dev/types/**/*.ts",
     "next-env.d.ts"
   ],
   "exclude": [

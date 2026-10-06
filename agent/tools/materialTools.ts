@@ -161,18 +161,19 @@ registerTool({
   },
 });
 
-// 缺价补价：未定价清单项 × 全局材料库。两步——matchLibrary 出预览表，
+// 缺价补价：缺主材暂估价的可计价项 × 全局材料库。两步——matchLibrary 出预览表，
 // fillFromLibrary 确认后写回（复用 quotationMatch / diff 视图）。
+// 已定价项同样需要主材暂估价——它是定额组价/成本分析的输入，与综合单价无关。
 registerTool({
   name: "material.matchLibrary",
-  description: "用全局材料价格库为未定价清单项找参考价，输出匹配预览（不写数据）",
+  description: "用全局材料价格库为缺主材暂估价的清单项找参考价，输出匹配预览（不写数据）",
   implemented: true,
   schema: z.object({}),
   handler: async (ctx) => {
     const prefs = await getPricePrefs(ctx.projectId);
     const items = await listBoq(ctx.projectId);
     const unpriced = items.filter((i) =>
-      isPricableItem(i) && Number(i.unitPrice) === 0 && Number(i.mainMaterialPrice ?? 0) === 0
+      isPricableItem(i) && Number(i.mainMaterialPrice ?? 0) === 0
     );
     const rows = [];
     const misses: typeof unpriced = [];
@@ -209,25 +210,24 @@ registerTool({
           }]
         : [],
       message: (rows.length
-        ? `材料库匹配到 ${rows.length}/${unpriced.length} 个未定价项的主材价，确认后写入「主材暂估价」（说「确认补价」；综合单价需经定额组价生成）`
-        : `未定价 ${unpriced.length} 项在材料库中没有命中`) + prefNote(prefs, offBrand),
+        ? `材料库匹配到 ${rows.length}/${unpriced.length} 个缺主材暂估价项的参考价，确认后写入「主材暂估价」（说「确认补价」；综合单价需经定额组价生成）`
+        : `${unpriced.length} 个缺主材暂估价项在材料库中没有命中`) + prefNote(prefs, offBrand),
     };
   },
 });
 
 registerTool({
   name: "material.fillFromLibrary",
-  description: "把材料库匹配价写回未定价清单项的主材暂估价（组价输入；需确认，生成 Diff 与回执）。材料价≠综合单价——综合单价须经定额组价生成",
+  description: "把材料库匹配价写回缺主材暂估价清单项（组价输入；需确认，生成 Diff 与回执）。材料价≠综合单价——综合单价须经定额组价生成",
   implemented: true,
-  confirm: () => "将把材料库匹配价写入未定价清单项的主材暂估价（组价输入，不改综合单价）",
+  confirm: () => "将把材料库匹配价写入缺主材暂估价清单项（组价输入，不改综合单价）",
   schema: z.object({}),
   handler: async (ctx) => {
     const prefs = await getPricePrefs(ctx.projectId);
     const items = await listBoq(ctx.projectId);
-    // 目标：未定价且尚无主材暂估价的可计价项（分部分项/单价措施）
+    // 目标：尚无主材暂估价的可计价项（分部分项/单价措施）——已定价项同样需要暂估价做组价输入
     const unpriced = items.filter((i) =>
-      isPricableItem(i) &&
-      Number(i.unitPrice) === 0 && Number(i.mainMaterialPrice ?? 0) === 0
+      isPricableItem(i) && Number(i.mainMaterialPrice ?? 0) === 0
     );
     const patches: { id: string; mainMaterialPrice: string; src: string }[] = [];
     const misses: string[] = [];

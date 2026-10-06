@@ -155,15 +155,19 @@ function materialConflictOf(itemMat: string, quotaMat: string): boolean {
   return true;
 }
 
-/** 定额分册域：编号前缀 → 专业域。跨域套用是错配重灾区（电气配管撞市政册同名子目） */
+/** 定额分册域：编号前缀 → 专业域。跨域套用是错配重灾区（电气配管撞市政册同名子目）。
+ *  川标编码：SC21(2020清单定额) 安装=CA–CN、房建(含装饰)=A*、仿古=B*、市政=D*、园林=E*、
+ *  构筑物=F*、轨道=G*、维修=H*、爆破=J*、管廊=K*、绿建=L*、装配式=M*、排水养护=N*、
+ *  道路养护=P*、轨道维护=Q*、路灯=S*；SC20(2000定额) 安装=5A–5K、土建=1*、装饰=2*、市政=3*。 */
 export type QuotaDomain = "INST" | "BUILD" | "DECOR" | "MUNI" | "OTHER";
 export function bookDomain(code: string): QuotaDomain {
-  if (/^5[A-Z]/.test(code)) return "INST";                 // 四川2020 安装 5A–5K
+  if (/^5[A-Z]/.test(code)) return "INST";                 // 四川2000 安装 5A–5K（旧库）
+  if (/^C[A-N]/.test(code)) return "INST";                 // 四川2020 安装 CA–CN
   if (/^[A-Z]{2}-\d/.test(code)) return "INST";            // 内置演示库（DB-/XA-/JB-/JA-）
   const p = code[0];
-  if (p === "1") return "BUILD";                           // 土建
-  if (p === "2") return "DECOR";                           // 装饰
-  if (p === "3") return "MUNI";                            // 市政
+  if (p === "1" || /^[ABEFHLM]/.test(code)) return "BUILD"; // 房建/仿古/园林/构筑物/维修/绿建/装配式
+  if (p === "2") return "DECOR";                           // 装饰（2000 旧库编码；2020 装饰并入房建 A）
+  if (p === "3" || /^[DGKNPQS]/.test(code)) return "MUNI"; // 市政/轨道/管廊/排水养护/道路养护/路灯
   return "OTHER";
 }
 
@@ -352,7 +356,7 @@ export function scoreQuotaDetail(item: BoqItemDTO, q: QuotaEntry): QuotaScoreDet
   const substantive = Math.max(0, s - domDelta);
   if (m.keywords) s += m.keywords.test(text) ? 10 : 0;
   // 系统归属：清单项的分部路径/名称出现系统词时，所属分册一致的定额加分。
-  // 解决「镀锌钢管DN100」在消防册(5G)与给排水册(5H)同分的跨册歧义。
+  // 解决「镀锌钢管DN100」在消防册(CJ)与给排水册(CK)同分的跨册歧义。
   if (m.system) {
     const scope = `${item.sectionPath ?? ""} ${text} ${f.system ?? ""}`;
     s += sysRe(m.system).test(scope) ? 12 : 0;
@@ -467,7 +471,8 @@ export function quotaLaborTotals(rows: QuotaCalcRow[]) {
   const books: Record<string, Decimal> = {};
   for (const row of rows.filter(r => r.quotaCode)) {
     const amount = D(row.labor ?? 0).mul(D(row.quantity));
-    const book = row.quotaCode!.match(/^(5[A-Z])/)?.[1] ?? "通用";
+    // 册码取编号前缀：SC21 安装 CA–CN/房建 A* 等两位字母；SC20 旧库 5A–5K
+    const book = row.quotaCode!.match(/^([5C][A-Z]|[A-Z]{2})/)?.[1] ?? "通用";
     total = total.plus(amount);
     books[book] = (books[book] ?? D(0)).plus(amount);
   }
@@ -484,11 +489,25 @@ export function quotaMaterials(q: QuotaEntry): { name: string; unit: string; qty
 }
 
 /** 主材标记：材料名与 detail.mainMaterial 对齐者为首主材（取价走清单暂估价通道） */
-function primaryMatIdx(q: QuotaEntry, mats: { name: string }[]): number {
+export function primaryMatIdx(q: QuotaEntry, mats: { name: string }[]): number {
   if (!mats.length) return -1;
   const pm = q.detail?.mainMaterial;
   const i = pm ? mats.findIndex((m) => m.name === pm || m.name.includes(pm) || pm.includes(m.name)) : -1;
   return i >= 0 ? i : 0;
+}
+
+/** 伪材料名：定额用料表里的汇总/摊销口径行（其他材料费/水/损耗…），
+ *  不是可询价材料——计入缺价清单就是把「缺主材价」误报成普遍现象，
+ *  取价查询这类名字也永远搜不到正经价格行。 */
+export const PSEUDO_MAT = /^(?:其他?|其它)?材料费$|^水$|^电$|损耗|摊销|周转|^(?:其他|其它)费|合价|小计/;
+
+/** 定额声明的首主材（取价搜索词）：跳过伪材料，泛名「主材」由调用方回退清单名 */
+export function primaryMaterialOf(q: QuotaEntry): { name: string; unit: string } | null {
+  const mats = quotaMaterials(q);
+  const i = primaryMatIdx(q, mats);
+  const m = i >= 0 ? mats[i] : null;
+  if (!m || PSEUDO_MAT.test(m.name.trim())) return null;
+  return { name: m.name.trim(), unit: m.unit };
 }
 
 /** 单条定额 → 组价方案行（每清单单位口径：定额单位倍数已折算）。
@@ -555,10 +574,14 @@ export function planPrice(plan: PricingPlanLine[]): Decimal {
 const SCOPE_NEEDS: {
   key: string; covered: RegExp; find: RegExp; reason: string;
   applies?: (item: BoqItemDTO, q?: QuotaEntry) => boolean;
-  /** 允许跨册取子目的前缀（刷油/防腐/绝热在 5K 册，保温在 5K/建筑册） */
+  /** 允许跨册取子目的前缀（刷油/防腐/绝热在 C.M 册，保温在 C.M/房建册） */
   books?: RegExp;
   /** 找不到定额子目时的材料提示（仍出建议行，提醒该内容要另计） */
   materialNote?: string;
+  /** 材料类缺口的已含判据：定额 materials[] 里有匹配未计价材料才算覆盖。
+   *  gcnr 文字「上零件/管件安装」只说明安装工含了——材料按定额说明仍按设计/按实另计，
+   *  借套子目（沟槽件清单套螺纹子目）尤其不能靠文字覆盖挡掉建议。 */
+  matCovered?: RegExp;
 }[] = [
   {
     key: "管道消毒冲洗", covered: /冲洗|消毒/, find: /消毒.*冲洗|冲洗.*消毒|管道消毒|管道冲洗/,
@@ -575,23 +598,30 @@ const SCOPE_NEEDS: {
     reason: "主定额工作内容未含管道试验（水压/灌水/通球/吹扫）",
   },
   {
-    key: "沟槽管件", covered: /管件|零件|接头|上零件/, find: /沟槽.*管件|管件.*沟槽|卡箍/,
-    reason: "沟槽连接的管件（弯头/三通/卡箍）为独立主材，定额含量表不含",
+    // C.J.1：管道安装（沟槽连接）已包括直接卡箍件安装，其他沟槽管件另行执行相关项目；
+    // 沟槽管件主材包括卡箍及密封圈以"套"计。借套螺纹子目时「上零件」绝不能当沟槽管件已含。
+    key: "沟槽管件", covered: /沟槽.*管件|卡箍/, find: /沟槽.*管件|管件.*沟槽|卡箍/,
+    reason: "沟槽连接的管件（弯头/三通/机械三通/卡箍）另行执行管件连接子目，主材按套另计",
     applies: (i) => /沟槽|卡箍/.test(`${i.name}${i.rawFeature}${i.features?.connectionMethod ?? ""}`),
-    materialNote: "沟槽管件为未计价主材，按实另计",
+    materialNote: "沟槽管件（含卡箍及密封圈）为未计价主材，按设计数量另计",
+    matCovered: /沟槽|卡箍/,
   },
   {
-    key: "管件", covered: /管件|零件|接头|上零件/, find: /管件.*连接|管件/,
+    key: "管件", covered: /管件|零件|接头/, find: /管件.*连接|管件/,
     reason: "卡压/特殊连接的管件为独立主材，定额通常未含",
-    applies: (i) => /卡压|卡套/.test(i.features?.connectionMethod ?? ""),
+    applies: (i) => /卡压|卡套|环压/.test(i.features?.connectionMethod ?? ""),
     materialNote: "管件为未计价主材，按实另计",
+    matCovered: /卡压|卡套|环压/,
   },
   {
+    // C.J.1：钢管（法兰连接）定额中包括管件及法兰安装，但管件、法兰数量应按设计图纸用——
+    // 安装工含了，法兰片/垫片/螺栓材料仍按设计数量另计，不能被「法兰连接」gcnr 挡掉。
     key: "法兰", covered: /法兰/, find: /法兰安装|法兰盘安装/,
     reason: "法兰连接件（法兰片/垫片/螺栓）为独立子目或主材",
     applies: (i) => /法兰/.test(`${i.features?.connectionMethod ?? ""}${i.name}`) &&
       !/法兰/.test(`${i.features?.category ?? ""}`) , // 法兰阀门类自身已是法兰项不单列
-    materialNote: "法兰及紧固件为未计价主材，按实另计",
+    materialNote: "法兰及紧固件为未计价主材，按设计数量另计",
+    matCovered: /法兰|垫片|紧固件|螺栓/,
   },
   {
     key: "套管", covered: /套管/, find: /套管.*制作|套管.*安装|一般套管|刚性套管|柔性套管|塑料套管/,
@@ -600,26 +630,26 @@ const SCOPE_NEEDS: {
   },
   {
     key: "除锈", covered: /除锈/, find: /除锈/,
-    reason: "除锈为独立子目（5K 刷油防腐册）",
+    reason: "除锈为独立子目（C.M 刷油防腐蚀绝热册）",
     // 黑色金属管道（焊接/无缝/铸铁管）惯例要除锈刷漆，清单不写也要建议
     applies: (i) => /除锈/.test(`${i.name}${i.rawFeature}`) ||
       /^(钢管|焊接钢管|无缝钢管|铸铁管|钢管.*)$/.test(i.features?.material ?? "") ||
       /焊接钢管|无缝钢管|铸铁管/.test(`${i.name}${i.rawFeature}`),
-    books: /^5[Kk]/,
+    books: /^5[Kk]|^CM/,
   },
   {
     key: "刷油防腐", covered: /刷油|刷漆|防锈漆|调和漆|沥青漆|防腐漆|油漆|银粉|防腐/, find: /刷油|刷漆|防锈漆|调和漆|沥青漆|防腐漆|银粉/,
-    reason: "刷漆/防腐涂装为独立子目（5K 册），管道本体定额不含",
+    reason: "刷漆/防腐涂装为独立子目（C.M 册），管道本体定额不含",
     applies: (i) => /刷漆|刷油|防锈|调和漆|沥青漆|防腐漆|油漆|银粉|防腐/.test(`${i.name}${i.rawFeature}`) ||
       /^(钢管|焊接钢管|无缝钢管|铸铁管)$/.test(i.features?.material ?? "") ||
       /焊接钢管|无缝钢管|铸铁管/.test(`${i.name}${i.rawFeature}`),
-    books: /^5[Kk]|^1[Hh]/,
+    books: /^5[Kk]|^1[Hh]|^CM|^A/,
   },
   {
     key: "保温绝热", covered: /保温|绝热|保冷|橡塑|岩棉|玻璃棉|聚氨酯|硅酸铝/, find: /绝热|保温|橡塑|岩棉|玻璃棉|聚氨酯|硅酸铝|保冷/,
-    reason: "保温/绝热层为独立子目（5K 册），管道本体定额不含",
+    reason: "保温/绝热层为独立子目（C.M 册），管道本体定额不含",
     applies: (i) => /保温|绝热|保冷|橡塑|岩棉|玻璃棉|聚氨酯|硅酸铝/.test(`${i.name}${i.rawFeature}`),
-    books: /^5[Kk]|^1[Hh]/,
+    books: /^5[Kk]|^1[Hh]|^CM|^A/,
   },
   {
     key: "电缆头", covered: /电缆头|终端头|中间头/, find: /电缆头|电缆终端|电缆中间头/,
@@ -666,7 +696,7 @@ function suggestSupplementary(
   const applicable = SCOPE_NEEDS.filter((n) => !n.applies || n.applies(item, q));
   if (!applicable.length && !pipeish && !elecrish && !hvacish) return [];
   const coveredText = `${q.name} ${q.detail?.gcnr ?? ""}`;   // gcnr 列出的工作即已含
-  const bookPrefix = q.code.slice(0, 2); // SC2020 编号前两位=分册
+  const bookPrefix = q.code.slice(0, 2); // 川标编号前两位=分册（CJ=消防/CK=给排水…）
   // 直径档归一化：DN100/公称直径100mm以内 → 数字 "100"，只在直径语境里匹配
   // （不能裸匹配数字——"混凝土基础400×400"不是 DN400）
   const diaNum = (item.features?.diameter ?? "").replace(/\D/g, "");
@@ -680,7 +710,12 @@ function suggestSupplementary(
     // 管道、风管类清单跑全量 covered 判定的通用工序（冲洗/支架/试验）
     if (!need.applies && !pipeish && !hvacish) continue;
     const spec = specCovered(need, specText);
-    if (need.covered.test(coveredText) || spec === "covered") continue; // 主定额/说明已含该工序
+    // 材料类缺口（沟槽管件/卡压管件/法兰）：唯一可信「已含」证据是定额 materials[]
+    // 里有对应未计价材料——gcnr/说明里的「含管件安装」管的是安装工不是材料钱，
+    // 让这类条文覆盖掉建议就是把材料费漏掉（费用不够）。
+    const matsHit = !!need.matCovered && quotaMaterials(q).some((mm) => need.matCovered!.test(mm.name));
+    if (matsHit) continue;
+    if (!need.materialNote && (need.covered.test(coveredText) || spec === "covered")) continue; // 主定额/说明已含该工序
     // 候选：同分册域内自由借套（安装册间支架/冲洗互通是常态），跨域只允许 need.books 指定册
     const qDom = bookDomain(q.code);
     const cands = lib
@@ -779,16 +814,16 @@ export function calcQuota(
       ? (ownMain.gt(0) ? Number(ownMain) : lookedUp && D(lookedUp).gt(0) ? Number(lookedUp) : undefined)
       : undefined;
     // 多材料解析：首主材走 mainPrice，管件/法兰/配件走 matPrices[name]，全部未计价材料逐一核价
-    const pi = mats.findIndex((mm) => {
-      const pm = q.detail?.mainMaterial;
-      return pm ? (mm.name === pm || mm.name.includes(pm) || pm.includes(mm.name)) : false;
-    });
-    const primaryIdx = pi >= 0 ? pi : (mats.length ? 0 : -1);
+    const primaryIdx = primaryMatIdx(q, mats);
     const missingMats: string[] = [];
     let main = D(0);
     for (let i = 0; i < mats.length; i++) {
       const price = i === primaryIdx ? mainPrice : opts.matPrices?.[mats[i].name];
-      if (price === undefined || price === null) { if (expectsMain) missingMats.push(mats[i].name); continue; }
+      if (price === undefined || price === null) {
+        // 伪材料名（其他材料费/水/损耗…）不计缺价——它们本就不是可询价材料
+        if (expectsMain && !PSEUDO_MAT.test(mats[i].name.trim())) missingMats.push(mats[i].name);
+        continue;
+      }
       main = main.plus(D(price).mul(mats[i].qtyPerUnit));
     }
     // 任何未计价材料缺价都使测算不完整（管件/法兰/配件也是钱）——缺价名单透出，偏差不予置信

@@ -13,6 +13,8 @@ npm run dev               # http://127.0.0.1:3210
 npm run build && npm start # 生产构建
 ```
 
+开发服务输出到 `.next-dev/`，正式构建输出到 `.next/`，两者互不覆盖。两种服务默认使用同一端口，启动前先关闭占用端口的服务。
+
 数据与存储位置（`.env`）：
 
 ```dotenv
@@ -22,7 +24,7 @@ STORAGE_DIR="./storage"
 
 ### 模型配置（可选）
 
-对话默认走内置规则引擎，全功能可用；配置模型后启用 LLM 规划（造价业务规则仍在工具里，
+对话默认走内置规则引擎，全功能可用；配置模型后启用 LLM 规划（造价业务规则由领域服务和确定性引擎承载，
 不进 prompt）。任一方式即可：
 
 ```dotenv
@@ -64,17 +66,19 @@ MODEL_NAME=deepseek-chat
 ## 目录
 
 ```
-agent/        自有 Agent 引擎：runtime（会话循环）/planner（意图路由）/executor/pending（确认门）
+agent/        自有 Agent 引擎：runtime（会话循环）/runs（生命周期与并发守卫）/planner（意图路由）
+              /confirmation/pending（确认门）/executor（工具审计与结果输出）
               /llm（模型出口）/events（SSE 事件）/autopilot + tools/（专业工具，含 schema 守卫）
 cost-engine/  纯函数确定性造价引擎（decimal.js）：money/semantic/match/quota/aggregate/adjust/
               fees/costComposition/calcExpr/fileCompare —— 所有金额只能在这里算
-file/         解析与接入：excel（表头定位/列角色/类型学/写回）、pdf、inspection（识别+模板缓存）、
+file/         解析与接入：ingest（项目文件接入与导入确认口径）、excel（表头定位/列角色/类型学/写回）、pdf、inspection（识别+模板缓存）、
               classify（文件类型/阶段期次）、factsExtract（台账事实）、compareReport、storage
 boq/          清单领域服务：service（导入/查询/改价）、mapRow（行→落库）、ingestRules（行级口径判定）
 material/     材料价匹配消费端
 project/      工程与计价设置领域服务（payload/facts）
 dataset/      全局数据集：service、priceParse、priceMatch、quotaParse（定额表解析）
-quota/        定额库（内置参考库 + 已上传数据集合并）
+quota/        定额服务：service/library（库加载）、matching（匹配与未匹配处置）、
+              pricing（材料取价/测算/写回/人工组价）、spec（说明检索与章节证据）
 shared/       跨端类型与纯函数：types/mapping（角色对齐）/json/settings
 src/app/      Next 路由（页面 + /api）
 src/ui/       工作台 UI（会话轨、清单表、各结果视图、admin 面板、shadcn 组件）
@@ -82,6 +86,8 @@ prisma/       schema 与迁移（SQLite，保持 Postgres 可移植：Json/枚�
 tests/        vitest（引擎/工具/解析/前端视图）
 scripts/      数据导入与回归脚本（test-real/check-cost-flow/make-fixtures/import-sc2020-*）
 ```
+
+当前模块职责、依赖方向和验证方式见 [架构说明](docs/restructure-design.md)。
 
 ## 关键口径（红线）
 

@@ -26,7 +26,7 @@ vi.mock("@quota/service", () => ({
       code: "5H0332", name: "镀锌钢管安装 DN100", unit: "10m", unitScale: 10,
       labor: 100, material: 20, machine: 5, mainQtyPerUnit: 1.02,
       detail: { mainMaterial: "镀锌钢管" },
-      match: {},
+      match: { category: "管道", material: /镀锌/, diameter: /DN100/ },
     },
     {
       code: "5H0999", name: "管道冲洗消毒", unit: "100m", unitScale: 100,
@@ -48,11 +48,15 @@ vi.mock("@project/facts", async (importOriginal) => {
 
 const specRows = vi.hoisted(() => ({ rows: [] as { book: string; title: string; content: string }[] }));
 vi.mock("@database/client", () => ({
-  prisma: { specSection: { findMany: vi.fn(async () => specRows.rows) } },
+  prisma: {
+    specSection: { findMany: vi.fn(async () => specRows.rows) },
+    quotaRow: { findMany: vi.fn(async () => []) },
+  },
 }));
 
 import "../agent/tools/quotaTools";
 import { getTool } from "../agent/tools/registry";
+import { previewProjectPricing, applyProjectPricing } from "@quota/pricing";
 
 const ctx = { projectId: "p", runId: "r1", userId: "u", emit: vi.fn() };
 const item = (over: Partial<BoqItemDTO> = {}): BoqItemDTO => ({
@@ -128,6 +132,47 @@ describe("quota.search 结果序确定性", () => {
   });
 });
 
+describe("quota.search 语义检索", () => {
+  const qCall = (query: string) =>
+    getTool("quota.search")!.handler!(ctx as never, { query } as never) as Promise<{
+      observation: {
+        code: string; name: string;
+        unpricedMaterials: { name: string; qtyPerUnit: number }[];
+        mainMaterial: string | null;
+      }[];
+    }>;
+  it("「镀锌钢管 DN65」命中定额名写「公称直径65mm以内」的子目（非整串匹配）", async () => {
+    const { getQuotaLibrary } = await import("@quota/service");
+    // 与 getQuotaLibrary 生产形态一致：material regex 必带 materialLabel
+    vi.mocked(getQuotaLibrary).mockResolvedValueOnce([
+      { code: "5H0007", name: "室外管道 镀锌钢管 螺纹连接 公称直径 65mm以内", unit: "10m", unitScale: 10, labor: 17.6, material: 18.83, machine: 1.44, mainQtyPerUnit: 1.015, detail: {}, match: { category: "管道", material: /镀锌钢管/, materialLabel: "镀锌钢管", diameter: /^DN65$/, connection: /螺纹/, connectionLabel: "螺纹" } },
+      { code: "5H0104", name: "室内管道 镀锌钢管 螺纹连接 公称直径 65mm以内", unit: "10m", unitScale: 10, labor: 67.98, material: 20.92, machine: 17.13, mainQtyPerUnit: 1.02, detail: { mainMaterial: "镀锌钢管" }, materials: [{ name: "镀锌钢管接头零件", unit: "个", qtyPerUnit: 0.425 }, { name: "型钢", unit: "kg", qtyPerUnit: 0.6254 }, { name: "镀锌钢管", unit: "m", qtyPerUnit: 1.02 }], match: { category: "管道", material: /镀锌钢管/, materialLabel: "镀锌钢管", diameter: /^DN65$/, connection: /螺纹/, connectionLabel: "螺纹" } },
+      { code: "5H0108", name: "室内管道 镀锌钢管 螺纹连接 公称直径 150mm以内", unit: "10m", unitScale: 10, labor: 110.15, material: 27.87, machine: 32.4, mainQtyPerUnit: 1.02, detail: {}, match: { category: "管道", material: /镀锌钢管/, materialLabel: "镀锌钢管", diameter: /^DN150$/, connection: /螺纹/, connectionLabel: "螺纹" } },
+      { code: "5A1246", name: "制冰设备安装 盐水制冰设备 冰池盖 包镀锌铁皮", unit: "台", unitScale: 1, labor: 31.8, material: 80.22, machine: 0, mainQtyPerUnit: 1, detail: {}, match: { category: "设备", material: /镀锌钢板/, materialLabel: "镀锌钢板" } },
+    ] as never);
+    const r = await qCall("镀锌钢管 DN65");
+    const codes = r.observation.map((h) => h.code);
+    expect(codes).toContain("5H0007");
+    expect(codes).toContain("5H0104");
+    // 档位相邻的 DN150 同种管子目可以出现，但异类设备行（镀锌铁皮）不得进结果
+    expect(codes).not.toContain("5A1246");
+    // 同档行排最前
+    expect(codes.slice(0, 2).sort()).toEqual(["5H0007", "5H0104"]);
+    // 未计价材料含量透出：管件/型钢与主材同列——「不含主材」口径不能把管件丢掉
+    const hit = r.observation.find((h) => h.code === "5H0104")!;
+    expect(hit.unpricedMaterials.map((m) => m.name)).toContain("镀锌钢管接头零件");
+    expect(hit.mainMaterial).toBe("镀锌钢管");
+  });
+  it("定额编号检索仍走字面命中", async () => {
+    const { getQuotaLibrary } = await import("@quota/service");
+    vi.mocked(getQuotaLibrary).mockResolvedValueOnce([
+      { code: "5H0332", name: "管道镀锌钢管 DN100", unit: "10m", unitScale: 10, labor: 100, material: 20, machine: 5, mainQtyPerUnit: 1.02, detail: {}, match: {} },
+    ] as never);
+    const r = await qCall("5h0332");
+    expect(r.observation.map((h) => h.code)).toEqual(["5H0332"]);
+  });
+});
+
 describe("quota.calculate 主材询价规格归一化", () => {
   it("询价规格 4×35 命中清单特征 4x35（×/x 等价），不再回退材料库", async () => {
     const { listQuotations } = await import("@material/service");
@@ -140,6 +185,49 @@ describe("quota.calculate 主材询价规格归一化", () => {
     db.items = [item({ name: "电力电缆", rawFeature: "YJV-4x35+1x16", features: { specification: "4x35" } as never })];
     await getTool("quota.calculate")!.handler!(ctx as never, {} as never);
     expect(vi.mocked(findLibraryPrice)).not.toHaveBeenCalled(); // 项目询价已命中
+  });
+});
+
+describe("组价服务与工具适配", () => {
+  it("测算价与实际写回相等，组价方案排除建议行，主材价不被改写", async () => {
+    const preview = await previewProjectPricing("p", "r1");
+    const calculated = preview.rows.find(r => r.itemId === "i1")!;
+    expect(calculated.quotaCode).toBeTruthy();
+    const applied = await applyProjectPricing("p");
+    expect(applied.applied).toBe(1);
+    expect(db.updates[0].patch.unitPrice).toBe(calculated.calcPrice);
+    expect(db.updates[0].patch.pricingPlan).toEqual(calculated.plan!.filter(l => !l.suggested));
+    expect(db.updates[0].patch).not.toHaveProperty("mainMaterialPrice");
+  });
+
+  it("缺材料价测算不完整，默认跳过，显式指定才写回", async () => {
+    db.items = [item({ mainMaterialPrice: "0" })];
+    const preview = await previewProjectPricing("p");
+    expect(preview.needMain).toBe(1);
+    expect(preview.rows[0].deviation).toBeNull();
+    expect((await applyProjectPricing("p")).applied).toBe(0);
+    expect(db.updates).toEqual([]);
+    expect((await applyProjectPricing("p", { includeIncomplete: true })).applied).toBe(1);
+  });
+
+  it("费率缺失拒绝写回，显式 0% 可以组价，每种费率只读取一次", async () => {
+    db.facts.clear();
+    await expect(applyProjectPricing("p")).rejects.toThrow("管理费率尚未确认");
+    expect(db.updates).toEqual([]);
+    db.facts = new Map([["管理费率", "0%"], ["利润率", "0%"]]);
+    const { getFact } = await import("@project/facts");
+    vi.mocked(getFact).mockClear();
+    expect((await applyProjectPricing("p")).applied).toBe(1);
+    expect(getFact).toHaveBeenCalledTimes(2);
+  });
+
+  it("指定目标项时只写目标，仍返回可撤销的前后快照", async () => {
+    db.items = [item(), item({ id: "i2" })];
+    const result = await applyProjectPricing("p", { onlyItemIds: ["i2"] });
+    expect(result.applied).toBe(1);
+    expect(db.updates.map(p => p.id)).toEqual(["i2"]);
+    expect(result.before[0].unitPrice).toBe("80");
+    expect(result.after[0].unitPrice).toBe(db.updates[0].patch.unitPrice);
   });
 });
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
-import { ActiveRunError, liveRunWhere, startRun } from "@agent/runtime";
+import { ActiveRunError, liveRunWhere } from "@agent/runs";
+import { startRun } from "@agent/runtime";
 
 // 按当前（可能已被用户修正的）列映射重新导入：走 agent run，全程留痕。
 export async function POST(

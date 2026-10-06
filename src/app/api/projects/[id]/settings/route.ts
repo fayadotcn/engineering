@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@database/client";
 import { PRICING_FIELDS } from "@shared/settings";
 import { getFacts, validatePricingFact, pricingFactType } from "@project/facts";
-import { findLiveRun } from "@agent/runtime";
+import { findLiveRun } from "@agent/runs";
 import { toJson } from "@shared/json";
 
 const schema = z.record(z.string().max(80)).refine(values => Object.keys(values).every(key => PRICING_FIELDS.some(f => f.key === key)), "包含未知设置");

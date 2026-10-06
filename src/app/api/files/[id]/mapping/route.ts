@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
-import { applySheetPatch, ensureInspection, mappingToView } from "@file/inspection";
+import { applySheetPatch, ensureInspection, mappingToView, withImportCounts } from "@file/inspection";
+import { storage } from "@file/storage";
 import type { SheetType } from "@file/excel";
 import { fromJson, toJson } from "@shared/json";
 
@@ -31,6 +32,7 @@ export async function PATCH(
   const sheet = mapping[sheetName];
   if (!sheet)
     return NextResponse.json({ error: "sheet 不存在" }, { status: 404 });
+  const buffer = await storage.get(file.storageKey);
 
   // 读-改-写竞态：两个并发 PATCH（不同 sheet）或导入写 meta 时，
   // 拿请求开始时的 meta 整写会丢对方改动——事务内重读最新 meta 再打补丁
@@ -41,6 +43,7 @@ export async function PATCH(
     const target = latest?.[sheetName];
     if (!target) return null; // 提交间隙 sheet 被重识别改名/删除
     applySheetPatch(target, body);
+    await withImportCounts(buffer, { [sheetName]: target });
     meta.mapping = latest;
     await tx.projectFile.update({ where: { id: file.id }, data: { meta: toJson(meta) } });
     return latest;

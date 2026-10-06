@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { revertReceipt, RevertError } from "@boq/revert";
-import { findLiveRun } from "@agent/runtime";
+import { findLiveRun } from "@agent/runs";
 
 export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

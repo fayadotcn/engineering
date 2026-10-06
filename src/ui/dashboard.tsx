@@ -54,12 +54,12 @@ export function DisciplineDonut({
 export function ProgressRing({ pct, done }: { pct: number; done?: boolean }) {
   const p = Math.min(Math.max(pct, 0), 100);
   return (
-    <div className="ring" role="progressbar" aria-valuenow={p} aria-valuemin={0} aria-valuemax={100} aria-label="定价进度">
+    <div className="cost-progress-ring" role="progressbar" aria-valuenow={p} aria-valuemin={0} aria-valuemax={100} aria-label="定价进度">
       <svg viewBox="0 0 42 42">
         <circle cx="21" cy="21" r={R} fill="none" stroke="var(--chart-track)" strokeWidth="5" />
         <circle
           cx="21" cy="21" r={R} fill="none"
-          stroke={done ? "var(--success-soft-fg)" : "var(--foreground)"}
+          stroke={done ? "var(--success-soft-fg)" : "var(--primary)"}
           strokeWidth="5" strokeLinecap="round"
           strokeDasharray={`${p} ${100 - p}`}
           strokeDashoffset="25"

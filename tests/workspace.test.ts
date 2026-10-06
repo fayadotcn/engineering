@@ -16,6 +16,22 @@ function fixture(items: unknown[] = []) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("专业结果与工程对话联动", () => {
+  it("导入停在确认门时立即释放控件，不等待持续连接的取消完成", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    const fallback = globalThis.fetch;
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const event = new TextEncoder().encode('data: {"seq":1,"type":"confirm_request","payload":{"confirmId":"c1","tool":"file.ingest","description":"核对清单","args":{"fileId":"f1"}}}\n\n');
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/stream")) return { ok: true, body: { getReader: () => ({ read: async () => ({ done: false, value: event }), cancel }) } };
+      if (url.endsWith("/files") && init?.method === "POST") return { ok: true, json: async () => ({ runId: "import-1" }) };
+      return fallback(url, init);
+    }));
+    await useStore.getState().upload(new File(["data"], "清单.xlsx"));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(useStore.getState()).toMatchObject({ running: false, importRunning: false });
+    expect(useStore.getState().blocks).toContainEqual(expect.objectContaining({ type: "confirm", confirmId: "c1", fileId: "f1" }));
+  });
+
   it("对话正在导入时，工作区不发起模型任务或批准另一项导入", async () => {
     fixture(); await useStore.getState().init("project-1");
     useStore.setState({ importRunning: true });
@@ -33,6 +49,18 @@ describe("专业结果与工程对话联动", () => {
     await useStore.getState().confirmImport("import-1", true);
     expect(fetch).not.toHaveBeenCalled();
     expect(useStore.getState().mappingDirty).toBe(true);
+  });
+
+  it("刷新待确认任务后保留核对入口，不重接流锁住映射和批准", async () => {
+    fixture();
+    const fallback = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => url.endsWith("/runs")
+      ? { ok: true, json: async () => [{ id: "import-1", status: "AWAITING_CONFIRM", userMessage: "分析并导入文件「清单.xlsx」", events: [{ seq: 1, type: "confirm_request", payload: { confirmId: "c1", tool: "file.ingest", description: "核对清单", args: { fileId: "f1" } } }] }] }
+      : fallback(url, init)));
+    await useStore.getState().init("project-1");
+    expect(useStore.getState()).toMatchObject({ running: false, agentRunning: false, importRunning: false });
+    expect(useStore.getState().blocks).toContainEqual(expect.objectContaining({ type: "confirm", confirmId: "c1", fileId: "f1" }));
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url]) => String(url).endsWith("/stream"))).toBe(false);
   });
 
   it("按需打开工作区先展示总览，清单和历史结果仍可查看", async () => {
@@ -234,6 +262,27 @@ describe("专业结果与工程对话联动", () => {
     await useStore.getState().streamRun("import-1");
     expect(useStore.getState().blocks.filter(b => b.type === "confirm" && !b.decided)).toHaveLength(0);
     expect(useStore.getState().running).toBe(false);
+  });
+
+  it("批准导入后显示已保存的映射，续流的旧识别快照不覆盖人工修改", async () => {
+    fixture(); await useStore.getState().init("project-1");
+    const fallback = globalThis.fetch;
+    const old = { kind: "columnMapping", id: "view:mapping:f1", fileId: "f1", title: "映射", filename: "清单.xlsx", fileStatus: "PENDING", sheets: [{ type: "QUOTATION", columns: { price: 4 } }] };
+    const saved = { ...old, fileStatus: "PARSED", sheets: [{ type: "BOQ", columns: { unitPrice: 4 }, itemsToImport: 2 }] };
+    useStore.setState({ blocks: [{ type: "confirm", confirmId: "c1", runId: "import-1", tool: "file.ingest", fileId: "f1", description: "核对" }] });
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/stream")) return { ok: true, body: new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode([
+          { seq: 1, type: "workspace_patch", payload: { view: old } },
+          { seq: 2, type: "run_finished", payload: { status: "DONE" } },
+        ].map(e => `data: ${JSON.stringify(e)}\n\n`).join("")));
+        controller.close();
+      } }) };
+      if (url.endsWith("/runs")) return { ok: true, json: async () => [{ id: "import-1", status: "DONE", userMessage: "导入", events: [{ seq: 1, type: "workspace_patch", payload: { view: saved } }] }] };
+      return fallback(url, init);
+    }));
+    await useStore.getState().confirmImport("import-1", true);
+    expect(useStore.getState().views.find(v => v.id === saved.id)).toMatchObject(saved);
   });
 
   it("Agent 产出新结果不抢走用户正在看的页面，只把它排进结果列表", async () => {

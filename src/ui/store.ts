@@ -9,8 +9,20 @@ import { isBusy, isDirty } from "./busy";
 
 export type { ConvBlock } from "./runEvents";
 export { FIXED_VIEWS } from "./sections";
-/** 发起任务时展开对话面板的事件名（Workbench 监听；任务进度在对话里看） */
-export const OPEN_CONV_EVENT = "cost:open-conv";
+/** 关闭视图浮层的待确认哨兵：pendingViewId === 此值表示「关闭面板」而非切换视图 */
+export const CLOSE_VIEW_ID = "__close__";
+
+/** 首页直达任务的交接袋：File 对象过不了 URL，挂在模块级 Map 上随 SPA 导航存活，
+ *  工作台 init 就绪后由 Workbench 取出消费（先补传文件，再发出第一句话）。 */
+const pendingStarts = new Map<string, { message: string; files: File[] }>();
+export function armPendingStart(projectId: string, start: { message: string; files: File[] }) {
+  pendingStarts.set(projectId, start);
+}
+export function takePendingStart(projectId: string) {
+  const start = pendingStarts.get(projectId);
+  pendingStarts.delete(projectId);
+  return start ?? null;
+}
 
 interface State {
   projectId: string | null;
@@ -24,6 +36,8 @@ interface State {
   blocks: ConvBlock[];
   views: WorkspaceView[];
   activeViewId: string | null;
+  /** 视图浮层是否展开。对话是主界面，视图按需浮出。 */
+  viewOpen: boolean;
   lastViewEvent: string | null;
   /** 有请求在途（上传、确认、事件流） */
   running: boolean;
@@ -72,6 +86,8 @@ interface State {
   streamRun(runId: string, skipSeqs?: Set<number>): Promise<void>;
   confirmImport(runId: string, approve: boolean): Promise<void>;
   setActiveView(id: string): void;
+  /** 关闭视图浮层；有未保存修改时先走 pendingViewId 确认门（哨兵 CLOSE_VIEW_ID）。 */
+  closeOverlay(): void;
   closeView(id: string, fallbackId?: string): void;
   /** 同 id 视图替换（列映射保存后服务端回传的最新视图） */
   replaceView(view: WorkspaceView): void;
@@ -147,7 +163,7 @@ async function userWrite<T>(get: Get, opts: { write: () => Promise<T>; done: str
 
 const INITIAL = {
   projectName: "", items: [], facts: [], files: [], receipts: [], summary: null, blocks: [], views: [],
-  activeViewId: null, lastViewEvent: null, ready: false, running: false, agentRunning: false, importRunning: false,
+  activeViewId: null, viewOpen: false, lastViewEvent: null, ready: false, running: false, agentRunning: false, importRunning: false,
   mappingDirty: false, settingsDirty: false, boqDirty: false, saving: false, pendingViewId: null, closedViewIds: [],
   loadingError: null, boqQuery: "", boqOnlyUnpriced: false, boqFocusVersion: 0, flashIds: [], flashSeq: 0, modelDown: null,
 } satisfies Partial<State>;
@@ -184,10 +200,9 @@ export const useStore = create<State>((set, get) => ({
         views, lastViewEvent: replay.lastViewEvent, modelDown: replay.modelDown, ready: true, loadingError: null,
         activeViewId: opening.startsWith("empty:") || views.some((v) => v.id === opening) ? opening : "view:overview",
       });
-      // 接管仍存活的任务流：刷新页面或另窗口发起的导入留下的 RUNNING/
-      // AWAITING_CONFIRM run，只回放历史不接流就会永远停在半截状态；
-      // 已回放的事件按 seq 预置去重，只消费增量。
-      const live = [...runs].reverse().find((r) => !r.legacy && (r.status === "RUNNING" || r.status === "AWAITING_CONFIRM"));
+      // 接管正在执行的任务，只消费增量。待确认任务已回放出确认卡片，
+      // 此时需保留编辑和批准入口，用户批准后由 confirmImport 重新接流。
+      const live = [...runs].reverse().find((r) => !r.legacy && r.status === "RUNNING");
       if (live) {
         const importRun = INGEST_RE.test(live.userMessage);
         set({ running: true, agentRunning: !importRun, importRunning: importRun });
@@ -224,8 +239,6 @@ export const useStore = create<State>((set, get) => ({
     if (!projectId || isBusy(get()) || !get().ready || !text.trim()) return;
     if (isDirty(get())) { toast.info("请先保存或取消当前编辑，再发起任务"); return; }
     set((s) => ({ running: true, agentRunning: true, blocks: [...s.blocks, { type: "user", text }] }));
-    // 任务进度在对话面板里——面板收起时先展开，用户不至于「点了没反应」
-    window.dispatchEvent(new Event(OPEN_CONV_EVENT));
     try {
       const { runId } = await api.startRun(projectId, text, extra);
       if (get().projectId !== projectId) return;
@@ -271,8 +284,9 @@ export const useStore = create<State>((set, get) => ({
             // 停在确认门或任务结束：交还控制权，确认后由 confirmImport 重新接流
             const awaiting = e.type === "confirm_request" && get().blocks.some((b) => b.type === "confirm" && b.confirmId === e.payload.confirmId && !b.decided);
             if (awaiting || e.type === "run_finished") {
-              await reader.cancel();
               if (get().projectId === projectId) set({ running: false });
+              // 确认门仍保持服务端运行；传输层取消可能等到该任务结束，不能挡住核对和批准。
+              void reader.cancel().catch(() => {});
               return;
             }
           }
@@ -297,7 +311,8 @@ export const useStore = create<State>((set, get) => ({
       set((s) => ({ blocks: s.blocks.map((b) => (b.type === "confirm" && b.runId === runId ? { ...b, decided: approve ? "approved" : "rejected" } : b)) }));
       await get().streamRun(runId);
       if (get().projectId !== projectId) return;
-      await Promise.all([get().refreshMeta(), get().reloadBoq()]);
+      // 续流会回放识别时的旧映射，重新装配当前已保存的文件状态。
+      await get().init(projectId, true);
     } catch (error) {
       if (get().projectId === projectId) toast.error(errText(error, "确认失败"));
     } finally {
@@ -520,10 +535,16 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setActiveView(id) {
-    if (id === get().activeViewId) return;
+    if (id === get().activeViewId && get().viewOpen) return;
     if (get().saving) { toast.info("正在保存，请稍候再切换页面"); return; }
     if (isDirty(get())) { set({ pendingViewId: id }); return; }
-    set((s) => ({ activeViewId: id, closedViewIds: s.closedViewIds.filter((v) => v !== id) }));
+    set((s) => ({ activeViewId: id, viewOpen: true, closedViewIds: s.closedViewIds.filter((v) => v !== id) }));
+  },
+
+  closeOverlay() {
+    if (get().saving) { toast.info("正在保存，请稍候"); return; }
+    if (isDirty(get())) { set({ pendingViewId: CLOSE_VIEW_ID }); return; }
+    set({ viewOpen: false });
   },
 
   replaceView(view) {

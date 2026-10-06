@@ -1,9 +1,10 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Fragment, type ComponentProps } from "react";
 import { useStore } from "../store";
 import type { AnomalyRow, WorkspaceView } from "@shared/types";
 import { AlertTriangle } from "lucide-react";
-import { EmptyState } from "../primitives";
+
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn, fmtMoney, displayFeature, Tip, TipEl } from "./shared";
@@ -29,7 +30,7 @@ export function AnomalyTable({ view }: { view: Extract<WorkspaceView, { kind: "a
   const { gotoBoqItem } = useStore();
   let rn = 0;
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
       <div className="xl-sheet overflow-auto rounded-lg">
         <table className="xl-table xl-pin-last table-fixed">
           <thead>

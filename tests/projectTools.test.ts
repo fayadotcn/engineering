@@ -37,6 +37,7 @@ vi.mock("@file/storage", () => ({ storage: { get: vi.fn(), put: vi.fn() } }));
 vi.mock("@file/inspection", () => ({ ensureInspection: vi.fn(), mappingToView: vi.fn(), toSheetMappings: vi.fn(), SHEET_TYPE_LABEL: {} }));
 
 import "../agent/tools/projectTools";
+import "../agent/tools/fileTools";
 import { getTool } from "../agent/tools/registry";
 
 const ctx = { projectId: "p1", runId: "r1", userId: "u", emit: vi.fn() };

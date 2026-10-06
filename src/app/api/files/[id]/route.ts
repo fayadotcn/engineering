@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@database/client";
 import { storage } from "@file/storage";
 import { toJson } from "@shared/json";
-import { liveRunWhere } from "@agent/runtime";
+import { liveRunWhere } from "@agent/runs";
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

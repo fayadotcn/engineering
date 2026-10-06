@@ -7,6 +7,7 @@ import { useStore } from "./store";
 import { DISCIPLINE_COLOR } from "./colors";
 import { DisciplineDonut, ProgressRing } from "./dashboard";
 import { FeeWaterfall } from "./FeeWaterfall";
+import { sectionOf } from "./sections";
 import type { Discipline } from "@shared/types";
 
 const money = (value: string) => Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -42,7 +43,7 @@ export function CostOverview({ onUpload }: { onUpload?: () => void }) {
     .filter(d => d.checks.length);
   const driftCount = driftFiles.reduce((n, d) => n + d.checks.length, 0);
   const driftMax = driftFiles.flatMap(d => d.checks).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))[0];
-  const hasResults = s.views.some(v => v.id.startsWith("view:") && !["view:boq", "view:files", "view:overview", "view:facts", "view:receipts", "view:prices"].includes(v.id));
+  const hasResults = s.views.some(v => sectionOf(v.kind) === "results");
 
   /** 点专业跳到这个专业对应的清单行——数字能追问。 */
   const drillDiscipline = (key: string) => {
@@ -54,38 +55,36 @@ export function CostOverview({ onUpload }: { onUpload?: () => void }) {
   };
 
   const steps = [
-    { label: "传清单", done: !!r?.itemCount, click: () => s.setActiveView("view:files") },
-    { label: "补计价设置", done: !!r?.itemCount && !missing.length, click: () => s.setActiveView("view:facts") },
-    { label: "填价格", done: pricable > 0 && !unpriced, click: () => s.setActiveView("view:boq") },
-    { label: "出成果", done: hasResults, click: () => s.setActiveView("empty:results") },
+    { label: "上传清单", done: !!r?.itemCount, click: () => s.setActiveView("view:files") },
+    { label: "计价条件", done: !!r?.itemCount && !missing.length, click: () => s.setActiveView("view:facts") },
+    { label: "完成组价", done: pricable > 0 && !unpriced, click: () => s.setActiveView("view:boq") },
+    { label: "报价成果", done: hasResults, click: () => s.setActiveView("empty:results") },
   ];
   const currentStep = steps.findIndex(st => !st.done);
   const hasBoq = !!r?.itemCount;
 
   return <div className="cost-overview cost-simple-overview">
-    <ol className="cost-steps">{steps.map((st, i) => <li key={st.label} className={`${st.done ? "done" : ""} ${i === currentStep ? "current" : ""}`}><button onClick={st.click}><i>{st.done ? <Check size={11} /> : i + 1}</i>{st.label}</button></li>)}</ol>
+    <header className="view-heading"><div><span className="page-eyebrow">从资料到报价</span><h2>工程概况</h2><p>当前进度、费用与下一步，都在这里。</p></div></header>
+    <ol className="cost-steps" aria-label="工程报价进度">{steps.map((st, i) => <li key={st.label} className={`${st.done ? "done" : ""} ${i === currentStep ? "current" : ""}`}><Button variant="ghost" size="sm" onClick={st.click} aria-current={i === currentStep ? "step" : undefined}><i aria-hidden="true">{st.done ? <Check size={11} /> : i + 1}</i>{st.label}<span className="sr-only">{st.done ? "已完成" : "待完成"}</span></Button></li>)}</ol>
 
     <div className="dash-hero">
       <div className="cost-next-step"><div><small>现在做这一步</small><h3>{next.title}</h3><p>{next.text}</p></div><Button disabled={busy} onClick={next.click}>{next.icon}{next.action}<ArrowRight size={14} /></Button></div>
       {hasBoq && <div className="dash-kpis">
-        <Card className="min-w-0 gap-1 rounded-xl border-border px-4 py-3.5 shadow-xs">
+        <Card className="dash-kpi min-w-0 gap-2 rounded-lg p-5 shadow-none max-[520px]:grid max-[520px]:grid-cols-[1fr_auto] max-[520px]:items-center">
           <span className="text-2xs text-muted-foreground">当前总价（暂计）</span>
-          <strong className="text-[clamp(var(--text-xl),2.6vw,var(--text-2xl))] font-semibold tracking-[-.03em] tabular-nums [overflow-wrap:anywhere]">{wanNum(r!.fees.grandTotal)}<small className="ml-1 text-2xs font-normal text-muted-foreground">元</small></strong>
+          <strong className="dash-number">{wanNum(r!.fees.grandTotal)}<small>元</small></strong>
           <p className="mt-auto text-2xs text-muted-foreground">{missing.includes("税率") ? "未填税率，暂不计税" : `${r!.itemCount} 项清单 · ${s.files.length} 份文件`}</p>
         </Card>
-        {pricable > 0 && <Card className="min-w-0 gap-1 rounded-xl border-border px-4 py-3.5 shadow-xs">
+        {pricable > 0 && <Card className="dash-kpi min-w-0 gap-2 rounded-lg p-5 shadow-none max-[520px]:grid max-[520px]:grid-cols-[1fr_auto] max-[520px]:items-center">
           <span className="text-2xs text-muted-foreground">定价进度</span>
           <div className="dash-kpi-ring"><ProgressRing pct={coverage} done={coverage >= 100} /></div>
           <p className="mt-auto text-2xs text-muted-foreground">{priced} / {pricable} 项已报价</p>
         </Card>}
         {/* 整块可点 → Card asChild 承载 button，保住按钮语义与键盘可达 */}
-        <Card asChild className={cn("min-w-0 gap-1 rounded-xl border-border px-4 py-3.5 text-left shadow-xs",
-          unpriced
-            ? "cursor-pointer transition-[border-color,box-shadow,transform] duration-[var(--dur-base)] hover:enabled:-translate-y-px hover:enabled:border-ring hover:enabled:shadow-sm active:enabled:translate-y-0"
-            : "disabled:cursor-default")}>
+        <Card asChild className={cn("dash-kpi min-w-0 gap-2 rounded-lg p-5 text-left shadow-none max-[520px]:grid max-[520px]:grid-cols-[1fr_auto] max-[520px]:items-center", unpriced && "dash-kpi-action")}>
           <button disabled={!unpriced} onClick={() => { useStore.setState({ boqOnlyUnpriced: true }); s.setActiveView("view:boq"); }}>
             <span className="text-2xs text-muted-foreground">还没报单价</span>
-            <strong className={cn("text-[clamp(var(--text-xl),2.6vw,var(--text-2xl))] font-semibold tracking-[-.03em] tabular-nums [overflow-wrap:anywhere]", unpriced && "text-warning-soft-fg")}>{unpriced}<small className="ml-1 text-2xs font-normal text-muted-foreground">项</small></strong>
+            <strong className={cn("dash-number", unpriced && "text-warning-soft-fg")}>{unpriced}<small>项</small></strong>
             <p className={cn("mt-auto text-2xs text-muted-foreground", unpriced && "text-warning-soft-fg")}>{unpriced ? "点击查看这些项目 →" : "当前没有未报价项"}</p>
           </button>
         </Card>
@@ -94,15 +93,15 @@ export function CostOverview({ onUpload }: { onUpload?: () => void }) {
     {hasBoq && <p className="cost-conclusion">这个工程目前合计约 <strong>{wan(r!.fees.grandTotal)}</strong>{missing.includes("税率") ? "（税金还没算进去）" : ""}，{unpriced ? <>还有 <strong>{unpriced}</strong> 项没填单价。</> : "清单里的项目都填了价。"}</p>}
 
     {hasBoq && (mix.length > 0 || Number(r!.fees.grandTotal) > 0) && <div className="dash-charts">
-      {mix.length > 0 && <Card className="min-w-0 gap-0 rounded-xl border-border p-4 shadow-xs">
-        <div className="dash-card-head"><span>钱都花在哪</span><small>按专业分 · 点图下钻清单</small></div>
+      {mix.length > 0 && <Card className="dash-chart min-w-0 gap-0 rounded-lg p-5 shadow-none">
+        <div className="dash-card-head"><span>各专业费用占比</span><small>选择专业，查看清单</small></div>
         <div className="dash-card-body donut-wrap">
           <DisciplineDonut slices={mix} center={wanNum(r!.fees.grandTotal)} sub="含税总价" onSelect={drillDiscipline} />
           <ul className="cost-mix-legend">{mix.map(d => { const pct = d.share > 0 && d.share < 0.005 ? "<1%" : `${Math.round(d.share * 100)}%`; return <li key={d.key}><button onClick={() => drillDiscipline(d.key)} title={`只看${d.label}的清单`}><i style={{ background: DISCIPLINE_COLOR[d.key] ?? DISCIPLINE_COLOR.OTHER }} />{d.label}<em>{wan(d.amount)} · {pct}</em></button></li>; })}</ul>
         </div>
       </Card>}
-      {Number(r!.fees.grandTotal) > 0 && <Card className="min-w-0 gap-0 rounded-xl border-border p-4 shadow-xs">
-        <div className="dash-card-head"><span>费用怎么加出来的</span><small>分部分项 → 措施 → 规费 → 税金</small></div>
+      {Number(r!.fees.grandTotal) > 0 && <Card className="dash-chart min-w-0 gap-0 rounded-lg p-5 shadow-none">
+        <div className="dash-card-head"><span>费用构成</span><small>从清单费用到含税总价</small></div>
         <div className="dash-card-body">
           <FeeWaterfall rows={r!.fees.rows} grandTotal={r!.fees.grandTotal}
             onFix={missing.length ? () => s.setActiveView("view:facts") : undefined} />

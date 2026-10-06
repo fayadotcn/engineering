@@ -88,10 +88,10 @@ function pickTier(tiers: MeasureFeeRate["tiers"], height: number) {
   return best;
 }
 
-/** 系统调整费名称 → 适用分册（采暖/燃气给排水在 5H，通风空调在 5I） */
+/** 系统调整费名称 → 适用分册（SC21：采暖工程系统调整费在 CK，空调水/通风空调在 CK/CG；5H/5I=旧库） */
 const SYSTEM_BOOK: [RegExp, string[]][] = [
-  [/采暖/, ["5H"]],
-  [/通风空调/, ["5I"]],
+  [/采暖/, ["CK", "5H"]],
+  [/通风空调|空调水/, ["CG", "CK", "5I"]],
 ];
 
 export function computeMeasureFees(

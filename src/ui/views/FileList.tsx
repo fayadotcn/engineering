@@ -1,9 +1,10 @@
 "use client";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useRef, useState } from "react";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useStore } from "../store";
-import { FileSpreadsheet, FileText } from "lucide-react";
-import { ConfirmDialog, EmptyState, toast } from "../primitives";
+import { FileSpreadsheet, FileText, Upload } from "lucide-react";
+import { ConfirmDialog, toast } from "../primitives";
 import { Button } from "@/components/ui/button";
 import { readResponse } from "../api";
 import { cn, Tip, TipEl } from "./shared";
@@ -24,7 +25,7 @@ const fmtBytes = (n?: number) => {
 
 const CMP_STAGE_ORDER = ["招标", "投标", "清标", "进度", "变更", "报审", "结算", "财评"];
 
-export function FileList() {
+export function FileList({ onUpload }: { onUpload?: () => void }) {
   const { files, views, blocks, closedViewIds, setActiveView, init, projectId, running, agentRunning, importRunning, saving, send } = useStore();
   const [busy, setBusy] = useState<string | null>(null);
   const [pendingDel, setPendingDel] = useState<{ id: string; name: string } | null>(null);
@@ -77,7 +78,8 @@ export function FileList() {
     finally { lock.current = false; setBusy(null); if (useStore.getState().projectId === projectId) useStore.setState({ saving: false }); }
   };
   return (
-    <div className="h-full overflow-auto p-4">
+    <div className="view-content">
+      <header className="view-heading"><div><span className="page-eyebrow">工程的原始依据</span><h2>项目资料</h2><p>清单、询价表与说明文档，集中保存。</p></div>{onUpload && <Button variant="outline" size="sm" disabled={blocked} onClick={onUpload}><Upload size={14} />上传资料</Button>}</header>
       <div className="mb-2 flex items-center justify-between gap-3">
         <p className="cost-file-hint mb-0">上传后系统会整理文件；需要你检查的表格会显示“待核对”。</p>
         {cmpPair && (
@@ -139,28 +141,28 @@ export function FileList() {
                 </td>
                 <td className="text-center">
                   {(f.status === "UPLOADED" || f.status === "FAILED") && !awaiting && (
-                    <button className="cost-file-action" disabled={blocked} onClick={() => void parseFile(f.id, f.filename)}>
+                    <Button variant="ghost" size="xs" disabled={blocked} onClick={() => void parseFile(f.id, f.filename)}>
                       {busy === f.id ? "解析中…" : f.status === "FAILED" ? "重新解析" : "开始解析"}
-                    </button>
+                    </Button>
                   )}
-                  {(view || closedId) && <button className="cost-file-action" onClick={() => void openFile(view?.id ?? closedId!)}>{view?.kind === "columnMapping" || closedId?.startsWith("view:mapping:") ? "核对表格" : "查看文档"}</button>}
+                  {(view || closedId) && <Button variant="ghost" size="xs" onClick={() => void openFile(view?.id ?? closedId!)}>{view?.kind === "columnMapping" || closedId?.startsWith("view:mapping:") ? "核对表格" : "查看文档"}</Button>}
                   <TipEl tip="下载上传的原文件">
-                    <a className="cost-file-action" href={`/api/files/${f.id}/download`} download>下载</a>
+                    <Button variant="ghost" size="xs" asChild><a href={`/api/files/${f.id}/download`} download>下载</a></Button>
                   </TipEl>
-                  <button
+                  <Button variant="ghost" size="xs"
                     onClick={() => setPendingDel({ id: f.id, name: f.filename })}
                     disabled={blocked}
-                    className="cost-file-action danger"
+                    className="text-muted-foreground hover:text-destructive"
                   >
                     删除
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ); })}
           </tbody>
         </table>
       </div>
-      {!files.length && <EmptyState icon={<FileSpreadsheet size={22} />} title="还没有文件" />}
+      {!files.length && <EmptyState icon={<FileSpreadsheet size={22} />} title="还没有文件" hint="上传 Excel 或 PDF，系统会识别表格，需要核对的内容会提示你确认。" action={onUpload && <Button disabled={blocked} onClick={onUpload}><Upload size={14} />上传第一份资料</Button>} />}
       <ConfirmDialog
         open={!!pendingDel}
         danger

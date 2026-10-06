@@ -5,6 +5,7 @@ import "../agent/tools/costTools";
 import "../agent/tools/excelTools";
 import "../agent/tools/materialTools";
 import "../agent/tools/projectTools";
+import "../agent/tools/fileTools";
 import "../agent/tools/quotaTools";
 import { listTools, registerTool, toolNameFromWire, toolSchemasForLLM } from "../agent/tools/registry";
 

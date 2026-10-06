@@ -1,176 +1,110 @@
 import { z } from "zod";
-import type Decimal from "decimal.js";
 import { registerTool } from "./registry";
-import { listBoq } from "@boq/service";
-import { listQuotations } from "@material/service";
-import { calcQuota, matchQuota, top2Quota, mainPriceKey, lineFromQuota, planPrice, quotaLaborTotals, hasMatchEvidence, nameBigrams, refreshItemFeatures, quotaMaterials } from "@cost-engine/quota";
-import { specNorm, specCompatible } from "@cost-engine/match";
 import { getQuotaLibrary } from "@quota/service";
-import { findLibraryPrice, getPricePrefs } from "@dataset/service";
-import { getFact, setFact, parseRateValue } from "@project/facts";
-import { D, fmtMoney } from "@cost-engine/money";
-import { isPricableItem } from "@shared/types";
-import type { BoqItemDTO, DiffRow } from "@shared/types";
-
-type QuoteList = Awaited<ReturnType<typeof listQuotations>>;
-type PricePrefs = Awaited<ReturnType<typeof getPricePrefs>>;
-
-/**
- * 主材价求解（quota.calculate / applyCalc 共用）：项目询价按 material+spec 优先，
- * 未命中回退全局材料库（含品牌/地区/期次偏好打分）。
- * 置信 <60 不取——错价比缺价更糟：缺价会标 needsMainPrice 留给询价环节。
- */
-async function resolveMainPrices(
-  leaf: BoqItemDTO[],
-  quotes: QuoteList,
-  pricePrefs: PricePrefs
-): Promise<{
-  mainPrices: Record<string, number>;
-  libCount: number;
-  libOffBrand: number;
-}> {
-  const mainPrices: Record<string, number> = {};
-  let libCount = 0, libOffBrand = 0;
-  for (const it of leaf) {
-    const f = it.features ?? {};
-    const spec = f.diameter ?? f.specification ?? "";
-    const hit = quotes.find((q) => {
-      const qf = q.features ?? {};
-      const qSpec = qf.diameter ?? qf.specification ?? q.spec;
-      const sameSpec = !!(
-        spec && qSpec &&
-        // 与 matchQuotations 同一归一化口径：DN前缀/×÷*分隔符等价 + 复合芯段覆盖
-        specCompatible(spec, qSpec)
-      );
-      const nameHit = !!(
-        q.materialName &&
-        (it.name.includes(q.materialName) ||
-          (f.material && q.materialName.includes(f.material)))
-      );
-      // 名称必须命中——同规格不同材料（DN100 钢管 vs DN100 塑料管）只差规格不能取价；
-      // 询价有规格时再加严：规格也得一致，防错价比缺价更糟
-      return nameHit && (sameSpec || !qSpec);
-    });
-    if (hit && !D(hit.price).isZero()) {
-      mainPrices[mainPriceKey(it)] = Number(hit.price);
-      continue;
-    }
-    const libHit = await findLibraryPrice(f.material ?? it.name, spec, pricePrefs);
-    if (libHit && libHit.score >= 60 && !D(libHit.price).isZero()) {
-      mainPrices[mainPriceKey(it)] = libHit.price;
-      libCount++;
-      if (libHit.notes.some((n) => n.includes("非指定"))) libOffBrand++;
-    }
-  }
-  return { mainPrices, libCount, libOffBrand };
-}
-
-/** 辅助未计价材料取价（管件/法兰/配件/法兰盘…）：定额用料表 materials[] 里
- *  首主材之外的材料名 → 项目询价 → 材料库（置信<60 不取，错价比缺价更糟）。 */
-async function resolveMatPrices(
-  chosen: { item: BoqItemDTO; q: import("@quota/library").QuotaEntry }[],
-  quotes: QuoteList,
-  pricePrefs: PricePrefs
-): Promise<{ matPrices: Record<string, number>; matLibCount: number }> {
-  const matPrices: Record<string, number> = {};
-  let matLibCount = 0;
-  const names = new Set<string>();
-  for (const { q } of chosen) {
-    const mats = quotaMaterials(q);
-    const pm = q.detail?.mainMaterial;
-    const pi = mats.findIndex((m) => pm && (m.name === pm || m.name.includes(pm) || pm.includes(m.name)));
-    mats.forEach((m, i) => { if (i !== (pi >= 0 ? pi : 0)) names.add(m.name); });
-  }
-  for (const name of names) {
-    const qh = quotes.find((qt) =>
-      qt.materialName && (qt.materialName === name || name.includes(qt.materialName) || qt.materialName.includes(name)));
-    if (qh && !D(qh.price).isZero()) { matPrices[name] = Number(qh.price); continue; }
-    const lh = await findLibraryPrice(name, "", pricePrefs);
-    if (lh && lh.score >= 60 && !D(lh.price).isZero()) { matPrices[name] = lh.price; matLibCount++; }
-  }
-  return { matPrices, matLibCount };
-}
-
-/** 定额说明章节正文：按定额 detail.fb（册）+ detail.chapter（章）用 bigram 桥接
- *  SpecSection.book/title 同源词汇（都出自定额体系），取交集命中节的正文合并。 */
-async function specTextsFor(quotas: import("@quota/library").QuotaEntry[]): Promise<Record<string, string>> {
-  const { prisma } = await import("@database/client");
-  const secs = await prisma.specSection.findMany({ select: { book: true, title: true, content: true } });
-  const out: Record<string, string> = {};
-  for (const q of quotas) {
-    const fb = q.detail?.fb ?? "", ch = q.detail?.chapter ?? "";
-    if (!fb && !ch) continue;
-    const key = `${fb}|${ch}`;
-    if (key in out) continue;
-    const fbB = nameBigrams(fb), chB = nameBigrams(ch);
-    const hit = secs.filter((s) => {
-      let fbHit = 0, chHit = 0;
-      const sB = nameBigrams(s.book), tB = nameBigrams(s.title);
-      for (const b of fbB) if (sB.has(b)) fbHit++;
-      for (const b of chB) if (tB.has(b) || s.content.includes(b)) chHit++;
-      return fbHit >= 1 && chHit >= 1;
-    });
-    out[key] = hit.map((s) => s.content).join("\n").slice(0, 30000);
-  }
-  return out;
-}
+import { matchProjectQuotas } from "@quota/matching";
+import { searchSpecs, specTextsFor, qdItemsFor } from "@quota/spec";
+import { searchUsage, usageSummary } from "@quota/usage";
+import { previewProjectPricing, applyProjectPricing, setItemQuota } from "@quota/pricing";
+import { fmtMoney } from "@cost-engine/money";
+import { parseSemanticFeature } from "@cost-engine/semantic";
+import { scoreQuotaDetail, quotaMaterials } from "@cost-engine/quota";
+import type { BoqItemDTO, DiffRow, UsageMatchRow } from "@shared/types";
 
 registerTool({
   name: "quota.search",
-  description: "检索内置定额库（按名称/编码/类别关键词）",
+  description: "语义检索定额库：查询词按清单项特征（类别/材质/规格DN/连接方式）打分排序，也支持名称/编号/类别字面命中。返回行人材机为每定额单位口径，报价须按 unitScale 折算并计入 unpricedMaterials 全部未计价材料（主材+管件/法兰等）",
   implemented: true,
   schema: z.object({ query: z.string() }),
   handler: async (_ctx, args: { query: string }) => {
-    const q = args.query.toLowerCase();
+    const q = args.query.trim();
     const lib = await getQuotaLibrary();
-    const hits = lib
-      .filter(
-        (e) =>
-          e.name.toLowerCase().includes(q) ||
-          e.code.toLowerCase().includes(q) ||
-          (e.match.category ?? "").includes(args.query)
-      )
-      // 编号定序——多数据集/内置混排时结果可复现
-      .sort((a, b) => a.code.localeCompare(b.code) || a.name.localeCompare(b.name, "zh"));
+    // 与 quota.match 同一语义口径：查询词当一条伪清单项做特征打分。
+    // 定额名写「公称直径 65mm以内」而不是「DN65」——纯整串 includes 永远够不到
+    // （历史事故：模型连查三次「镀锌钢管 DN65」0 命中，误报定额库无该子目）。
+    const probe = {
+      name: q, rawFeature: "", unit: "", sectionPath: "", discipline: "OTHER",
+      features: parseSemanticFeature(q, ""),
+    } as BoqItemDTO;
+    const literal = q.toLowerCase();
+    const scored = lib
+      .map((e) => ({
+        e,
+        s: scoreQuotaDetail(probe, e).score,
+        literal:
+          e.name.toLowerCase().includes(literal) ||
+          e.code.toLowerCase().includes(literal) ||
+          (e.match.category ?? "").includes(q),
+      }))
+      .filter((h) => h.s > 0 || h.literal);
+    const hits = scored
+      // 语义分定序；同分按编号——多数据集/内置混排时结果可复现
+      .sort((a, b) =>
+        b.s - a.s || Number(b.literal) - Number(a.literal) ||
+        a.e.code.localeCompare(b.e.code) || a.e.name.localeCompare(b.e.name, "zh"))
+      .slice(0, 30);
+    // 定额说明上下文：组价完整性看「已含/不含/另行/按设计」条文
+    // （沟槽管件另行执行管件连接子目、法兰数量按设计图纸用…）。
+    // 首选命中子目自身章节的说明（对口分册），词检索命中作补充。
+    const NORM_SENT = /不含|未含|另计|另行|包括|已含|系数|按实|按设计|以\s*["“](个|套|10)/;
+    const texts = await specTextsFor(hits.slice(0, 5).map((h) => h.e));
+    const relatedSpecs: { ref: string; rules: string }[] = [];
+    for (const key of Object.keys(texts)) {
+      const rules = (texts[key] ?? "")
+        .split(/[。；;\n]/).map((s) => s.trim())
+        .filter((s) => NORM_SENT.test(s)).slice(0, 5).join("；").slice(0, 360);
+      // 相邻章节常映射到同一节条文（室外/室内/燃气章 → 同一册说明）——按内容去重
+      if (rules && !relatedSpecs.some((r) => r.rules === rules))
+        relatedSpecs.push({ ref: key.replace(/\|/g, " / "), rules });
+    }
+    const { hits: specHits } = await searchSpecs({ query: q });
+    for (const h of specHits) {
+      const ref = `${h.book} / ${h.title}`;
+      if (relatedSpecs.some((r) => r.ref === ref)) continue;
+      const rules = h.excerpt
+        .split(/[。；;\n]/).map((s) => s.trim())
+        .filter((s) => NORM_SENT.test(s)).join("；").slice(0, 320);
+      if (rules) relatedSpecs.push({ ref, rules });
+      if (relatedSpecs.length >= 3) break;
+    }
+    relatedSpecs.splice(3);
+    // GB 清单项工程内容：命中子目的 xmbh 清单编码 → 清单库工程内容/计算规则/项目特征。
+    // 组价完整性核对依据——清单工程内容列出的工序必须在组价方案里有着落。
+    const { prisma } = await import("@database/client");
+    const mkRows = await prisma.quotaRow.findMany({
+      where: { code: { in: hits.slice(0, 8).map((h) => h.e.code) } },
+      select: { code: true, matchKeys: true },
+    });
+    const xmbhs = mkRows.flatMap((r) => {
+      try { return String(JSON.parse(r.matchKeys ?? "{}").xmbh ?? "").split(",").filter(Boolean); }
+      catch { return []; }
+    });
+    const gbItems = (await qdItemsFor(xmbhs)).map((g) => ({
+      quotaCodes: mkRows.filter((r) => (r.matchKeys ?? "").includes(g.code)).map((r) => r.code),
+      ref: `GB清单 ${g.title}`,
+      content: g.content.slice(0, 500),
+    }));
     return {
-      observation: hits.map((e) => ({
-        code: e.code, name: e.name, unit: e.unit,
+      observation: hits.map(({ e }) => ({
+        code: e.code, name: e.name, unit: e.unit, unitScale: e.unitScale,
         labor: e.labor, material: e.material, machine: e.machine,
+        // 未计价材料全量（主材+管件/法兰/型钢等辅助件），qtyPerUnit 已折算每清单单位。
+        // 报价口径必须含 Σ含量×单价——只报人材机会把消防管件这类未计价材料丢掉。
+        unpricedMaterials: quotaMaterials(e).map((m) => ({
+          name: m.name, unit: m.unit, qtyPerUnit: m.qtyPerUnit,
+        })),
+        mainMaterial: e.detail?.mainMaterial ?? null,
       })),
+      gbItems,
+      ...(relatedSpecs.length ? { relatedSpecs } : {}),
+      message: hits.length
+        ? scored.length > hits.length
+          ? `按语义相关度返回前 ${hits.length} 条（共 ${scored.length} 条命中）`
+          : undefined
+        : `定额库中未检索到「${q}」相关子目——可换短关键词重试，或用 quota.usage 查历史工程套用经验`,
     };
   },
 });
 
-/** 定额手册核查方向：按名称 bigram 在 SpecSection 标题/册名里定位「该查哪册哪章」。
- *  未匹配项给出查询方向、歧义项给出条文依据位置——local 手册查不到再交 web.search。 */
-async function specHints(queries: string[]) {
-  if (!queries.length) return new Map<string, { book: string; title: string }>();
-  const { prisma } = await import("@database/client");
-  const secs = await prisma.specSection.findMany({ select: { book: true, title: true, content: true } });
-  // 分册体量作决胜项：主手册（建筑与装饰等）章节多于仿古/修缮册，同分指到更通用的册
-  const bookSize = new Map<string, number>();
-  for (const s of secs) bookSize.set(s.book, (bookSize.get(s.book) ?? 0) + 1);
-  const out = new Map<string, { book: string; title: string }>();
-  for (const q of queries) {
-    const bs = nameBigrams(q);
-    let titleBest: { book: string; title: string; hit: number; size: number } | null = null;
-    let bodyBest: { book: string; title: string; hit: number; size: number } | null = null;
-    for (const s of secs) {
-      const size = bookSize.get(s.book) ?? 0;
-      let tHit = 0;
-      for (const b of bs) if (`${s.title} ${s.book}`.includes(b)) tHit++;
-      if (tHit && (!titleBest || tHit > titleBest.hit || (tHit === titleBest.hit && size > titleBest.size)))
-        titleBest = { book: s.book, title: s.title, hit: tHit, size };
-      let cHit = 0;
-      for (const b of bs) if (s.content.includes(b)) cHit++;
-      if (cHit && (!bodyBest || cHit > bodyBest.hit || (cHit === bodyBest.hit && size > bodyBest.size)))
-        bodyBest = { book: s.book, title: s.title, hit: cHit, size };
-    }
-    const best = titleBest ?? bodyBest;
-    if (best) out.set(q, { book: best.book, title: best.title });
-  }
-  return out;
-}
 
 registerTool({
   name: "quota.match",
@@ -178,83 +112,19 @@ registerTool({
   implemented: true,
   schema: z.object({ query: z.string().optional() }),
   handler: async (ctx) => {
-    const items = await listBoq(ctx.projectId);
-    const leaf = refreshItemFeatures(items.filter((i) => isPricableItem(i)));
-    const lib = await getQuotaLibrary();
-    // top2 候选 + 存疑判定在 service.top2Quota：分差小且基价不同才算「拿不准」
-    const rows = leaf.map((item) => ({ item, ...top2Quota(item, lib) }));
-    const matched = rows.filter((r) => r.best.q && r.best.s >= 50 && hasMatchEvidence(r.best.detail));
-    const ambiguous = matched.filter((r) => r.ambiguous);
-    let unmatched = rows.filter((r) => !matched.includes(r));
-
-    // 通道一「继承」：同项目同名项已有确认组价方案 → 直接复用，不参与未匹配处置
-    // （清单里同名项大量重复出现是常态，人工确认过一次就不该每次从零打分）
-    const planByName = new Map<string, number>();
-    for (const it of leaf) {
-      const plan = (it.pricingPlan ?? []).filter((l) => !l.suggested);
-      if (plan.length && !planByName.has(it.name.trim())) planByName.set(it.name.trim(), plan.length);
+    const { leaf, matched, ambiguous, unmatched, inherited, ambRefs, shown, disp, usageMap, usageKeys, usageFuzzy } = await matchProjectQuotas(ctx.projectId);
+    // 经验套用视图：未匹配项 + 命中的历史套用候选（编码为宏业库口径，仅处置参考）
+    const usageRows: UsageMatchRow[] = [];
+    for (const [i, r] of unmatched.entries()) {
+      const hit = usageKeys[i]?.itemKey ? usageMap.get(usageKeys[i].itemKey) : undefined;
+      if (!hit) continue;
+      usageRows.push({
+        itemName: r.item.name, unit: r.item.unit,
+        fuzzy: usageFuzzy.has(usageKeys[i].itemKey),
+        quotas: hit.quotas, combos: hit.combos,
+      });
+      if (usageRows.length >= 60) break;
     }
-    const inherited = unmatched.filter((r) => planByName.has(r.item.name.trim()) && !(r.item.pricingPlan ?? []).some((l) => !l.suggested));
-    const inheritedNames = new Set(inherited.map((r) => r.item.name));
-    unmatched = unmatched.filter((r) => !inheritedNames.has(r.item.name));
-
-    // 手册核查方向：歧义项定位共享章节的条文；未匹配项按名称找该查哪册哪章
-    const ambChapters = [...new Set(ambiguous.map((r) => r.best.q?.detail?.chapter ?? "").filter(Boolean))];
-    const unmatchedHints = await specHints(unmatched.map((r) => r.item.name));
-    const ambRefs = await specHints(ambChapters);
-
-    // 通道二「借套」：手册章名 → 同分册/同章的定额子目候选（借套换算，非直接匹配）
-    // fb/章名与手册章名同源（都出自定额体系词汇），跨词表靠 bigram 桥接
-    const borrowFor = (title: string, itemName: string) => {
-      const bs = nameBigrams(title);
-      const ib = nameBigrams(itemName);
-      return lib
-        .map((e) => {
-          let fbHit = 0, chHit = 0, nmHit = 0;
-          for (const b of bs) {
-            if (e.detail?.fb?.includes(b)) fbHit++;
-            if (e.detail?.chapter?.includes(b)) chHit++;
-          }
-          for (const b of ib) if (e.name.includes(b)) nmHit++;
-          // 同册同章内名称相近的排前——借套的「套」就在名字上
-          return { e, rank: fbHit * 3 + chHit * 2 + nmHit * 4 };
-        })
-        .filter((c) => c.rank > 0)
-        .sort((a, b) => b.rank - a.rank || a.e.code.localeCompare(b.e.code))
-        .slice(0, 3)
-        .map((c) => `${c.e.code} ${c.e.name}`);
-    };
-    const shown = unmatched.slice(0, 25).map((r) => {
-      const ref = unmatchedHints.get(r.item.name);
-      const borrow = ref ? borrowFor(ref.title, r.item.name) : [];
-      const disposition = !ref ? "outOfScope" : borrow.length ? "borrowable" : "estimateOnly";
-      const d = r.best.detail;
-      const reason = !r.best.q ? "库内无候选子目" :
-        d?.materialConflict ? "候选材质不合（同材料组异材）" :
-        d?.bandMiss ? "清单规格超出定额档位" :
-        d?.domainPenalty ? "仅其他分册有弱候选" :
-        !hasMatchEvidence(d) ? "特征证据不足（类别/材质/规格未对上）" : "得分不足";
-      return {
-        item: r.item.name,
-        disposition,
-        reason,
-        bestScore: r.best.s,
-        ...(r.best.q ? { nearest: `${r.best.q.code} ${r.best.q.name}` } : {}),
-        ...(ref ? { specRef: `${ref.book} · ${ref.title}` } : {}),
-        ...(borrow.length ? { borrow } : {}),
-      };
-    });
-    const disp = { borrowable: 0, estimateOnly: 0, outOfScope: 0 };
-    for (const u of unmatched) {
-      const ref = unmatchedHints.get(u.item.name);
-      if (!ref) disp.outOfScope++;
-      else {
-        const bs = nameBigrams(ref.title);
-        const has = lib.some((e) => [...bs].some((b) => e.detail?.fb?.includes(b) || e.detail?.chapter?.includes(b)));
-        if (has) disp.borrowable++; else disp.estimateOnly++;
-      }
-    }
-
     return {
       observation: {
         total: leaf.length,
@@ -275,12 +145,62 @@ registerTool({
         } : {}),
         unmatchedHints: shown,
       },
+      views: usageRows.length ? [{
+        kind: "quotaUsage" as const,
+        id: `view:usage:${ctx.projectId}`,
+        title: "历史工程套用经验（未匹配项）",
+        rows: usageRows,
+      }] : [],
       message: `定额匹配：${matched.length}/${leaf.length} 项直接匹配` +
         (inherited.length ? `；${inherited.length} 项可继承同名项已确认组价` : "") +
         (ambiguous.length ? `；${ambiguous.length} 项存疑（备选子目已附定额手册条文位置，spec.search 可查原文）` : "") +
         (unmatched.length
-          ? `；${unmatched.length} 项无直接子目：借套换算 ${disp.borrowable}、补充单价/暂估 ${disp.estimateOnly}、覆盖域外 ${disp.outOfScope}。借套项确认后用 setItemQuota 指定，暂估项走市场询价不进定额人工费基数`
+          ? `；${unmatched.length} 项无直接子目：历史套用可参考 ${disp.usage}（flag=共识/低频/存疑，明细见经验视图，编号为宏业口径不入库，选定额时需按名称检索库内对应子目再 setItemQuota）` +
+            `、借套换算 ${disp.borrowable}、补充单价/暂估 ${disp.estimateOnly}、覆盖域外 ${disp.outOfScope}。借套项确认后用 setItemQuota 指定，暂估项走市场询价不进定额人工费基数`
           : ""),
+    };
+
+  },
+});
+
+// 历史工程定额套用经验库：800+ 个宏业 GCFX 工程文件解析沉淀。
+// flag 口径：common=≥2个独立项目共识 | rare=低频 | suspect=孤例且桶内已有共识（疑似错套）。
+registerTool({
+  name: "quota.usage",
+  description: "查历史工程定额套用经验库（从 D 盘 800+ 宏业计价文件解析的清单→定额套用频次，按多项目共识排序；编码为宏业口径仅作参考）",
+  implemented: true,
+  schema: z.object({
+    query: z.string().describe("清单名称关键词，如「刚性防水套管」「防火阀」「镀锌钢管」"),
+  }),
+  handler: async (_ctx, args: { query: string }) => {
+    const [buckets, summary] = await Promise.all([searchUsage(args.query), usageSummary()]);
+    const rows: UsageMatchRow[] = buckets.map((b) => ({
+      itemName: b.itemName,
+      unit: b.key.split("|")[1] ?? "",
+      quotas: b.quotas,
+      combos: b.combos,
+    }));
+    return {
+      observation: {
+        query: args.query,
+        corpus: summary,
+        buckets: buckets.length,
+        hits: buckets.slice(0, 15).map((b) => ({
+          item: b.itemName,
+          quotas: b.quotas.slice(0, 3).map((q) => `${q.applied || q.code} ${q.name}　×${q.uses}/${q.projects}项目 ${q.flag}`),
+          combos: b.combos.slice(0, 2).map((c) => `${c.lines.map((l) => l.applied || l.code).join("+")}　×${c.uses}/${c.projects}项目`),
+        })),
+      },
+      views: rows.length ? [{
+        kind: "quotaUsage" as const,
+        id: `view:usage:q:${args.query}`,
+        title: `套用经验：${args.query}`,
+        query: args.query,
+        rows,
+      }] : [],
+      message: buckets.length
+        ? `经验库命中 ${buckets.length} 个名称模式（语料共 ${summary.buckets} 桶/${summary.stats} 条套用/${summary.combos} 种组合），常见套法见视图`
+        : `经验库中没有「${args.query}」相关套用记录（语料共 ${summary.buckets} 个名称模式）`,
     };
   },
 });
@@ -294,46 +214,9 @@ registerTool({
     book: z.string().optional().describe("限定册，如 通风空调/消防/给排水"),
   }),
   handler: async (_ctx, args: { query: string; book?: string }) => {
-    const { prisma } = await import("@database/client");
-    const secs = await prisma.specSection.findMany({
-      where: args.book ? { book: { contains: args.book } } : undefined,
-    });
-    // 关键词：空格/顿号切分 + 对整串做 2~4 字滑窗（"沟槽连接管道"→沟槽/连接/管道…）
-    const terms = new Set<string>();
-    for (const w of args.query.split(/[\s,，、]+/).filter(Boolean)) {
-      terms.add(w);
-      for (let len = 2; len <= Math.min(4, w.length); len++)
-        for (let i = 0; i + len <= w.length; i++) terms.add(w.slice(i, i + len));
-    }
-    const scored = secs
-      .map((s) => {
-        let sc = 0;
-        for (const k of terms) {
-          const occ = (s.content.split(k).length - 1) + (s.title.includes(k) ? 6 : 0) + (s.book.includes(k) ? 3 : 0);
-          sc += Math.min(occ, 8) * k.length; // 长词权重高
-        }
-        return { s, sc };
-      })
-      .filter((x) => x.sc > 0)
-      // 同分按册/标题定序——同一检索词多次命中结果可复现
-      .sort((a, b) => b.sc - a.sc || a.s.book.localeCompare(b.s.book, "zh") || a.s.title.localeCompare(b.s.title, "zh"))
-      .slice(0, 3);
-    const hits = scored.map(({ s }) => {
-      // 截取首个关键词附近的条文片段
-      let idx = -1;
-      // 用最长的词定位摘录起点，最可能落在关键句
-      for (const k of [...terms].sort((a, b) => b.length - a.length)) {
-        idx = s.content.indexOf(k);
-        if (idx >= 0) break;
-      }
-      const start = Math.max(0, (idx < 0 ? 0 : idx - 60));
-      return {
-        book: s.book, title: s.title,
-        excerpt: s.content.slice(start, start + 700),
-      };
-    });
+    const { total, hits } = await searchSpecs(args);
     return {
-      observation: { total: secs.length, hits },
+      observation: { total, hits },
       views: hits.length
         ? [{
             kind: "specResult" as const,
@@ -348,6 +231,7 @@ registerTool({
         ? `查到 ${hits.length} 条相关定额说明（${hits.map((h) => h.title).join("、")}）`
         : "定额说明中未找到相关条文",
     };
+
   },
 });
 
@@ -357,63 +241,7 @@ registerTool({
   implemented: true,
   schema: z.object({}),
   handler: async (ctx) => {
-    const [items, quotes] = await Promise.all([
-      listBoq(ctx.projectId),
-      listQuotations(ctx.projectId),
-    ]);
-    const leaf = refreshItemFeatures(items.filter((i) => isPricableItem(i)));
-    const pricePrefs = await getPricePrefs(ctx.projectId);
-    const { mainPrices, libCount, libOffBrand } = await resolveMainPrices(
-      leaf, quotes, pricePrefs
-    );
-
-    const mgmtFact = (await getFact(ctx.projectId, "管理费率"))?.value;
-    const profitFact = (await getFact(ctx.projectId, "利润率"))?.value;
-    const mgmtRate =
-      parseRateValue(mgmtFact) ?? 0;
-    const profitRate =
-      parseRateValue(profitFact) ?? 0;
-    const missingRates = [parseRateValue(mgmtFact) === null ? "管理费率" : "", parseRateValue(profitFact) === null ? "利润率" : ""].filter(Boolean);
-
-    const lib = await getQuotaLibrary();
-    // 一遍打分三处用：辅助材料取价、定额说明章节定位、测算本体——别各扫一遍 2 万行库
-    const matches = new Map(leaf.map((it) => [it.id, top2Quota(it, lib)]));
-    const chosen: { item: BoqItemDTO; q: import("@quota/library").QuotaEntry }[] = [];
-    for (const it of leaf) {
-      const b = matches.get(it.id)!.best;
-      if (b.q && b.s >= 50 && hasMatchEvidence(b.detail)) chosen.push({ item: it, q: b.q });
-    }
-    const { matPrices, matLibCount } = await resolveMatPrices(chosen, quotes, pricePrefs);
-    const specTexts = await specTextsFor(chosen.map((c) => c.q));
-    const rows = calcQuota(leaf, { mainPrices, matPrices, specTexts, mgmtRate, profitRate, lib, matches });
-    const done = rows.filter((r) => r.quotaCode);
-    const needMain = done.filter((r) => r.needsMainPrice).length;
-    const deviant = done.filter(
-      (r) => r.deviation !== null && Math.abs(Number(r.deviation)) > 20
-    );
-    // 定额人工费合计 → 台账（规费基数是人工费而非分部分项费，四川安装口径）
-    // 同时按定额分册(5G/5H/5I…)存明细——措施费系数(脚手架/超高/高层)按册取人工费基数
-    const { total: laborBase, byBook: laborByBook } = quotaLaborTotals(done);
-    if (done.length) {
-      await setFact(ctx.projectId, {
-        factType: "取费基数",
-        key: "定额人工费",
-        value: laborBase,
-        source: "INFERRED",
-        confidence: 0.7,
-        createdBy: "agent",
-        agentRunId: ctx.runId,
-      });
-      await setFact(ctx.projectId, {
-        factType: "取费基数",
-        key: "定额人工费明细",
-        value: JSON.stringify(laborByBook),
-        source: "INFERRED",
-        confidence: 0.7,
-        createdBy: "agent",
-        agentRunId: ctx.runId,
-      });
-    }
+    const { leaf, rows, done, needMain, deviant, laborBase, mgmtRate, profitRate, missingRates, libCount, libOffBrand, matLibCount } = await previewProjectPricing(ctx.projectId, ctx.runId);
     return {
       observation: {
         total: leaf.length,
@@ -444,6 +272,7 @@ registerTool({
           : "") +
         (deviant.length ? `，${deviant.length} 项测算价与清单价偏差>20%` : ""),
     };
+
   },
 });
 
@@ -460,51 +289,13 @@ registerTool({
   confirm: (a: { includeIncomplete?: boolean }) =>
     `将把定额测算综合单价写回清单${a.includeIncomplete ? "（含缺主材价的不完整项）" : "（缺主材价项跳过）"}`,
   handler: async (ctx, args: { includeIncomplete?: boolean; onlyItemIds?: string[] }) => {
-    for (const key of ["管理费率", "利润率"]) {
-      if (parseRateValue((await getFact(ctx.projectId, key))?.value) === null) throw new Error(`${key}尚未确认，请先在计价设置中填写（确实不计时填 0%）再写回组价`);
-    }
-    const [items, quotes] = await Promise.all([
-      listBoq(ctx.projectId),
-      listQuotations(ctx.projectId),
-    ]);
-    const leaf = refreshItemFeatures(items.filter((i) => isPricableItem(i)));
-    const pricePrefs = await getPricePrefs(ctx.projectId);
-    const { mainPrices } = await resolveMainPrices(leaf, quotes, pricePrefs);
-    const mgmtRate = parseRateValue((await getFact(ctx.projectId, "管理费率"))?.value) ?? 0;
-    const profitRate = parseRateValue((await getFact(ctx.projectId, "利润率"))?.value) ?? 0;
-    const lib = await getQuotaLibrary();
-    const matches = new Map(leaf.map((it) => [it.id, top2Quota(it, lib)]));
-    const chosen: { item: BoqItemDTO; q: import("@quota/library").QuotaEntry }[] = [];
-    for (const it of leaf) {
-      const b = matches.get(it.id)!.best;
-      if (b.q && b.s >= 50 && hasMatchEvidence(b.detail)) chosen.push({ item: it, q: b.q });
-    }
-    const { matPrices } = await resolveMatPrices(chosen, quotes, pricePrefs);
-    const specTexts = await specTextsFor(chosen.map((c) => c.q));
-    const rows = calcQuota(leaf, { mainPrices, matPrices, specTexts, mgmtRate, profitRate, lib, matches });
-    const allowed = args.onlyItemIds ? new Set(args.onlyItemIds) : null;
-    const writable = rows.filter(
-      (r) => r.quotaCode && r.calcPrice &&
-        (args.includeIncomplete || !r.needsMainPrice) &&
-        (!allowed || allowed.has(r.itemId))
-    );
-    const skipped = rows.filter((r) => r.quotaCode && r.needsMainPrice && !args.includeIncomplete);
-    if (!writable.length)
-      return {
-        observation: { applied: 0, skipped: skipped.length },
-        message: skipped.length
-          ? `${skipped.length} 项测算缺主材价，属不完整单价，未写回——先补主材暂估价（询价/材料库）再组价`
-          : "没有可写回的测算结果，请先运行定额测算",
-      };
-    const { updateBoqItems } = await import("@boq/service");
-    const { before, after } = await updateBoqItems(
-      ctx.projectId,
-      writable.map((r) => ({
-        id: r.itemId,
-        // 综合单价=组价方案合计；pricingPlan 只落已确认行（suggested 不计入）
-        patch: { unitPrice: r.calcPrice!, pricingPlan: (r.plan ?? []).filter((l) => !l.suggested) },
-      }))
-    );
+    const { applied, skipped, before, after, mgmtRate, profitRate } = await applyProjectPricing(ctx.projectId, args);
+    if (!applied) return {
+      observation: { applied: 0, skipped: skipped.length },
+      message: skipped.length
+        ? `${skipped.length} 项测算缺主材价，属不完整单价，未写回——先补主材暂估价（询价/材料库）再组价`
+        : "没有可写回的测算结果，请先运行定额测算",
+    };
     const diffRows: DiffRow[] = [];
     for (const b of before) {
       const a = after.find((x) => x.id === b.id)!;
@@ -519,19 +310,20 @@ registerTool({
         });
     }
     return {
-      observation: { applied: writable.length, skippedIncomplete: skipped.length, mgmtRate, profitRate },
+      observation: { applied, skippedIncomplete: skipped.length, mgmtRate, profitRate },
       views: [
         { kind: "diff", id: `view:diff:${ctx.runId}`, title: "组价写回 Diff", receiptId: "", rows: diffRows },
         { kind: "boqTable", id: "view:boq", title: "工程量清单" },
       ],
       receipts: [{
         actionType: "PRICE_APPLY",
-        summary: `定额组价写回：${writable.length} 项综合单价（管理费 ${mgmtRate * 100}%/利润 ${profitRate * 100}%）${skipped.length ? `，${skipped.length} 项缺主材价未写` : ""}`,
+        summary: `定额组价写回：${applied} 项综合单价（管理费 ${mgmtRate * 100}%/利润 ${profitRate * 100}%）${skipped.length ? `，${skipped.length} 项缺主材价未写` : ""}`,
         before: before.map((b) => ({ id: b.id, name: b.name, unitPrice: b.unitPrice, pricingPlan: b.pricingPlan })),
         after: after.map((a) => ({ id: a.id, name: a.name, unitPrice: a.unitPrice, pricingPlan: a.pricingPlan })),
       }],
-      message: `已把定额测算综合单价写回 ${writable.length} 项${skipped.length ? `；${skipped.length} 项缺主材价跳过` : ""}`,
+      message: `已把定额测算综合单价写回 ${applied} 项${skipped.length ? `；${skipped.length} 项缺主材价跳过` : ""}`,
     };
+
   },
 });
 
@@ -545,7 +337,7 @@ registerTool({
   schema: z.object({
     itemId: z.string().optional().describe("清单项 id（单项时用这个）"),
     itemIds: z.array(z.string()).optional().describe("批量指定清单项 id（与 itemId 二选一或并用）"),
-    quotaCode: z.string().describe("定额编号，如 5H0332").optional(),
+    quotaCode: z.string().describe("定额编号，如 CJ0016").optional(),
     mode: z.enum(["replace", "append"]).optional().describe("replace=替换主项（默认）；append=增列到组价方案"),
     clear: z.boolean().optional().describe("true=清除该项组价方案（恢复清单原价不变，仅清方案）"),
   }),
@@ -554,16 +346,13 @@ registerTool({
     return a.clear ? `将清除 ${n} 个清单项的组价方案` : `将把定额 ${a.quotaCode} ${a.mode === "append" ? "增列到" : "设为"} ${n} 个清单项的组价方案，综合单价按方案合计重算`;
   },
   handler: async (ctx, args: { itemId?: string; itemIds?: string[]; quotaCode?: string; mode?: "replace" | "append"; clear?: boolean }) => {
-    const ids = [...new Set([...(args.itemIds ?? []), ...(args.itemId ? [args.itemId] : [])])];
-    if (!ids.length) return { observation: { error: "未指定清单项" } };
-    const items = await listBoq(ctx.projectId);
-    const targets = ids.map((id) => items.find((x) => x.id === id)).filter((x): x is BoqItemDTO => !!x);
-    if (!targets.length) return { observation: { error: "清单项不存在" } };
-    const { updateBoqItems } = await import("@boq/service");
-
-    if (args.clear) {
-      const { before, after } = await updateBoqItems(ctx.projectId,
-        targets.map((it) => ({ id: it.id, patch: { pricingPlan: [] } })));
+    const result = await setItemQuota(ctx.projectId, args);
+    if (result.kind === "error") return {
+      observation: { error: result.error, ...(result.skipped !== undefined ? { skipped: result.skipped } : {}) },
+      ...(result.message ? { message: result.message } : {}),
+    };
+    if (result.kind === "cleared") {
+      const { targets, before, after } = result;
       return {
         observation: { cleared: targets.length },
         receipts: [{
@@ -574,43 +363,7 @@ registerTool({
         message: `已清除 ${targets.length} 个清单项的组价方案，综合单价保留现值`,
       };
     }
-
-    const lib = await getQuotaLibrary();
-    const q = lib.find((e) => e.code === args.quotaCode);
-    if (!q) return { observation: { error: `定额库中无 ${args.quotaCode}，可用 quota.search 检索` } };
-
-    for (const key of ["管理费率", "利润率"]) {
-      if (parseRateValue((await getFact(ctx.projectId, key))?.value) === null) throw new Error(`${key}尚未确认，请先填写计价设置再人工组价`);
-    }
-
-    const mgmtRate = parseRateValue((await getFact(ctx.projectId, "管理费率"))?.value) ?? 0;
-    const profitRate = parseRateValue((await getFact(ctx.projectId, "利润率"))?.value) ?? 0;
-    // 主材价沿用清单项主材暂估价；该子目本身没有主材（材料费已含基价）时不加，防重复计
-    const expectsMain = q.detail === undefined || quotaMaterials(q).length > 0 || !!q.detail.mainMaterial;
-
-    const patches: { id: string; patch: { unitPrice: string; pricingPlan: unknown[] } }[] = [];
-    const rows: { it: BoqItemDTO; price: Decimal; planLen: number }[] = [];
-    const noMainItems: BoqItemDTO[] = [];
-    for (const it of targets) {
-      const ownMainD = D(it.mainMaterialPrice ?? "0");
-      const hasMain = ownMainD.isFinite() && ownMainD.gt(0);
-      // 红线：子目有主材但清单项无暂估价 → 写出的综合单价不完整，跳过该项不写
-      if (expectsMain && !hasMain) { noMainItems.push(it); continue; }
-      const line = lineFromQuota(it, q, {
-        mgmtRate, profitRate,
-        mainPrice: hasMain && expectsMain ? ownMainD.toNumber() : undefined,
-        manual: true,
-      });
-      const existing = (it.pricingPlan ?? []).filter((l) => !l.suggested);
-      const plan = args.mode === "append" ? [...existing, line] : [line];
-      const price = planPrice(plan);
-      patches.push({ id: it.id, patch: { unitPrice: price.toFixed(2), pricingPlan: plan } });
-      rows.push({ it, price, planLen: plan.length });
-    }
-    if (!patches.length)
-      return { observation: { error: `主材「${q.detail?.mainMaterial}」缺价`, skipped: noMainItems.length }, message: `全部目标项缺主材「${q.detail?.mainMaterial}」暂估价，未写入——请先补主材暂估价再组价` };
-
-    const { before, after } = await updateBoqItems(ctx.projectId, patches);
+    const { q, rows, noMainItems, before, after } = result;
     const first = rows[0];
     const multi = rows.length > 1;
     return {
@@ -642,5 +395,6 @@ registerTool({
         : `「${first.it.name}」组价方案已更新（${first.planLen} 条子目），综合单价 ${fmtMoney(first.it.unitPrice)} → ${fmtMoney(first.price)}` +
           (noMainItems.length ? `；另有 ${noMainItems.length} 项缺主材暂估价未写入` : ""),
     };
+
   },
 });

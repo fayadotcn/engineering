@@ -125,4 +125,50 @@ describe("组价方案：工作内容缺口的配套子目建议", () => {
     expect(planPrice(plan).toFixed(2)).toBe("75.16");
     expect(planPrice(plan.filter((l) => !l.suggested)).toFixed(2)).toBe(planPrice(plan).toFixed(2));
   });
+
+  it("沟槽连接清单借套螺纹子目：「上零件」gcnr 不能吞掉沟槽管件材料另计建议", () => {
+    const threadQ: QuotaEntry = {
+      code: "5G0071", name: "管道安装 镀锌钢管 螺纹连接 公称直径 70mm以内", unit: "10m", unitScale: 10,
+      labor: 49.8, material: 16.27, machine: 8.31, mainQtyPerUnit: 1.02,
+      detail: { gcnr: "切管、套丝、调直、上零件、管道安装、水压试验。", mainMaterial: "镀锌钢管" },
+      materials: [
+        { name: "镀锌钢管", unit: "m", qtyPerUnit: 1.02 },
+        { name: "镀锌钢管接头零件", unit: "个", qtyPerUnit: 0.891 },
+      ],
+      match: { category: "管道", material: /镀锌钢管/, diameter: /^DN65$/ },
+    };
+    const grooveItem = item({
+      name: "镀锌钢管(沟槽连接)",
+      features: { category: "管道", material: "镀锌钢管", diameter: "DN65", connectionMethod: "沟槽连接" },
+    });
+    const [r] = calcQuota([grooveItem], {
+      lib: [threadQ], threshold: 0,
+      // C.J.1 条文：其他沟槽管件另行执行相关项目
+      specTexts: { "": "管道安装（沟槽连接）已包括直接卡箍件安装，其他沟槽管件另行执行相关项目" },
+    });
+    const suggested = (r.plan ?? []).filter((l) => l.suggested);
+    const note = suggested.find((l) => /沟槽管件/.test(l.quotaName));
+    expect(note, "沟槽清单必须提示沟槽管件另计").toBeTruthy();
+    expect(note!.quotaName).toContain("材料另计");
+  });
+
+  it("定额 materials[] 已列沟槽管件时不再重复提示", () => {
+    const grooveQ: QuotaEntry = {
+      code: "5G0901", name: "水喷淋钢管 沟槽连接 公称直径 65mm以内", unit: "10m", unitScale: 10,
+      labor: 60, material: 20, machine: 8, mainQtyPerUnit: 1.02,
+      detail: { gcnr: "管道安装、卡箍件安装、水压试验。", mainMaterial: "镀锌钢管" },
+      materials: [
+        { name: "镀锌钢管", unit: "m", qtyPerUnit: 1.02 },
+        { name: "沟槽管件", unit: "套", qtyPerUnit: 0.35 },
+      ],
+      match: { category: "管道", material: /镀锌钢管/, diameter: /^DN65$/, connection: /沟槽/ },
+    };
+    const grooveItem = item({
+      name: "镀锌钢管(沟槽连接)",
+      features: { category: "管道", material: "镀锌钢管", diameter: "DN65", connectionMethod: "沟槽连接" },
+    });
+    const [r] = calcQuota([grooveItem], { lib: [grooveQ], threshold: 0 });
+    const suggested = (r.plan ?? []).filter((l) => l.suggested);
+    expect(suggested.every((l) => !/沟槽管件/.test(l.quotaName))).toBe(true);
+  });
 });

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { resolvedTheme, setThemeChoice, themeChoice, type ThemeChoice } from "./theme";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const NEXT: Record<ThemeChoice, ThemeChoice> = { auto: "light", light: "dark", dark: "auto" };
 const MODE_LABEL: Record<ThemeChoice, string> = { auto: "跟随系统", light: "浅色", dark: "深色" };
@@ -13,7 +14,7 @@ const ICON: Record<"light" | "dark" | "auto", typeof Sun> = { light: Sun, dark: 
  * 图标显示当前模式；生效中的明暗同时反映在 pressed 态与 tooltip 里。
  */
 export function ThemeToggle({ className }: { className?: string }) {
-  const [choice, setChoice] = useState<ThemeChoice>("auto");
+  const [choice, setChoice] = useState<ThemeChoice>("light");
   const [resolved, setResolved] = useState<"light" | "dark">("light");
 
   useEffect(() => {
@@ -34,18 +35,23 @@ export function ThemeToggle({ className }: { className?: string }) {
   };
 
   const Icon = ICON[choice];
+  const label = `主题：${MODE_LABEL[choice]}${choice === "auto" ? `（${resolved === "dark" ? "深色" : "浅色"}）` : ""}`;
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      type="button"
-      onClick={toggle}
-      aria-label={`主题：${MODE_LABEL[choice]}（当前${resolved === "dark" ? "深色" : "浅色"}），点击切换`}
-      title={`主题：${MODE_LABEL[choice]}${choice === "auto" ? `（${resolved === "dark" ? "深色" : "浅色"}）` : ""}`}
-      aria-pressed={resolved === "dark"}
-      className={className}
-    >
-      <Icon size={15} />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          type="button"
+          onClick={toggle}
+          aria-label={`${label}，点击切换`}
+          aria-pressed={resolved === "dark"}
+          className={className}
+        >
+          <Icon size={15} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
