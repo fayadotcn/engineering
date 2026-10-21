@@ -1,119 +1,157 @@
-# 安装工程造价工作台（对话即造价）
+# Installation Engineering Costing Workbench (Conversation-Driven Costing)
 
-面向安装工程（消防/给排水/电气/通风空调/弱电）的造价工作台：上传真实的清单/询价/定额表，
-用自然语言下达任务（导入、匹配、组价、清标、汇总、导出），Agent 调工具改数据，关键写操作
-走确认门。金额与工程量一律由确定性引擎计算，可复算、可追溯。
+A costing workbench for installation engineering (fire protection / plumbing & drainage /
+electrical / HVAC / low-voltage systems): upload real BOQ / price-inquiry / quota tables,
+issue tasks in natural language (import, match, price composition, bid clarification,
+summarize, export), and the Agent calls tools to modify data — critical write operations
+go through a confirmation gate. All amounts and quantities are computed by a deterministic
+engine: reproducible and traceable.
 
-## 运行
+## Running
 
 ```bash
 npm install
-npx prisma db push        # 初始化 SQLite（prisma/dev.db）
+npx prisma db push        # Initialize SQLite (prisma/dev.db)
 npm run dev               # http://127.0.0.1:3210
-npm run build && npm start # 生产构建
+npm run build && npm start # Production build
 ```
 
-开发服务输出到 `.next-dev/`，正式构建输出到 `.next/`，两者互不覆盖。两种服务默认使用同一端口，启动前先关闭占用端口的服务。
+The dev server outputs to `.next-dev/`; the production build outputs to `.next/` — the two
+never overwrite each other. Both servers default to the same port, so stop whichever is
+occupying the port before starting the other.
 
-数据与存储位置（`.env`）：
+Data and storage locations (`.env`):
 
 ```dotenv
 DATABASE_URL="file:./dev.db"
 STORAGE_DIR="./storage"
 ```
 
-### 模型配置（可选）
+### Model Configuration (optional)
 
-对话默认走内置规则引擎，全功能可用；配置模型后启用 LLM 规划（造价业务规则由领域服务和确定性引擎承载，
-不进 prompt）。任一方式即可：
+Conversation runs on the built-in rule engine by default with all features available;
+configuring a model enables LLM planning (costing business rules live in domain services
+and the deterministic engine — never in the prompt). Either configuration works:
 
 ```dotenv
-MODEL_PROVIDER=openai-compatible   # 或 anthropic；=rule 强制规则引擎
+MODEL_PROVIDER=openai-compatible   # or anthropic; =rule forces the rule engine
 MODEL_BASE_URL=https://api.deepseek.com
 MODEL_API_KEY=sk-...
 MODEL_NAME=deepseek-chat
-# 只给 DEEPSEEK_API_KEY 也行：自动按 deepseek 官方端点 + deepseek-chat 兜底
+# DEEPSEEK_API_KEY alone also works: falls back to DeepSeek's official endpoint + deepseek-chat
 ```
 
-模型不可达时自动降规则引擎并在会话里明示「固定任务模式」。
+When the model is unreachable the system automatically falls back to the rule engine and
+shows "fixed-task mode" in the conversation.
 
-## 页面
+## Pages
 
-| 路径 | 说明 |
+| Path | Description |
 |---|---|
-| `/` | 项目列表（新建/切换工程） |
-| `/new` | 新建工程 |
-| `/p/[id]` | 工程工作台：左侧原生会话轨 ｜ 右侧工作区（清单/资料/成果） |
-| `/admin` | 数据管理后台：全局数据集（材料价格库、定额库、措施费系数）与行级维护 |
+| `/` | Project list (create / switch projects) |
+| `/new` | Create a new project |
+| `/p/[id]` | Project workbench: native conversation track on the left ｜ workspace (BOQ / files / deliverables) on the right |
+| `/admin` | Data admin panel: global datasets (material price library, quota library, measure-fee coefficients) with row-level maintenance |
 
-## 典型流程
+## Typical Workflow
 
-1. **导入资料**：拖入 Excel/PDF（清单、询价单、定额表、报审表、进度计量表…）。识别表结构与
-   列角色 → 存 `ProjectFile.meta.mapping` → 推「列映射」视图；置信度不足或用户改过时挂起确认门，
-   批准后才落库（同一文件重复导入幂等）。
-2. **看映射再确认**：列映射视图给出每张表的类型、「将导入 N 行」和逐列证据；0 行会红标
-   （有数据但没认出名称/数量列），避免确认完才发现整表没进来。
-3. **补价/组价**：缺主材价 → `material.matchLibrary`（预览）→ `material.fillFromLibrary`（确认门）
-   写**主材暂估价** → `quota.match`/`quota.calculate` 测算 → `quota.applyCalc`（确认门）写**综合单价**。
-4. **费用与成果**：`cost.feeSummary`（分部分项→措施→其他→规费→税前→税金→含税）、
-   `cost.composition`（人材机+管利成本构成、成本倒挂预警）、清标异常检查、报告与 Excel 导出。
-5. **随时可撤**：每个修改动作产生 ActionReceipt（含改动前后快照），支持行级撤销与冲突拒撤。
+1. **Import files**: drag in Excel/PDF (BOQs, price-inquiry sheets, quota tables, review
+   forms, progress measurement tables…). The system recognizes table structure and column
+   roles → stores `ProjectFile.meta.mapping` → pushes a "column mapping" view; if confidence
+   is insufficient or the user edited the mapping, the confirmation gate suspends and only
+   commits after approval (re-importing the same file is idempotent).
+2. **Review mapping before confirming**: the column-mapping view shows each table's type,
+   "N rows will be imported", and per-column evidence; 0 rows is flagged red (data exists
+   but name/quantity columns weren't recognized), so you don't discover a whole table
+   missing only after confirming.
+3. **Fill prices / compose pricing**: missing main-material price → `material.matchLibrary`
+   (preview) → `material.fillFromLibrary` (confirmation gate) writes the **provisional
+   main-material price** → `quota.match`/`quota.calculate` computes → `quota.applyCalc`
+   (confirmation gate) writes the **comprehensive unit price**.
+4. **Fees & deliverables**: `cost.feeSummary` (itemized → measures → other → statutory fees
+   → pre-tax → tax → tax-inclusive), `cost.composition` (labor/material/machinery +
+   management/profit cost breakdown, cost-inversion warnings), bid-clarification anomaly
+   checks, report and Excel export.
+5. **Undo anytime**: every modification produces an ActionReceipt (with before/after
+   snapshots), supporting row-level undo with conflict rejection.
 
-一键报价（autopilot）：说「一键报价/自动报价」或带 `autopilot=true`，走确定性管线
-`matchLibrary→fillFromLibrary→quota.match→calculate→applyCalc→measureFees→feeSummary`，
-写操作仍过确认门；缺管理费率/利润率时跳过写回并提示补齐后回复「写回组价」续接。
+One-click quoting (autopilot): say "one-click quote / auto quote" or pass `autopilot=true`
+to run the deterministic pipeline
+`matchLibrary→fillFromLibrary→quota.match→calculate→applyCalc→measureFees→feeSummary`;
+write operations still go through the confirmation gate. If the management rate / profit
+rate is missing, write-back is skipped with a prompt to complete settings, then reply
+"write back pricing" to continue.
 
-## 目录
+## Directory Layout
 
 ```
-agent/        自有 Agent 引擎：runtime（会话循环）/runs（生命周期与并发守卫）/planner（意图路由）
-              /confirmation/pending（确认门）/executor（工具审计与结果输出）
-              /llm（模型出口）/events（SSE 事件）/autopilot + tools/（专业工具，含 schema 守卫）
-cost-engine/  纯函数确定性造价引擎（decimal.js）：money/semantic/match/quota/aggregate/adjust/
-              fees/costComposition/calcExpr/fileCompare —— 所有金额只能在这里算
-file/         解析与接入：ingest（项目文件接入与导入确认口径）、excel（表头定位/列角色/类型学/写回）、pdf、inspection（识别+模板缓存）、
-              classify（文件类型/阶段期次）、factsExtract（台账事实）、compareReport、storage
-boq/          清单领域服务：service（导入/查询/改价）、mapRow（行→落库）、ingestRules（行级口径判定）
-material/     材料价匹配消费端
-project/      工程与计价设置领域服务（payload/facts）
-dataset/      全局数据集：service、priceParse、priceMatch、quotaParse（定额表解析）
-quota/        定额服务：service/library（库加载）、matching（匹配与未匹配处置）、
-              pricing（材料取价/测算/写回/人工组价）、spec（说明检索与章节证据）
-shared/       跨端类型与纯函数：types/mapping（角色对齐）/json/settings
-src/app/      Next 路由（页面 + /api）
-src/ui/       工作台 UI（会话轨、清单表、各结果视图、admin 面板、shadcn 组件）
-prisma/       schema 与迁移（SQLite，保持 Postgres 可移植：Json/枚举→String）
-tests/        vitest（引擎/工具/解析/前端视图）
-scripts/      数据导入与回归脚本（test-real/check-cost-flow/make-fixtures/import-sc2020-*）
+agent/        In-house Agent engine: runtime (conversation loop)/runs (lifecycle & concurrency
+              guard)/planner (intent routing)/confirmation/pending (confirmation gate)
+              /executor (tool audit & result output)/llm (model egress)/events (SSE events)
+              /autopilot + tools/ (domain tools with schema guards)
+cost-engine/  Pure-function deterministic costing engine (decimal.js): money/semantic/match/
+              quota/aggregate/adjust/fees/costComposition/calcExpr/fileCompare — all amounts
+              may only be computed here
+file/         Parsing & ingestion: ingest (project file intake & import-confirmation rules),
+              excel (header locating/column roles/type inference/write-back), pdf,
+              inspection (recognition + template cache), classify (file type/stage),
+              factsExtract (ledger facts), compareReport, storage
+boq/          BOQ domain services: service (import/query/reprice), mapRow (row→persistence),
+              ingestRules (row-level rules)
+material/     Material price matching consumer
+project/      Project & pricing-settings domain service (payload/facts)
+dataset/      Global datasets: service, priceParse, priceMatch, quotaParse (quota-table parsing)
+quota/        Quota services: service/library (library loading), matching (match & unmatched
+              handling), pricing (material pricing/computation/write-back/manual composition),
+              spec (spec retrieval & chapter evidence)
+shared/       Cross-boundary types & pure functions: types/mapping (role alignment)/json/settings
+src/app/      Next.js routes (pages + /api)
+src/ui/       Workbench UI (conversation track, BOQ tables, result views, admin panel,
+              shadcn components)
+prisma/       Schema & migrations (SQLite; kept Postgres-portable: Json/enums→String)
+tests/        vitest (engine/tools/parsing/frontend views)
+scripts/      Data import & regression scripts (test-real/check-cost-flow/make-fixtures/
+              import-sc2020-*)
 ```
 
-当前模块职责、依赖方向和验证方式见 [架构说明](docs/restructure-design.md)。
+Current module responsibilities, dependency direction, and verification are documented in
+the [architecture notes](docs/restructure-design.md).
 
-## 关键口径（红线）
+## Key Conventions (Red Lines)
 
-- **综合单价 vs 主材价**：`unitPrice` 是综合单价（人材机管利组价结果）；
-  `mainMaterialPrice` 是主材暂估价（询价/信息价）。材料价/询价**绝不写 unitPrice**。
-- **含税价**：源表单价列为含税时标 `taxIncluded`（分部分项与单价措施一视同仁），
-  汇总时不计入税前基数、不重复计税。
-- **规费基数**：四川安装口径为**定额人工费**（测算后写台账），无基数时退化为分部分项费并标注。
-- **措施费**：导入的措施清单真值优先；可叠加官方系数计取（脚手架/超高/高层/系统调整）。
-- **台账事实**：费率/金额文本必须走 `parseRateValue`/`parseAmountValue`（"9%"≠9），
-  禁止 `Number(fact.value)`。
-- **可追溯**：源表原文全量保留在 `BoqItem.rawCells`（含 `__nonNumeric/__derived/__decomp` 标记），
-  写回 Excel 时对改动单元格记批注。
+- **Comprehensive unit price vs. main-material price**: `unitPrice` is the comprehensive
+  unit price (the result of composing labor/material/machinery + management/profit);
+  `mainMaterialPrice` is the provisional main-material price (inquiry/information price).
+  Material/inquiry prices must **never** be written to `unitPrice`.
+- **Tax-inclusive prices**: when a source table's unit-price column is tax-inclusive it is
+  flagged `taxIncluded` (itemized items and priced measures alike); such rows are excluded
+  from the pre-tax base at aggregation and never taxed twice.
+- **Statutory-fee base**: per Sichuan installation conventions the base is the **quota labor
+  cost** (written to the ledger after computation); when no base exists it degrades to the
+  itemized cost and is annotated.
+- **Measure fees**: imported measure BOQs take precedence as ground truth; official
+  coefficients may be layered on top (scaffolding / excess height / high-rise / system
+  adjustments).
+- **Ledger facts**: rate/amount text must go through `parseRateValue`/`parseAmountValue`
+  ("9%" ≠ 9); `Number(fact.value)` is forbidden.
+- **Traceability**: source-table raw text is fully preserved in `BoqItem.rawCells`
+  (including `__nonNumeric/__derived/__decomp` markers); cells changed on Excel write-back
+  get annotations.
 
-## 验证
+## Verification
 
 ```bash
-npm test                     # 单测（引擎/解析/工具/前端视图）
+npm test                     # Unit tests (engine/parsing/tools/frontend views)
 npm run typecheck            # tsc --noEmit
-npx tsx scripts/test-real.ts # 真实造价文件解析回归（读桌面样例）
-npm run build                # 生产构建
-npx tsx scripts/check-cost-flow.ts   # 端到端：隔离 DB + next start 上跑真实 API（需先 build）
-npm run fixtures             # 生成测试用 Excel 到 fixtures/out/
+npx tsx scripts/test-real.ts # Regression on real costing files (reads desktop samples)
+npm run build                # Production build
+npx tsx scripts/check-cost-flow.ts   # E2E: isolated DB + real APIs on `next start` (build first)
+npm run fixtures             # Generate test Excel files into fixtures/out/
 ```
 
-## 约定
+## Conventions
 
-- 模型密钥、`storage/`、`prisma/dev.db`、`.verify/` 等本地状态不入库（见 `.gitignore`）。
-- 数据文件与模型密钥不要提交；生产使用请轮换本地调试用过的密钥。
+- Model keys, `storage/`, `prisma/dev.db`, `.verify/`, and other local state are not
+  committed (see `.gitignore`).
+- Never commit data files or model keys; rotate any keys used for local debugging before
+  production use.
